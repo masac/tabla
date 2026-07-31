@@ -1230,11 +1230,13 @@ function getPaneEls(name) {
 // schimbarea acestor referințe redirecționează automat TOATE uneltele
 // existente către noua suprafață, fără nicio altă modificare.
 function activatePane(name) {
+  if (activeSurface !== name) {
+    selectedStrokes.clear();
+    selectedImages.clear();
+    updateImageSelection();
+    hideSelectionInfo();
+  }
   activeSurface = name;
-  selectedStrokes.clear();
-  selectedImages.clear();
-  updateImageSelection();
-  hideSelectionInfo();
 
   document.querySelectorAll('.pdf-pane').forEach(p => p.classList.remove('active-pane'));
 
@@ -1372,6 +1374,7 @@ document.getElementById('btn-toggle-pdf-mode').addEventListener('click', () => {
   els.draw.addEventListener('pointerdown', function(e) { activatePane(name); handlePointerDown(e); });
   els.draw.addEventListener('pointermove', handlePointerMove);
   els.draw.addEventListener('pointerup', handlePointerUp);
+  els.draw.addEventListener('pointercancel', handlePointerUp);
   els.draw.addEventListener('pointerleave', handlePointerLeave);
   els.draw.addEventListener('dblclick', function(e) { activatePane(name); handleDblClick(e); });
 })();
@@ -2526,9 +2529,9 @@ function drawSelectionHighlights() {
       selCtx.save();
       selCtx.fillStyle = '#e67e00';
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 2;
+      selCtx.lineWidth = 3;
       selCtx.beginPath();
-      selCtx.rect(hx - 7, hy - 7, 14, 14);
+      selCtx.arc(hx, hy, 13, 0, Math.PI * 2);
       selCtx.fill();
       selCtx.stroke();
       selCtx.restore();
@@ -2716,7 +2719,8 @@ function handlePointerDown(e) {
 
     if (currentResizeHandle && selectedStrokes.has(currentResizeHandle.strokeIdx)) {
       const dhx = p.x - currentResizeHandle.x, dhy = p.y - currentResizeHandle.y;
-      if (Math.sqrt(dhx * dhx + dhy * dhy) < 14 && page) {
+      const hitRadius = e.pointerType === 'touch' ? 30 : 16;
+      if (Math.sqrt(dhx * dhx + dhy * dhy) < hitRadius && page) {
         const stroke = page.strokes[currentResizeHandle.strokeIdx];
         if (stroke) {
           const bbox = getStrokeBoundingBox(stroke);
@@ -2727,6 +2731,7 @@ function handlePointerDown(e) {
           const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
           resizeStartDist = Math.max(1, Math.sqrt(ddx * ddx + ddy * ddy));
           drawC.setPointerCapture(e.pointerId);
+          e.preventDefault();
           showToast('↔ Trage pentru a scala');
           return;
         }
@@ -3428,6 +3433,7 @@ function handleDblClick(e) {
 boardDrawC.addEventListener('pointerdown', function(e) { activatePane('board'); handlePointerDown(e); });
 boardDrawC.addEventListener('pointermove', handlePointerMove);
 boardDrawC.addEventListener('pointerup', handlePointerUp);
+boardDrawC.addEventListener('pointercancel', handlePointerUp);
 boardDrawC.addEventListener('pointerleave', handlePointerLeave);
 boardDrawC.addEventListener('dblclick', handleDblClick);
 
