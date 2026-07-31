@@ -865,6 +865,7 @@ var _pdfWorkerSrc = (function() {
       <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
       <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
+      <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
       <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
       </button>
@@ -1029,6 +1030,76 @@ var _pdfWorkerSrc = (function() {
 </div>
 
 <div id="toast"></div>
+
+<div id="function-modal-backdrop">
+  <div id="function-modal">
+    <h3>Reprezintă grafic o funcție</h3>
+    <label for="fn-expr-input">Funcție f(x) — poți scrie în LaTeX (ex: <code>x^2-3x+2</code>, <code>\sin(x)</code>, <code>\sqrt{x}</code>, <code>\frac{1}{x}</code>)</label>
+    <input type="text" id="fn-expr-input" placeholder="ex: x^2 - 3x + 2" autocomplete="off">
+    <div class="fn-modal-row">
+      <div class="fn-modal-field">
+        <label for="fn-xmin-input">x minim</label>
+        <input type="number" id="fn-xmin-input" value="-10">
+      </div>
+      <div class="fn-modal-field">
+        <label for="fn-xmax-input">x maxim</label>
+        <input type="number" id="fn-xmax-input" value="10">
+      </div>
+      <div class="fn-modal-field">
+        <label for="fn-color-input">Culoare</label>
+        <input type="color" id="fn-color-input" value="#e74c3c">
+      </div>
+    </div>
+    <div id="fn-error-msg"></div>
+    <div class="fn-modal-actions">
+      <button class="cancel" id="fn-cancel-btn">Anulează</button>
+      <button class="ok" id="fn-ok-btn">✓ Reprezintă grafic</button>
+    </div>
+  </div>
+</div>
+
+<style>
+#function-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+}
+#function-modal-backdrop.show { display: flex; }
+#function-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  font-family: system-ui, sans-serif;
+}
+#function-modal h3 { margin: 0 0 12px 0; font-size: 16px; color: #222; }
+#function-modal label { font-size: 12px; color: #555; display: block; margin-bottom: 4px; }
+#function-modal code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+#fn-expr-input {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 15px;
+  border: 1px solid #ccc; border-radius: 8px; margin-bottom: 12px;
+}
+.fn-modal-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.fn-modal-field { flex: 1; }
+.fn-modal-field input {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px;
+}
+.fn-modal-field input[type="color"] { padding: 2px; height: 32px; }
+#fn-error-msg { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+.fn-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.fn-modal-actions button {
+  padding: 8px 14px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer;
+}
+.fn-modal-actions .ok { background: #2d7d2d; color: #fff; }
+.fn-modal-actions .cancel { background: #eee; color: #333; }
+</style>
+
 <script>
 // ====================================================================
 // COD COMPLET - VERSIUNE FINALĂ 
@@ -1085,6 +1156,12 @@ let lassoPoints = [];
 let lassoAdditive = false;
 let lassoBaseSelection = new Set();
 let isDraggingSelected = false;
+let isResizingStroke = false;
+let resizeStrokeIndex = -1;
+let resizeOriginalStroke = null;
+let resizeAnchor = { x: 0, y: 0 };
+let resizeStartDist = 1;
+let currentResizeHandle = null; // { x, y, strokeIdx }
 let dragStartMouseX = 0, dragStartMouseY = 0;
 let dragStartPositions = new Map();
 let moveUndoSnapshots = new Map();
@@ -1830,7 +1907,109 @@ function drawBg() {
 
 function drawStrokeOn(c, stroke) {
   if (!stroke) return;
-  
+
+  if (stroke.type === 'function') {
+    c.save();
+    const axisColor = stroke.axisColor || '#7a7a7a';
+
+    // axele Ox / Oy (linii pline)
+    c.strokeStyle = axisColor;
+    c.lineWidth = 1.4;
+    if (stroke.xAxis && stroke.xAxis.length === 2) {
+      c.beginPath();
+      c.moveTo(stroke.xAxis[0].x, stroke.xAxis[0].y);
+      c.lineTo(stroke.xAxis[1].x, stroke.xAxis[1].y);
+      c.stroke();
+    }
+    if (stroke.yAxis && stroke.yAxis.length === 2) {
+      c.beginPath();
+      c.moveTo(stroke.yAxis[0].x, stroke.yAxis[0].y);
+      c.lineTo(stroke.yAxis[1].x, stroke.yAxis[1].y);
+      c.stroke();
+    }
+
+    // săgeți: Ox spre dreapta, Oy în sus
+    function arrowHead(tipX, tipY, dirX, dirY) {
+      const size = 9;
+      const angle = Math.atan2(dirY, dirX);
+      const a1 = angle + Math.PI - 0.42;
+      const a2 = angle + Math.PI + 0.42;
+      c.beginPath();
+      c.moveTo(tipX, tipY);
+      c.lineTo(tipX + size * Math.cos(a1), tipY + size * Math.sin(a1));
+      c.lineTo(tipX + size * Math.cos(a2), tipY + size * Math.sin(a2));
+      c.closePath();
+      c.fillStyle = axisColor;
+      c.fill();
+    }
+    if (stroke.xAxis && stroke.xAxis.length === 2) {
+      arrowHead(stroke.xAxis[1].x, stroke.xAxis[1].y, 1, 0);
+    }
+    if (stroke.yAxis && stroke.yAxis.length === 2) {
+      arrowHead(stroke.yAxis[1].x, stroke.yAxis[1].y, 0, -1);
+    }
+
+    // diviziuni (ticks) pe Ox și Oy
+    c.strokeStyle = axisColor;
+    c.lineWidth = 1;
+    c.fillStyle = axisColor;
+    c.font = '12px system-ui, sans-serif';
+    (stroke.xTicks || []).forEach(t => {
+      c.beginPath();
+      c.moveTo(t.x, t.y - 4);
+      c.lineTo(t.x, t.y + 4);
+      c.stroke();
+      c.textAlign = 'center';
+      c.textBaseline = 'top';
+      c.fillText(t.label, t.x, t.y + 6);
+    });
+    (stroke.yTicks || []).forEach(t => {
+      c.beginPath();
+      c.moveTo(t.x - 4, t.y);
+      c.lineTo(t.x + 4, t.y);
+      c.stroke();
+      c.textAlign = 'right';
+      c.textBaseline = 'middle';
+      c.fillText(t.label, t.x - 7, t.y);
+    });
+
+    // valorile extreme (domeniu pe Ox, imaginea vizibilă pe Oy) — evidențiate
+    c.font = 'bold 12px system-ui, sans-serif';
+    c.fillStyle = stroke.color || axisColor;
+    (stroke.extremes || []).forEach(ex => {
+      c.beginPath();
+      if (ex.axis === 'x') {
+        c.moveTo(ex.x, ex.y - 5);
+        c.lineTo(ex.x, ex.y + 5);
+        c.stroke();
+        c.textAlign = 'center';
+        c.textBaseline = 'top';
+        c.fillText(ex.label, ex.x, ex.y + 8);
+      } else {
+        c.moveTo(ex.x - 5, ex.y);
+        c.lineTo(ex.x + 5, ex.y);
+        c.stroke();
+        c.textAlign = 'right';
+        c.textBaseline = 'middle';
+        c.fillText(ex.label, ex.x - 8, ex.y);
+      }
+    });
+
+    // curba funcției
+    c.strokeStyle = stroke.color;
+    c.lineWidth = stroke.size || 3;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    (stroke.segments || []).forEach(seg => {
+      if (!seg || seg.length < 2) return;
+      c.beginPath();
+      c.moveTo(seg[0].x, seg[0].y);
+      for (let i = 1; i < seg.length; i++) c.lineTo(seg[i].x, seg[i].y);
+      c.stroke();
+    });
+    c.restore();
+    return;
+  }
   if (stroke.type === 'text') {
     c.save();
     c.font = stroke.font;
@@ -2093,6 +2272,59 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.sqrt((px - projX)**2 + (py - projY)**2);
 }
 
+// Calculează geometria unui stroke scalat cu 'factor' față de un punct ancoră (anchorX, anchorY).
+// 'orig' este un clonă neschimbată a stroke-ului la începutul redimensionării, pentru a evita erori cumulate.
+function computeScaledGeometry(orig, anchorX, anchorY, factor) {
+  const sp = (px, py) => ({ x: anchorX + (px - anchorX) * factor, y: anchorY + (py - anchorY) * factor });
+  const out = {};
+  switch (orig.type) {
+    case 'text': {
+      const p = sp(orig.x, orig.y);
+      out.x = p.x; out.y = p.y;
+      out.fontSize = Math.max(6, (orig.fontSize || 28) * factor);
+      out.font = (orig.font || '').replace(/[\d.]+px/, out.fontSize.toFixed(1) + 'px');
+      break;
+    }
+    case 'midpoint': {
+      const p = sp(orig.x, orig.y); out.x = p.x; out.y = p.y;
+      out.p1 = sp(orig.p1.x, orig.p1.y);
+      out.p2 = sp(orig.p2.x, orig.p2.y);
+      break;
+    }
+    case 'circle':
+    case 'arc': {
+      const p = sp(orig.cx, orig.cy); out.cx = p.x; out.cy = p.y;
+      out.radius = Math.max(2, orig.radius * factor);
+      break;
+    }
+    case 'angle': {
+      out.vertex = sp(orig.vertex.x, orig.vertex.y);
+      out.ray1 = sp(orig.ray1.x, orig.ray1.y);
+      out.ray2 = sp(orig.ray2.x, orig.ray2.y);
+      break;
+    }
+    case 'rect': {
+      const p = sp(orig.x, orig.y); out.x = p.x; out.y = p.y;
+      out.w = orig.w * factor; out.h = orig.h * factor;
+      break;
+    }
+    case 'function': {
+      out.segments = (orig.segments || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
+      out.xAxis = (orig.xAxis || []).map(pt => sp(pt.x, pt.y));
+      out.yAxis = (orig.yAxis || []).map(pt => sp(pt.x, pt.y));
+      out.xTicks = (orig.xTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
+      out.yTicks = (orig.yTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
+      out.extremes = (orig.extremes || []).map(t => ({ ...sp(t.x, t.y), label: t.label, axis: t.axis }));
+      break;
+    }
+    default: {
+      if (orig.points) out.points = orig.points.map(pt => sp(pt.x, pt.y));
+    }
+  }
+  if (typeof orig.size === 'number') out.size = Math.max(0.5, orig.size * factor);
+  return out;
+}
+
 function getStrokeBoundingBox(stroke) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   
@@ -2157,6 +2389,24 @@ function getStrokeBoundingBox(stroke) {
     const pad = stroke.size || 5;
     return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
   }
+  if (stroke.type === 'function') {
+    const allPts = [];
+    (stroke.segments || []).forEach(seg => allPts.push(...seg));
+    if (stroke.xAxis) allPts.push(...stroke.xAxis);
+    if (stroke.yAxis) allPts.push(...stroke.yAxis);
+    (stroke.xTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
+    (stroke.yTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
+    (stroke.extremes || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
+    for (const p of allPts) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (!isFinite(minX)) return { x: 0, y: 0, w: 10, h: 10 };
+    const pad = 34;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }
   return { x: 0, y: 0, w: 10, h: 10 };
 }
 
@@ -2202,6 +2452,13 @@ function findStrokeAt(x, y, page) {
       const d1 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray1.x, s.ray1.y);
       const d2 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray2.x, s.ray2.y);
       if (Math.min(d1, d2) < 12) return i;
+    } else if (s.type === 'function') {
+      for (const seg of (s.segments || [])) {
+        for (let j = 0; j < seg.length - 1; j++) {
+          const d = distToSegment(x, y, seg[j].x, seg[j].y, seg[j+1].x, seg[j+1].y);
+          if (d < 12) return i;
+        }
+      }
     } else if (s.points && s.points.length > 0) {
       for (let j = 0; j < s.points.length - 1; j++) {
         const p1 = s.points[j], p2 = s.points[j+1];
@@ -2255,6 +2512,28 @@ function drawSelectionHighlights() {
   
   selCtx.setLineDash([]);
   selCtx.restore();
+
+  // Mâner de scalare — vizibil doar când e selectat un singur stroke
+  currentResizeHandle = null;
+  if (selectedStrokes.size === 1) {
+    const idx = [...selectedStrokes][0];
+    const stroke = page.strokes[idx];
+    if (stroke) {
+      const bbox = getStrokeBoundingBox(stroke);
+      const hx = bbox.x + bbox.w + 2;
+      const hy = bbox.y + bbox.h + 2;
+      currentResizeHandle = { x: hx, y: hy, strokeIdx: idx };
+      selCtx.save();
+      selCtx.fillStyle = '#e67e00';
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 2;
+      selCtx.beginPath();
+      selCtx.rect(hx - 7, hy - 7, 14, 14);
+      selCtx.fill();
+      selCtx.stroke();
+      selCtx.restore();
+    }
+  }
 }
 
 function toggleSelection(idx, shiftKey) {
@@ -2338,6 +2617,16 @@ function snapshotStrokePosition(stroke) {
     ray2: { x: stroke.ray2.x, y: stroke.ray2.y }
   };
   if (stroke.points) return { points: stroke.points.map(p => ({ x: p.x, y: p.y })) };
+  if (stroke.type === 'function') {
+    return {
+      segments: (stroke.segments || []).map(seg => seg.map(p => ({ x: p.x, y: p.y }))),
+      xAxis: (stroke.xAxis || []).map(p => ({ x: p.x, y: p.y })),
+      yAxis: (stroke.yAxis || []).map(p => ({ x: p.x, y: p.y })),
+      xTicks: (stroke.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+      yTicks: (stroke.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+      extremes: (stroke.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }))
+    };
+  }
   return null;
 }
 
@@ -2360,6 +2649,13 @@ function restoreStrokePosition(stroke, snap) {
     stroke.vertex = { x: snap.vertex.x, y: snap.vertex.y };
     stroke.ray1 = { x: snap.ray1.x, y: snap.ray1.y };
     stroke.ray2 = { x: snap.ray2.x, y: snap.ray2.y };
+  } else if (stroke.type === 'function' && snap.segments) {
+    stroke.segments = snap.segments.map(seg => seg.map(p => ({ x: p.x, y: p.y })));
+    stroke.xAxis = (snap.xAxis || []).map(p => ({ x: p.x, y: p.y }));
+    stroke.yAxis = (snap.yAxis || []).map(p => ({ x: p.x, y: p.y }));
+    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
+    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
+    stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }));
   } else if (stroke.points && snap.points) {
     stroke.points = snap.points.map(p => ({ x: p.x, y: p.y }));
   }
@@ -2417,6 +2713,25 @@ function handlePointerDown(e) {
   if (tool === 'select') {
     const p = pos(e);
     const page = getCurrentPage();
+
+    if (currentResizeHandle && selectedStrokes.has(currentResizeHandle.strokeIdx)) {
+      const dhx = p.x - currentResizeHandle.x, dhy = p.y - currentResizeHandle.y;
+      if (Math.sqrt(dhx * dhx + dhy * dhy) < 14 && page) {
+        const stroke = page.strokes[currentResizeHandle.strokeIdx];
+        if (stroke) {
+          const bbox = getStrokeBoundingBox(stroke);
+          isResizingStroke = true;
+          resizeStrokeIndex = currentResizeHandle.strokeIdx;
+          resizeOriginalStroke = JSON.parse(JSON.stringify(stroke));
+          resizeAnchor = { x: bbox.x, y: bbox.y };
+          const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
+          resizeStartDist = Math.max(1, Math.sqrt(ddx * ddx + ddy * ddy));
+          drawC.setPointerCapture(e.pointerId);
+          showToast('↔ Trage pentru a scala');
+          return;
+        }
+      }
+    }
     
     const imgAt = getImageAt(page, p.x, p.y);
     if (imgAt) {
@@ -2462,6 +2777,15 @@ function handlePointerDown(e) {
               x: s.vertex.x, y: s.vertex.y,
               ray1: { x: s.ray1.x, y: s.ray1.y },
               ray2: { x: s.ray2.x, y: s.ray2.y }
+            });
+          } else if (s.type === 'function') {
+            dragStartPositions.set(si, {
+              segments: (s.segments || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y }))),
+              xAxis: (s.xAxis || []).map(pt => ({ x: pt.x, y: pt.y })),
+              yAxis: (s.yAxis || []).map(pt => ({ x: pt.x, y: pt.y })),
+              xTicks: (s.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+              yTicks: (s.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+              extremes: (s.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }))
             });
           } else if (s.points && s.points.length > 0) {
             dragStartPositions.set(si, { points: s.points.map(pt => ({ x: pt.x, y: pt.y })) });
@@ -2579,6 +2903,22 @@ function handlePointerMove(e) {
     const gd = nearestGuideDist(p);
     drawC.style.cursor = (gd < GUIDE_SNAP_DIST) ? GEO_PEN_CURSOR : '';
   }
+
+  if (tool === 'select' && isResizingStroke) {
+    const page = getCurrentPage();
+    if (page && resizeOriginalStroke) {
+      const stroke = page.strokes[resizeStrokeIndex];
+      if (stroke) {
+        const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+        const factor = Math.min(20, Math.max(0.05, dist / resizeStartDist));
+        Object.assign(stroke, computeScaledGeometry(resizeOriginalStroke, resizeAnchor.x, resizeAnchor.y, factor));
+        redrawStrokes();
+        drawSelectionHighlights();
+      }
+    }
+    return;
+  }
   
   if (tool === 'select' && isSelecting) {
     const page = getCurrentPage();
@@ -2673,6 +3013,13 @@ function handlePointerMove(e) {
         s.ray1.y = start.ray1.y + dy;
         s.ray2.x = start.ray2.x + dx;
         s.ray2.y = start.ray2.y + dy;
+      } else if (s.type === 'function' && start.segments) {
+        s.segments = start.segments.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
+        s.xAxis = (start.xAxis || []).map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+        s.yAxis = (start.yAxis || []).map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+        s.xTicks = (start.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+        s.yTicks = (start.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+        s.extremes = (start.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
       } else if (s.points) {
         for (let i = 0; i < s.points.length; i++) {
           const orig = start.points && start.points[i];
@@ -2813,6 +3160,24 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp(e) {
+
+  if (tool === 'select' && isResizingStroke) {
+    isResizingStroke = false;
+    const page = getCurrentPage();
+    const stroke = page ? page.strokes[resizeStrokeIndex] : null;
+    if (page && stroke && resizeOriginalStroke) {
+      const after = JSON.parse(JSON.stringify(stroke));
+      if (JSON.stringify(after) !== JSON.stringify(resizeOriginalStroke)) {
+        undoStack.push({ type: 'resizeStroke', page, stroke, before: resizeOriginalStroke, after });
+        redoStack = [];
+        showToast('✓ Stroke scalat');
+      }
+    }
+    resizeOriginalStroke = null;
+    resizeStrokeIndex = -1;
+    updateStatus();
+    return;
+  }
 
   if (tool === 'select' && isSelecting) {
     isSelecting = false;
@@ -3148,6 +3513,9 @@ function setTool(t) {
   isSelecting = false;
   lassoPoints = [];
   isDraggingSelected = false;
+  isResizingStroke = false;
+  resizeOriginalStroke = null;
+  resizeStrokeIndex = -1;
   dragStartPositions.clear();
   moveUndoSnapshots.clear();
   overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
@@ -4150,6 +4518,316 @@ document.addEventListener('pointerup', () => {
 });
 
 // ================================================================
+// REPREZENTARE GRAFICĂ A FUNCȚIILOR f(x)
+// ================================================================
+
+// Convertește o expresie scrisă (opțional în LaTeX) într-o expresie JS evaluabilă.
+function parseMathExpression(raw) {
+  let expr = (raw || '').trim();
+  if (!expr) return '';
+
+  // elimină prefixe gen "f(x)=" sau "y="
+  expr = expr.replace(/^\s*[a-zA-Z]\w*\s*\(\s*x\s*\)\s*=\s*/i, '');
+  expr = expr.replace(/^\s*y\s*=\s*/i, '');
+
+  expr = expr.replace(/\\left/g, '').replace(/\\right/g, '');
+  expr = expr.replace(/\\cdot/g, '*').replace(/\\times/g, '*');
+
+  // \frac{a}{b} -> ((a)/(b)), aplicat repetat pentru fracții imbricate simplu
+  let prev;
+  do {
+    prev = expr;
+    expr = expr.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))');
+  } while (expr !== prev);
+
+  // \sqrt[n]{a} -> ((a)**(1/(n)))
+  expr = expr.replace(/\\sqrt\[([^\[\]]*)\]\{([^{}]*)\}/g, '(($2)**(1/($1)))');
+  // \sqrt{a} -> sqrt(a)
+  do {
+    prev = expr;
+    expr = expr.replace(/\\sqrt\{([^{}]*)\}/g, 'sqrt($1)');
+  } while (expr !== prev);
+
+  // exponent cu acolade: ^{...} -> **(...)
+  do {
+    prev = expr;
+    expr = expr.replace(/\^\{([^{}]*)\}/g, '**($1)');
+  } while (expr !== prev);
+  // restul de exponenți: ^ -> **
+  expr = expr.replace(/\^/g, '**');
+
+  expr = expr.replace(/\\pi\b/g, 'PI');
+  // înmulțire implicită în jurul constantei PI (ex: "\pi x" sau "2\pi")
+  expr = expr.replace(/\bPI\b\s*(?=[a-zA-Z0-9(])/g, 'PI*');
+  expr = expr.replace(/([a-zA-Z0-9)])\s*\bPI\b/g, '$1*PI');
+
+  // funcții latex cu backslash: elimină backslash-ul (asin/acos/atan gestionate separat)
+  expr = expr.replace(/\\arcsin/g, 'asin').replace(/\\arccos/g, 'acos').replace(/\\arctan/g, 'atan');
+  expr = expr.replace(/\\ln\b/g, 'ln');
+  expr = expr.replace(/\\(sin|cos|tan|sinh|cosh|tanh|log|exp|min|max|abs|floor|ceil|round|sign)\b/g, '$1');
+
+  // spațiere latex
+  expr = expr.replace(/\\[,;:!]/g, '');
+  // orice altă comandă latex necunoscută: păstrează doar litera
+  expr = expr.replace(/\\([a-zA-Z]+)/g, '$1');
+  // acolade rămase -> paranteze
+  expr = expr.replace(/\{/g, '(').replace(/\}/g, ')');
+
+  // înmulțire implicită: cifră urmată de literă sau paranteză
+  expr = expr.replace(/(\d)(?=[a-zA-Z(])/g, '$1*');
+  // paranteză închisă urmată de cifră/literă/paranteză deschisă
+  expr = expr.replace(/\)(?=[\da-zA-Z(])/g, ')*');
+
+  // ln și log -> logaritm natural (Math.log)
+  expr = expr.replace(/\bln\b/g, 'log');
+
+  const fnNames = ['asin','acos','atan','sinh','cosh','tanh','sin','cos','tan','sqrt','abs','exp','log','min','max','floor','ceil','round','sign'];
+  for (const fn of fnNames) {
+    expr = expr.replace(new RegExp('\\b' + fn + '\\b', 'g'), 'Math.' + fn);
+  }
+  expr = expr.replace(/\bPI\b/g, 'Math.PI');
+  expr = expr.replace(/\bE\b/g, 'Math.E');
+
+  return expr;
+}
+
+function compileFunctionExpr(raw) {
+  const jsExpr = parseMathExpression(raw);
+  if (!jsExpr || !/^[0-9a-zA-Z_.+\-*/%(),\s]*$/.test(jsExpr)) {
+    throw new Error('Expresie invalidă. Verifică sintaxa.');
+  }
+  let fn;
+  try {
+    fn = new Function('x', 'return (' + jsExpr + ');');
+  } catch (err) {
+    throw new Error('Nu am putut interpreta funcția.');
+  }
+  return fn;
+}
+
+function isTrigExpression(raw) {
+  return /\\?(a?rc)?(sin|cos|tan|csc|sec|cot)h?\s*\(/i.test(raw) || /\\(sin|cos|tan|csc|sec|cot)\b/i.test(raw);
+}
+
+function gcdInt(a, b) {
+  a = Math.abs(a); b = Math.abs(b);
+  while (b) { [a, b] = [b, a % b]; }
+  return a || 1;
+}
+
+function niceNumber(range, round) {
+  if (!(range > 0)) return 1;
+  const exponent = Math.floor(Math.log10(range));
+  const fraction = range / Math.pow(10, exponent);
+  let niceFraction;
+  if (round) {
+    if (fraction < 1.5) niceFraction = 1;
+    else if (fraction < 3) niceFraction = 2;
+    else if (fraction < 7) niceFraction = 5;
+    else niceFraction = 10;
+  } else {
+    if (fraction <= 1) niceFraction = 1;
+    else if (fraction <= 2) niceFraction = 2;
+    else if (fraction <= 5) niceFraction = 5;
+    else niceFraction = 10;
+  }
+  return niceFraction * Math.pow(10, exponent);
+}
+
+function computeNiceStep(min, max, targetTicks) {
+  const range = niceNumber(Math.max(max - min, 1e-9), false);
+  return niceNumber(range / Math.max(targetTicks - 1, 1), true);
+}
+
+function formatNumber(n) {
+  if (Math.abs(n) < 1e-9) return '0';
+  const r = Math.round(n * 1000) / 1000;
+  if (Number.isInteger(r)) return String(r);
+  return String(parseFloat(r.toFixed(3)));
+}
+
+function formatPiLabel(val) {
+  if (Math.abs(val) < 1e-9) return '0';
+  const k = val / Math.PI;
+  const denominators = [1, 2, 3, 4, 6];
+  for (const d of denominators) {
+    const numerator = Math.round(k * d);
+    if (Math.abs(k * d - numerator) < 1e-6 && numerator !== 0) {
+      const sign = numerator < 0 ? '-' : '';
+      const absNum = Math.abs(numerator);
+      if (d === 1) return sign + (absNum === 1 ? '' : absNum) + 'π';
+      const g = gcdInt(absNum, d);
+      const n2 = absNum / g, d2 = d / g;
+      return sign + (n2 === 1 ? '' : n2) + 'π/' + d2;
+    }
+  }
+  return formatNumber(val);
+}
+
+function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
+  const fn = compileFunctionExpr(rawExpr);
+  const page = getCurrentPage();
+  if (!page) throw new Error('Nu există o pagină activă.');
+  if (!(xMax > xMin)) throw new Error('Intervalul de x este invalid.');
+
+  const W = drawC.width, H = drawC.height;
+  const marginX = W * 0.10, marginY = H * 0.10;
+  const plotW = Math.max(W - marginX * 2, 50);
+  const plotH = Math.max(H - marginY * 2, 50);
+  const originX = marginX + plotW / 2;
+  const originY = marginY + plotH / 2;
+
+  const N = 500;
+  const xRange = xMax - xMin;
+  const rawPoints = [];
+  for (let i = 0; i <= N; i++) {
+    const xVal = xMin + (xRange * i) / N;
+    let yVal;
+    try { yVal = fn(xVal); } catch (e) { yVal = NaN; }
+    rawPoints.push({ x: xVal, y: (typeof yVal === 'number' && isFinite(yVal)) ? yVal : NaN });
+  }
+
+  const finiteYs = rawPoints.map(p => p.y).filter(y => isFinite(y)).sort((a, b) => a - b);
+  if (finiteYs.length === 0) throw new Error('Funcția nu produce valori numerice reale în acest interval.');
+
+  const lo = finiteYs[Math.max(0, Math.floor(finiteYs.length * 0.02))];
+  const hi = finiteYs[Math.min(finiteYs.length - 1, Math.ceil(finiteYs.length * 0.98) - 1)];
+  let yMin = Math.min(lo, 0);
+  let yMax = Math.max(hi, 0);
+  if (yMax - yMin < 1e-6) { yMin -= 1; yMax += 1; }
+  const yPad = (yMax - yMin) * 0.12;
+  yMin -= yPad; yMax += yPad;
+
+  const scaleX = plotW / xRange;
+  const scaleY = plotH / (yMax - yMin);
+  const xMid = (xMin + xMax) / 2, yMid = (yMin + yMax) / 2;
+
+  function toCanvas(xVal, yVal) {
+    return { x: originX + (xVal - xMid) * scaleX, y: originY - (yVal - yMid) * scaleY };
+  }
+
+  const hardMin = yMin - (yMax - yMin) * 3;
+  const hardMax = yMax + (yMax - yMin) * 3;
+  const segments = [];
+  let current = [];
+  for (const p of rawPoints) {
+    if (!isFinite(p.y) || p.y < hardMin || p.y > hardMax) {
+      if (current.length > 1) segments.push(current);
+      current = [];
+      continue;
+    }
+    current.push(toCanvas(p.x, p.y));
+  }
+  if (current.length > 1) segments.push(current);
+  if (segments.length === 0) throw new Error('Funcția nu produce un grafic vizibil în acest interval.');
+
+  // Poziția reală a axelor Ox (y=0) și Oy (x=0), sau cea mai apropiată margine dacă 0 nu e în interval
+  const oxY = (0 >= yMin && 0 <= yMax) ? 0 : (yMin > 0 ? yMin : yMax);
+  const oyX = (0 >= xMin && 0 <= xMax) ? 0 : (xMin > 0 ? xMin : xMax);
+
+  const trig = isTrigExpression(rawExpr);
+  let xStep;
+  if (trig) {
+    let step = Math.PI / 2;
+    while ((xMax - xMin) / step > 10) step *= 2;
+    while ((xMax - xMin) / step < 4) step /= 2;
+    xStep = step;
+  } else {
+    xStep = computeNiceStep(xMin, xMax, 9);
+  }
+  const yStep = computeNiceStep(yMin, yMax, 8);
+
+  const xTicks = [];
+  {
+    const start = Math.ceil((xMin - 1e-9) / xStep) * xStep;
+    for (let v = start; v <= xMax + xStep * 1e-6; v += xStep) {
+      if (Math.abs(v) < xStep * 1e-6) continue; // skip origin, drawn separately
+      const p = toCanvas(v, oxY);
+      xTicks.push({ x: p.x, y: p.y, label: trig ? formatPiLabel(v) : formatNumber(v) });
+    }
+  }
+  const yTicks = [];
+  {
+    const start = Math.ceil((yMin - 1e-9) / yStep) * yStep;
+    for (let v = start; v <= yMax + yStep * 1e-6; v += yStep) {
+      if (Math.abs(v) < yStep * 1e-6) continue;
+      const p = toCanvas(oyX, v);
+      yTicks.push({ x: p.x, y: p.y, label: formatNumber(v) });
+    }
+  }
+
+  // Etichete pentru valorile extreme (domeniul pe Ox, codomeniul vizibil pe Oy)
+  const extremes = [];
+  const pMinX = toCanvas(xMin, oxY), pMaxX = toCanvas(xMax, oxY);
+  extremes.push({ x: pMinX.x, y: pMinX.y, label: trig ? formatPiLabel(xMin) : formatNumber(xMin), axis: 'x' });
+  extremes.push({ x: pMaxX.x, y: pMaxX.y, label: trig ? formatPiLabel(xMax) : formatNumber(xMax), axis: 'x' });
+  const pMinY = toCanvas(oyX, yMin), pMaxY = toCanvas(oyX, yMax);
+  extremes.push({ x: pMinY.x, y: pMinY.y, label: formatNumber(yMin), axis: 'y' });
+  extremes.push({ x: pMaxY.x, y: pMaxY.y, label: formatNumber(yMax), axis: 'y' });
+
+  const stroke = {
+    type: 'function',
+    expr: rawExpr,
+    color: strokeColor,
+    size: 3,
+    segments: segments,
+    axisColor: '#7a7a7a',
+    xAxis: [toCanvas(xMin, oxY), toCanvas(xMax, oxY)],
+    yAxis: [toCanvas(oyX, yMin), toCanvas(oyX, yMax)],
+    xTicks, yTicks, extremes
+  };
+
+  pushStroke(page, stroke);
+  redrawStrokes();
+  updateStatus();
+  showToast(`✓ Grafic desenat: f(x) = ${rawExpr}`);
+}
+
+const fnModalBackdrop = document.getElementById('function-modal-backdrop');
+const fnExprInput = document.getElementById('fn-expr-input');
+const fnXMinInput = document.getElementById('fn-xmin-input');
+const fnXMaxInput = document.getElementById('fn-xmax-input');
+const fnColorInput = document.getElementById('fn-color-input');
+const fnErrorMsg = document.getElementById('fn-error-msg');
+
+function openFunctionModal() {
+  fnErrorMsg.textContent = '';
+  fnModalBackdrop.classList.add('show');
+  setTimeout(() => fnExprInput.focus(), 50);
+}
+
+function closeFunctionModal() {
+  fnModalBackdrop.classList.remove('show');
+}
+
+function submitFunctionModal() {
+  fnErrorMsg.textContent = '';
+  const rawExpr = fnExprInput.value.trim();
+  if (!rawExpr) {
+    fnErrorMsg.textContent = 'Scrie o funcție, ex: x^2 - 3x + 2';
+    return;
+  }
+  const xMin = parseFloat(fnXMinInput.value);
+  const xMax = parseFloat(fnXMaxInput.value);
+  try {
+    plotFunctionOnCanvas(rawExpr, xMin, xMax, fnColorInput.value);
+    closeFunctionModal();
+  } catch (err) {
+    fnErrorMsg.textContent = err.message || 'A apărut o eroare la reprezentarea funcției.';
+  }
+}
+
+document.getElementById('fn-ok-btn').onclick = submitFunctionModal;
+document.getElementById('fn-cancel-btn').onclick = closeFunctionModal;
+fnModalBackdrop.addEventListener('mousedown', (e) => {
+  if (e.target === fnModalBackdrop) closeFunctionModal();
+});
+fnExprInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); submitFunctionModal(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeFunctionModal(); }
+});
+
+// ================================================================
 // EVENT LISTENERS BUTOANE
 // ================================================================
 
@@ -4166,6 +4844,7 @@ document.getElementById('btn-finish-polygon').onclick = () => {
 };
 document.getElementById('btn-erase').onclick = () => setTool('erase');
 document.getElementById('btn-text').onclick = () => setTool('text');
+document.getElementById('btn-function').onclick = () => openFunctionModal();
 document.getElementById('btn-midpoint').onclick = () => setTool('midpoint');
 document.getElementById('btn-select').onclick = () => setTool('select');
 document.getElementById('btn-multiselect').onclick = () => {
@@ -4307,6 +4986,8 @@ document.getElementById('btn-undo').onclick = () => {
     for (const item of action.items) {
       restoreStrokePosition(item.stroke, item.before);
     }
+  } else if (action.type === 'resizeStroke') {
+    Object.assign(action.stroke, action.before);
   } else if (action.type === 'imageMove') {
     for (const item of action.items) {
       item.img.x = item.before.x;
@@ -4352,6 +5033,8 @@ document.getElementById('btn-redo').onclick = () => {
     for (const item of action.items) {
       restoreStrokePosition(item.stroke, item.after);
     }
+  } else if (action.type === 'resizeStroke') {
+    Object.assign(action.stroke, action.after);
   } else if (action.type === 'imageMove') {
     for (const item of action.items) {
       item.img.x = item.after.x;
