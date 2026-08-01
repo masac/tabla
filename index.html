@@ -866,6 +866,7 @@ var _pdfWorkerSrc = (function() {
       <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
+      <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
       <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
       </button>
@@ -1030,6 +1031,43 @@ var _pdfWorkerSrc = (function() {
 </div>
 
 <div id="toast"></div>
+
+<div id="solids-menu"></div>
+
+<style>
+#solids-menu {
+  display: none;
+  position: fixed;
+  z-index: 9998;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.28);
+  padding: 6px;
+  max-height: 70vh;
+  overflow-y: auto;
+  width: 260px;
+  font-family: system-ui, sans-serif;
+}
+#solids-menu.show { display: block; }
+.solids-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #333;
+  font-size: 13.5px;
+  user-select: none;
+}
+.solids-menu-item:hover, .solids-menu-item:active {
+  background: #f2f2f7;
+}
+.solids-menu-item svg {
+  flex-shrink: 0;
+  color: #555;
+}
+</style>
 
 <div id="function-modal-backdrop">
   <div id="function-modal">
@@ -1911,6 +1949,40 @@ function drawBg() {
 function drawStrokeOn(c, stroke) {
   if (!stroke) return;
 
+  if (stroke.type === 'solid3d') {
+    c.save();
+    const baseWidth = stroke.size || 2.4;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+
+    // muchii ascunse (plan secundar) — mai subțiri, mai deschise la culoare, punctate clar
+    c.globalAlpha = 0.55;
+    c.strokeStyle = stroke.color;
+    c.lineWidth = Math.max(1, baseWidth * 0.75);
+    c.setLineDash([baseWidth * 3, baseWidth * 2.4]);
+    (stroke.hidden || []).forEach(seg => {
+      if (!seg || seg.length < 2) return;
+      c.beginPath();
+      c.moveTo(seg[0].x, seg[0].y);
+      c.lineTo(seg[1].x, seg[1].y);
+      c.stroke();
+    });
+
+    // muchii vizibile (plan principal) — pline, opace
+    c.globalAlpha = 1;
+    c.setLineDash([]);
+    c.strokeStyle = stroke.color;
+    c.lineWidth = baseWidth;
+    (stroke.visible || []).forEach(seg => {
+      if (!seg || seg.length < 2) return;
+      c.beginPath();
+      c.moveTo(seg[0].x, seg[0].y);
+      c.lineTo(seg[1].x, seg[1].y);
+      c.stroke();
+    });
+    c.restore();
+    return;
+  }
   if (stroke.type === 'function') {
     c.save();
     const axisColor = stroke.axisColor || '#7a7a7a';
@@ -2320,6 +2392,11 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
       out.extremes = (orig.extremes || []).map(t => ({ ...sp(t.x, t.y), label: t.label, axis: t.axis }));
       break;
     }
+    case 'solid3d': {
+      out.visible = (orig.visible || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
+      out.hidden = (orig.hidden || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
+      break;
+    }
     default: {
       if (orig.points) out.points = orig.points.map(pt => sp(pt.x, pt.y));
     }
@@ -2392,9 +2469,21 @@ function getStrokeBoundingBox(stroke) {
     const pad = stroke.size || 5;
     return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
   }
-  if (stroke.type === 'function') {
+  if (stroke.type === 'solid3d') {
     const allPts = [];
-    (stroke.segments || []).forEach(seg => allPts.push(...seg));
+    (stroke.visible || []).forEach(seg => allPts.push(...seg));
+    (stroke.hidden || []).forEach(seg => allPts.push(...seg));
+    for (const p of allPts) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (!isFinite(minX)) return { x: 0, y: 0, w: 10, h: 10 };
+    const pad = stroke.size || 6;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }
+  if (stroke.type === 'function') {
     if (stroke.xAxis) allPts.push(...stroke.xAxis);
     if (stroke.yAxis) allPts.push(...stroke.yAxis);
     (stroke.xTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
@@ -2455,6 +2544,12 @@ function findStrokeAt(x, y, page) {
       const d1 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray1.x, s.ray1.y);
       const d2 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray2.x, s.ray2.y);
       if (Math.min(d1, d2) < 12) return i;
+    } else if (s.type === 'solid3d') {
+      const allSegs = [...(s.visible || []), ...(s.hidden || [])];
+      for (const seg of allSegs) {
+        const d = distToSegment(x, y, seg[0].x, seg[0].y, seg[1].x, seg[1].y);
+        if (d < 12) return i;
+      }
     } else if (s.type === 'function') {
       for (const seg of (s.segments || [])) {
         for (let j = 0; j < seg.length - 1; j++) {
@@ -2620,6 +2715,12 @@ function snapshotStrokePosition(stroke) {
     ray2: { x: stroke.ray2.x, y: stroke.ray2.y }
   };
   if (stroke.points) return { points: stroke.points.map(p => ({ x: p.x, y: p.y })) };
+  if (stroke.type === 'solid3d') {
+    return {
+      visible: (stroke.visible || []).map(seg => seg.map(p => ({ x: p.x, y: p.y }))),
+      hidden: (stroke.hidden || []).map(seg => seg.map(p => ({ x: p.x, y: p.y })))
+    };
+  }
   if (stroke.type === 'function') {
     return {
       segments: (stroke.segments || []).map(seg => seg.map(p => ({ x: p.x, y: p.y }))),
@@ -2652,6 +2753,9 @@ function restoreStrokePosition(stroke, snap) {
     stroke.vertex = { x: snap.vertex.x, y: snap.vertex.y };
     stroke.ray1 = { x: snap.ray1.x, y: snap.ray1.y };
     stroke.ray2 = { x: snap.ray2.x, y: snap.ray2.y };
+  } else if (stroke.type === 'solid3d' && snap.visible) {
+    stroke.visible = snap.visible.map(seg => seg.map(p => ({ x: p.x, y: p.y })));
+    stroke.hidden = (snap.hidden || []).map(seg => seg.map(p => ({ x: p.x, y: p.y })));
   } else if (stroke.type === 'function' && snap.segments) {
     stroke.segments = snap.segments.map(seg => seg.map(p => ({ x: p.x, y: p.y })));
     stroke.xAxis = (snap.xAxis || []).map(p => ({ x: p.x, y: p.y }));
@@ -2782,6 +2886,11 @@ function handlePointerDown(e) {
               x: s.vertex.x, y: s.vertex.y,
               ray1: { x: s.ray1.x, y: s.ray1.y },
               ray2: { x: s.ray2.x, y: s.ray2.y }
+            });
+          } else if (s.type === 'solid3d') {
+            dragStartPositions.set(si, {
+              visible: (s.visible || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y }))),
+              hidden: (s.hidden || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y })))
             });
           } else if (s.type === 'function') {
             dragStartPositions.set(si, {
@@ -3018,6 +3127,9 @@ function handlePointerMove(e) {
         s.ray1.y = start.ray1.y + dy;
         s.ray2.x = start.ray2.x + dx;
         s.ray2.y = start.ray2.y + dy;
+      } else if (s.type === 'solid3d' && start.visible) {
+        s.visible = start.visible.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
+        s.hidden = (start.hidden || []).map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
       } else if (s.type === 'function' && start.segments) {
         s.segments = start.segments.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
         s.xAxis = (start.xAxis || []).map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
@@ -4676,7 +4788,8 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   if (!page) throw new Error('Nu există o pagină activă.');
   if (!(xMax > xMin)) throw new Error('Intervalul de x este invalid.');
 
-  const W = drawC.width, H = drawC.height;
+  const rect = drawC.getBoundingClientRect();
+  const W = rect.width, H = rect.height;
   const marginX = W * 0.10, marginY = H * 0.10;
   const plotW = Math.max(W - marginX * 2, 50);
   const plotH = Math.max(H - marginY * 2, 50);
@@ -4831,6 +4944,284 @@ fnModalBackdrop.addEventListener('mousedown', (e) => {
 fnExprInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); submitFunctionModal(); }
   if (e.key === 'Escape') { e.preventDefault(); closeFunctionModal(); }
+});
+
+// ================================================================
+// CORPURI GEOMETRICE 3D (Cub, Prisme, Piramide, Cilindru, Con, Sferă...)
+// ================================================================
+
+const SOLID_DEG2RAD = Math.PI / 180;
+const SOLID_OBLIQUE_ANGLE = 28 * SOLID_DEG2RAD;
+const SOLID_OBLIQUE_K = 0.6;
+
+// Proiectează un punct din planul solului (X = stânga-dreapta, Z = adâncime) plus înălțimea Y
+// într-un punct 2D (stil desen în perspectivă oblică / cavalieră), folosit pentru toate corpurile.
+function solidProjectGP(X, Z, Y) {
+  return {
+    x: X + Z * SOLID_OBLIQUE_K * Math.cos(SOLID_OBLIQUE_ANGLE),
+    y: -Y - Z * SOLID_OBLIQUE_K * Math.sin(SOLID_OBLIQUE_ANGLE)
+  };
+}
+
+// Determină, pentru fiecare muchie a unui poligon (dat prin puncte {x,z}), dacă fața laterală
+// corespunzătoare e vizibilă (orientată spre privitor) sau ascunsă (spre spate).
+function solidPolygonVisibility(pts) {
+  const n = pts.length;
+  const cx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const cz = pts.reduce((s, p) => s + p.z, 0) / n;
+  const vis = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    let nx = pts[j].z - pts[i].z, nz = -(pts[j].x - pts[i].x);
+    const mx = (pts[i].x + pts[j].x) / 2, mz = (pts[i].z + pts[j].z) / 2;
+    if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
+    // O muchie e vizibilă dacă peretele ei "privește" spre spectator (nz < 0, adică spre față).
+    // Doar când peretele e exact perpendicular pe adâncime (nz ≈ 0, ca la o cutie axă-aliniată,
+    // unde pereții stânga/dreapta au normala pur orizontală) se folosește nx ca rezolvare:
+    // convenția standard arată fața dreaptă, nu pe cea stângă.
+    const EPS = 1e-6;
+    let visible;
+    if (nz < -EPS) visible = true;
+    else if (nz > EPS) visible = false;
+    else visible = nx > 0;
+    vis.push(visible);
+  }
+  return vis;
+}
+
+// Construiește muchiile (vizibile/ascunse) pentru o prismă, piramidă sau trunchi de piramidă,
+// pornind de la un poligon de bază (basePts), o înălțime și un factor de scalare pentru fața de sus
+// (1 = prismă, 0 = piramidă/vârf unic, între 0 și 1 = trunchi de piramidă).
+function buildPolygonalSolidLocal(basePts, height, topScale) {
+  const n = basePts.length;
+  const edgeVis = solidPolygonVisibility(basePts);
+  const cx = basePts.reduce((s, p) => s + p.x, 0) / n;
+  const cz = basePts.reduce((s, p) => s + p.z, 0) / n;
+  const baseScreen = basePts.map(p => solidProjectGP(p.x, p.z, 0));
+  let topScreen = null, apexScreen = null;
+  if (topScale === 0) {
+    apexScreen = solidProjectGP(cx, cz, height);
+  } else {
+    topScreen = basePts.map(p => solidProjectGP(cx + (p.x - cx) * topScale, cz + (p.z - cz) * topScale, height));
+  }
+  const visible = [], hidden = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    (edgeVis[i] ? visible : hidden).push([baseScreen[i], baseScreen[j]]);
+  }
+  if (topScreen) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      visible.push([topScreen[i], topScreen[j]]);
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const vis = edgeVis[(i - 1 + n) % n] || edgeVis[i];
+    const p2 = apexScreen || topScreen[i];
+    (vis ? visible : hidden).push([baseScreen[i], p2]);
+  }
+  return { visible, hidden };
+}
+
+function solidRegularNGon(n, R, phaseDeg) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = (phaseDeg + i * 360 / n) * SOLID_DEG2RAD;
+    pts.push({ x: R * Math.cos(t), z: R * Math.sin(t) });
+  }
+  return pts;
+}
+function solidRectBase(halfW, halfD) {
+  return [{ x: -halfW, z: -halfD }, { x: halfW, z: -halfD }, { x: halfW, z: halfD }, { x: -halfW, z: halfD }];
+}
+function solidTrapezoidBase(w1, w2, d) {
+  return [{ x: -w1 / 2, z: -d / 2 }, { x: w1 / 2, z: -d / 2 }, { x: w2 / 2, z: d / 2 }, { x: -w2 / 2, z: d / 2 }];
+}
+
+// Construiește cilindrul / conul / trunchiul de con (R2 = 0 înseamnă con, cu vârf unic)
+function buildRoundSolidLocal(R1, R2, height) {
+  const segs = 48;
+  const baseGP = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs * 2 * Math.PI;
+    baseGP.push({ x: R1 * Math.cos(t), z: R1 * Math.sin(t) });
+  }
+  const baseScreen = baseGP.map(p => solidProjectGP(p.x, p.z, 0));
+  const visible = [], hidden = [];
+  for (let i = 0; i < segs; i++) {
+    const tmid = (i + 0.5) / segs * 2 * Math.PI;
+    (Math.sin(tmid) < 0 ? visible : hidden).push([baseScreen[i], baseScreen[i + 1]]);
+  }
+  let topScreen = null, apexScreen = null;
+  if (R2 > 0) {
+    const ratio = R2 / R1;
+    topScreen = baseGP.map(p => solidProjectGP(p.x * ratio, p.z * ratio, height));
+    for (let i = 0; i < segs; i++) visible.push([topScreen[i], topScreen[i + 1]]);
+  } else {
+    apexScreen = solidProjectGP(0, 0, height);
+  }
+  const leftIdx = Math.round(segs / 2), rightIdx = 0;
+  const leftTop = topScreen ? topScreen[leftIdx] : apexScreen;
+  const rightTop = topScreen ? topScreen[rightIdx] : apexScreen;
+  visible.push([baseScreen[leftIdx], leftTop]);
+  visible.push([baseScreen[rightIdx], rightTop]);
+  // Linia diametrului (secțiunea axială): jos mereu, sus doar dacă există o față superioară plană
+  // (cilindru / trunchi de con) — formează dreptunghiul / triunghiul / trapezul isoscel cerut.
+  visible.push([baseScreen[rightIdx], baseScreen[leftIdx]]);
+  if (topScreen) visible.push([topScreen[rightIdx], topScreen[leftIdx]]);
+  return { visible, hidden };
+}
+
+// Construiește sfera: un cerc exterior (mereu vizibil) + o elipsă "ecuator" (parțial ascunsă)
+function buildSphereLocal(R) {
+  const segs = 48;
+  const outer = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs * 2 * Math.PI;
+    outer.push({ x: R * Math.cos(t), y: R * Math.sin(t) });
+  }
+  const visible = [];
+  for (let i = 0; i < segs; i++) visible.push([outer[i], outer[i + 1]]);
+  const hidden = [];
+  const ry = R * 0.34;
+  const eq = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs * 2 * Math.PI;
+    eq.push({ x: R * Math.cos(t), y: ry * Math.sin(t) });
+  }
+  for (let i = 0; i < segs; i++) {
+    const seg = [eq[i], eq[i + 1]];
+    (((eq[i].y + eq[i + 1].y) / 2) > 0 ? visible : hidden).push(seg);
+  }
+  return { visible, hidden };
+}
+
+const SOLID_SHAPES = {
+  cub: { label: 'Cub', build: () => buildPolygonalSolidLocal(solidRectBase(55, 55), 110, 1) },
+  paralelipiped: { label: 'Paralelipiped dreptunghic', build: () => buildPolygonalSolidLocal(solidRectBase(75, 45), 90, 1) },
+  prismaTriunghiulara: { label: 'Prismă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 110, 1) },
+  prismaPatrulatera: { label: 'Prismă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(60, 60), 130, 1) },
+  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 100, 1) },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -90), 120, 0) },
+  piramidaPatrulatera: { label: 'Piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(65, 65), 130, 0) },
+  piramidaHexagonala: { label: 'Piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 130, 0) },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -90), 95, 0.5) },
+  trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(70, 70), 95, 0.5) },
+  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 95, 0.5) },
+  cilindru: { label: 'Cilindru', build: () => buildRoundSolidLocal(60, 60, 110) },
+  con: { label: 'Con', build: () => buildRoundSolidLocal(60, 0, 125) },
+  trunchiCon: { label: 'Trunchiul de con', build: () => buildRoundSolidLocal(65, 32, 100) },
+  sfera: { label: 'Sferă', build: () => buildSphereLocal(65) }
+};
+
+// Randează un mic SVG-pictogramă pentru o formă, refolosind exact aceeași geometrie ca desenul real.
+function buildShapeIconSVG(shapeKey, size) {
+  const spec = SOLID_SHAPES[shapeKey];
+  const built = spec.build();
+  const allPts = [];
+  built.visible.forEach(s => allPts.push(...s));
+  built.hidden.forEach(s => allPts.push(...s));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allPts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+  const pad = 2;
+  const scale = Math.min((size - 2 * pad) / w, (size - 2 * pad) / h);
+  const offX = pad - minX * scale + (size - 2 * pad - w * scale) / 2;
+  const offY = pad - minY * scale + (size - 2 * pad - h * scale) / 2;
+  const tp = p => ({ x: p.x * scale + offX, y: p.y * scale + offY });
+  let lines = '';
+  built.hidden.forEach(seg => {
+    const a = tp(seg[0]), b = tp(seg[1]);
+    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke-dasharray="3,2.4" stroke-width="1" opacity="0.55"/>`;
+  });
+  built.visible.forEach(seg => {
+    const a = tp(seg[0]), b = tp(seg[1]);
+    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
+  });
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">${lines}</svg>`;
+}
+
+function insertSolidShape(shapeKey) {
+  const spec = SOLID_SHAPES[shapeKey];
+  if (!spec) return;
+  const page = getCurrentPage();
+  if (!page) return;
+
+  const built = spec.build();
+  const allPts = [];
+  built.visible.forEach(s => allPts.push(...s));
+  built.hidden.forEach(s => allPts.push(...s));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allPts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const rect = drawC.getBoundingClientRect();
+  const cx = rect.width / 2, cy = rect.height * 0.28;
+  const offX = cx - (minX + maxX) / 2, offY = cy - (minY + maxY) / 2;
+  const shift = seg => seg.map(p => ({ x: p.x + offX, y: p.y + offY }));
+
+  const stroke = {
+    type: 'solid3d',
+    shape: shapeKey,
+    color: color,
+    size: 2.4,
+    visible: built.visible.map(shift),
+    hidden: built.hidden.map(shift)
+  };
+
+  pushStroke(page, stroke);
+  setTool('select');
+  selectedStrokes = new Set([page.strokes.length - 1]);
+  selectedImages.clear();
+  updateImageSelection();
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast(`✓ ${spec.label} — selectat(ă), trage pentru a muta sau scala`);
+}
+
+const solidsMenuEl = document.getElementById('solids-menu');
+const btnSolids = document.getElementById('btn-solids');
+btnSolids.innerHTML = buildShapeIconSVG('cub', 20);
+
+solidsMenuEl.innerHTML = Object.keys(SOLID_SHAPES).map(key => {
+  const spec = SOLID_SHAPES[key];
+  const icon = buildShapeIconSVG(key, 22);
+  return `<div class="solids-menu-item" data-shape="${key}">${icon}<span>${spec.label}</span></div>`;
+}).join('');
+
+function toggleSolidsMenu() {
+  if (solidsMenuEl.classList.contains('show')) {
+    closeSolidsMenu();
+    return;
+  }
+  const r = btnSolids.getBoundingClientRect();
+  solidsMenuEl.style.left = Math.round(r.left) + 'px';
+  solidsMenuEl.style.top = Math.round(r.bottom + 6) + 'px';
+  solidsMenuEl.classList.add('show');
+}
+function closeSolidsMenu() {
+  solidsMenuEl.classList.remove('show');
+}
+btnSolids.onclick = (e) => { e.stopPropagation(); toggleSolidsMenu(); };
+solidsMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
+  item.onclick = () => {
+    insertSolidShape(item.dataset.shape);
+    closeSolidsMenu();
+  };
+});
+document.addEventListener('pointerdown', (e) => {
+  if (solidsMenuEl.classList.contains('show') && !solidsMenuEl.contains(e.target) && e.target !== btnSolids && !btnSolids.contains(e.target)) {
+    closeSolidsMenu();
+  }
 });
 
 // ================================================================
