@@ -4963,6 +4963,14 @@ function solidProjectGP(X, Z, Y) {
   };
 }
 
+// Proiecție fără forfecare (doar o "turtire" pe verticală a adâncimii, fără deplasare pe orizontală) —
+// folosită pentru hexagon, ca să rămână aproape regulat (laturi aproape egale) și fața din față
+// să fie un dreptunghi / triunghi isoscel / trapez isoscel curat, la fel ca la corpurile rotunde.
+const HEX_SQUASH = 0.85;
+function hexProjectGP(X, Z, Y) {
+  return { x: X, y: -Y - Z * HEX_SQUASH };
+}
+
 // Determină, pentru fiecare muchie a unui poligon (dat prin puncte {x,z}), dacă fața laterală
 // corespunzătoare e vizibilă (orientată spre privitor) sau ascunsă (spre spate).
 function solidPolygonVisibility(pts) {
@@ -4992,17 +5000,18 @@ function solidPolygonVisibility(pts) {
 // Construiește muchiile (vizibile/ascunse) pentru o prismă, piramidă sau trunchi de piramidă,
 // pornind de la un poligon de bază (basePts), o înălțime și un factor de scalare pentru fața de sus
 // (1 = prismă, 0 = piramidă/vârf unic, între 0 și 1 = trunchi de piramidă).
-function buildPolygonalSolidLocal(basePts, height, topScale) {
+function buildPolygonalSolidLocal(basePts, height, topScale, projectFn) {
+  const proj = projectFn || solidProjectGP;
   const n = basePts.length;
   const edgeVis = solidPolygonVisibility(basePts);
   const cx = basePts.reduce((s, p) => s + p.x, 0) / n;
   const cz = basePts.reduce((s, p) => s + p.z, 0) / n;
-  const baseScreen = basePts.map(p => solidProjectGP(p.x, p.z, 0));
+  const baseScreen = basePts.map(p => proj(p.x, p.z, 0));
   let topScreen = null, apexScreen = null;
   if (topScale === 0) {
-    apexScreen = solidProjectGP(cx, cz, height);
+    apexScreen = proj(cx, cz, height);
   } else {
-    topScreen = basePts.map(p => solidProjectGP(cx + (p.x - cx) * topScale, cz + (p.z - cz) * topScale, height));
+    topScreen = basePts.map(p => proj(cx + (p.x - cx) * topScale, cz + (p.z - cz) * topScale, height));
   }
   const visible = [], hidden = [];
   for (let i = 0; i < n; i++) {
@@ -5041,32 +5050,43 @@ function solidTrapezoidBase(w1, w2, d) {
 // Construiește cilindrul / conul / trunchiul de con (R2 = 0 înseamnă con, cu vârf unic)
 function buildRoundSolidLocal(R1, R2, height) {
   const segs = 48;
-  const baseGP = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs * 2 * Math.PI;
-    baseGP.push({ x: R1 * Math.cos(t), z: R1 * Math.sin(t) });
+  const squash = 0.4; // raportul rază-verticală / rază-orizontală al elipselor (ca la sferă)
+
+  function ellipsePts(R, cy) {
+    const pts = [];
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs * 2 * Math.PI;
+      pts.push({ x: R * Math.cos(t), y: cy + R * squash * Math.sin(t) });
+    }
+    return pts;
   }
-  const baseScreen = baseGP.map(p => solidProjectGP(p.x, p.z, 0));
+
+  const baseScreen = ellipsePts(R1, 0);
   const visible = [], hidden = [];
   for (let i = 0; i < segs; i++) {
-    const tmid = (i + 0.5) / segs * 2 * Math.PI;
-    (Math.sin(tmid) < 0 ? visible : hidden).push([baseScreen[i], baseScreen[i + 1]]);
+    const my = (baseScreen[i].y + baseScreen[i + 1].y) / 2;
+    (my > 0 ? visible : hidden).push([baseScreen[i], baseScreen[i + 1]]);
   }
+
   let topScreen = null, apexScreen = null;
   if (R2 > 0) {
-    const ratio = R2 / R1;
-    topScreen = baseGP.map(p => solidProjectGP(p.x * ratio, p.z * ratio, height));
-    for (let i = 0; i < segs; i++) visible.push([topScreen[i], topScreen[i + 1]]);
+    topScreen = ellipsePts(R2, -height);
+    for (let i = 0; i < segs; i++) {
+      const my = (topScreen[i].y + topScreen[i + 1].y) / 2;
+      (my > -height ? visible : hidden).push([topScreen[i], topScreen[i + 1]]);
+    }
   } else {
-    apexScreen = solidProjectGP(0, 0, height);
+    apexScreen = { x: 0, y: -height };
   }
+
   const leftIdx = Math.round(segs / 2), rightIdx = 0;
   const leftTop = topScreen ? topScreen[leftIdx] : apexScreen;
   const rightTop = topScreen ? topScreen[rightIdx] : apexScreen;
   visible.push([baseScreen[leftIdx], leftTop]);
   visible.push([baseScreen[rightIdx], rightTop]);
   // Linia diametrului (secțiunea axială): jos mereu, sus doar dacă există o față superioară plană
-  // (cilindru / trunchi de con) — formează dreptunghiul / triunghiul / trapezul isoscel cerut.
+  // (cilindru / trunchi de con) — formează dreptunghiul / triunghiul / trapezul isoscel cerut,
+  // perfect orizontal, cu arce cu adevărat simetrice (ca la sferă).
   visible.push([baseScreen[rightIdx], baseScreen[leftIdx]]);
   if (topScreen) visible.push([topScreen[rightIdx], topScreen[leftIdx]]);
   return { visible, hidden };
@@ -5083,7 +5103,7 @@ function buildSphereLocal(R) {
   const visible = [];
   for (let i = 0; i < segs; i++) visible.push([outer[i], outer[i + 1]]);
   const hidden = [];
-  const ry = R * 0.34;
+  const ry = R * 0.45;
   const eq = [];
   for (let i = 0; i <= segs; i++) {
     const t = i / segs * 2 * Math.PI;
@@ -5101,13 +5121,13 @@ const SOLID_SHAPES = {
   paralelipiped: { label: 'Paralelipiped dreptunghic', build: () => buildPolygonalSolidLocal(solidRectBase(75, 45), 90, 1) },
   prismaTriunghiulara: { label: 'Prismă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 110, 1) },
   prismaPatrulatera: { label: 'Prismă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(60, 60), 130, 1) },
-  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 100, 1) },
-  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -90), 120, 0) },
+  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 100, 1, hexProjectGP) },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 120, 0) },
   piramidaPatrulatera: { label: 'Piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(65, 65), 130, 0) },
-  piramidaHexagonala: { label: 'Piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 130, 0) },
-  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -90), 95, 0.5) },
+  piramidaHexagonala: { label: 'Piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 130, 0, hexProjectGP) },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 95, 0.5) },
   trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(70, 70), 95, 0.5) },
-  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, -90), 95, 0.5) },
+  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 95, 0.5, hexProjectGP) },
   cilindru: { label: 'Cilindru', build: () => buildRoundSolidLocal(60, 60, 110) },
   con: { label: 'Con', build: () => buildRoundSolidLocal(60, 0, 125) },
   trunchiCon: { label: 'Trunchiul de con', build: () => buildRoundSolidLocal(65, 32, 100) },
