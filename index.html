@@ -1034,6 +1034,42 @@ var _pdfWorkerSrc = (function() {
 
 <div id="solids-menu"></div>
 
+<div id="confirm-modal-backdrop">
+  <div id="confirm-modal">
+    <p id="confirm-modal-msg"></p>
+    <div class="confirm-modal-actions">
+      <button class="cancel" id="confirm-modal-cancel">Anulează</button>
+      <button class="ok" id="confirm-modal-ok">Confirmă</button>
+    </div>
+  </div>
+</div>
+<style>
+#confirm-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+}
+#confirm-modal-backdrop.show { display: flex; }
+#confirm-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 320px;
+  max-width: 88vw;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  font-family: system-ui, sans-serif;
+}
+#confirm-modal-msg { margin: 0 0 16px 0; font-size: 14.5px; color: #222; line-height: 1.4; }
+.confirm-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.confirm-modal-actions button { padding: 8px 14px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; }
+.confirm-modal-actions .ok { background: #c0392b; color: #fff; }
+.confirm-modal-actions .cancel { background: #eee; color: #333; }
+</style>
+
 <style>
 #solids-menu {
   display: none;
@@ -1630,10 +1666,10 @@ function renderImages() {
     delBtn.className = 'img-delete-btn';
     delBtn.textContent = '×';
     delBtn.title = 'Șterge imaginea';
-    delBtn.addEventListener('click', (e) => {
+    delBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (imgData.locked) { showToast('🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
-      if (confirm('Ștergi această imagine?')) {
+      if (await customConfirm('Ștergi această imagine?')) {
         const idx = page.images.findIndex(img => img.id === imgData.id);
         if (idx !== -1) {
           undoStack.push({ type: 'imageDelete', page, items: [{ index: idx, img: page.images[idx] }] });
@@ -3717,13 +3753,13 @@ function nextPage() {
   hideSelectionInfo();
 }
 
-function deletePage() {
+async function deletePage() {
   if (pages.length <= 1) {
-    if (!confirm('Aceasta este singura pagină. Ștergerea îi va goli tot conținutul (linii, imagini). Continui?')) return;
+    if (!(await customConfirm('Aceasta este singura pagină. Ștergerea îi va goli tot conținutul (linii, imagini). Continui?'))) return;
     pages[0] = { strokes: [], images: [] };
     currentPageIdx = 0;
   } else {
-    if (!confirm(`Ștergi pagina ${currentPageIdx + 1} din ${pages.length}? Acțiunea nu poate fi anulată.`)) return;
+    if (!(await customConfirm(`Ștergi pagina ${currentPageIdx + 1} din ${pages.length}? Acțiunea nu poate fi anulată.`))) return;
     pages.splice(currentPageIdx, 1);
     if (currentPageIdx >= pages.length) currentPageIdx = pages.length - 1;
   }
@@ -5046,6 +5082,24 @@ function solidRectBase(halfW, halfD) {
 function solidTrapezoidBase(w1, w2, d) {
   return [{ x: -w1 / 2, z: -d / 2 }, { x: w1 / 2, z: -d / 2 }, { x: w2 / 2, z: d / 2 }, { x: -w2 / 2, z: d / 2 }];
 }
+// Triunghi cu muchia din spate perfect orizontală (cele două vârfuri din spate au aceeași adâncime)
+// și vârful din față deplasat spre dreapta cu shiftX.
+function solidTriangleFrontShift(R, shiftX) {
+  const zBack = R * 0.5, xBack = R * Math.cos(30 * SOLID_DEG2RAD);
+  return [
+    { x: shiftX, z: -R },
+    { x: xBack, z: zBack },
+    { x: -xBack, z: zBack }
+  ];
+}
+// Hexagon cu cele două vârfuri din față ușor depărtate de centru (nudge), ca muchiile verticale
+// laterale ale feței din față să nu cadă exact peste muchiile punctate din spate.
+function solidHexagonFrontNudge(R, phaseDeg, nudge) {
+  const pts = solidRegularNGon(6, R, phaseDeg);
+  pts[0] = { x: pts[0].x * nudge, z: pts[0].z };
+  pts[1] = { x: pts[1].x * nudge, z: pts[1].z };
+  return pts;
+}
 
 // Construiește cilindrul / conul / trunchiul de con (R2 = 0 înseamnă con, cu vârf unic)
 function buildRoundSolidLocal(R1, R2, height) {
@@ -5084,10 +5138,9 @@ function buildRoundSolidLocal(R1, R2, height) {
   const rightTop = topScreen ? topScreen[rightIdx] : apexScreen;
   visible.push([baseScreen[leftIdx], leftTop]);
   visible.push([baseScreen[rightIdx], rightTop]);
-  // Linia diametrului (secțiunea axială): jos mereu, sus doar dacă există o față superioară plană
-  // (cilindru / trunchi de con) — formează dreptunghiul / triunghiul / trapezul isoscel cerut,
-  // perfect orizontal, cu arce cu adevărat simetrice (ca la sferă).
-  visible.push([baseScreen[rightIdx], baseScreen[leftIdx]]);
+  // Linia diametrului (secțiunea axială): jos, cu linie întreruptă (trece prin interiorul corpului);
+  // sus rămâne plină, dacă există o față superioară plană (cilindru / trunchi de con).
+  hidden.push([baseScreen[rightIdx], baseScreen[leftIdx]]);
   if (topScreen) visible.push([topScreen[rightIdx], topScreen[leftIdx]]);
   return { visible, hidden };
 }
@@ -5113,19 +5166,21 @@ function buildSphereLocal(R) {
     const seg = [eq[i], eq[i + 1]];
     (((eq[i].y + eq[i + 1].y) / 2) > 0 ? visible : hidden).push(seg);
   }
+  // Diametrul sferei, cu linie întreruptă (trece prin interior).
+  hidden.push([{ x: -R, y: 0 }, { x: R, y: 0 }]);
   return { visible, hidden };
 }
 
 const SOLID_SHAPES = {
   cub: { label: 'Cub', build: () => buildPolygonalSolidLocal(solidRectBase(55, 55), 110, 1) },
   paralelipiped: { label: 'Paralelipiped dreptunghic', build: () => buildPolygonalSolidLocal(solidRectBase(75, 45), 90, 1) },
-  prismaTriunghiulara: { label: 'Prismă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 110, 1) },
+  prismaTriunghiulara: { label: 'Prismă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 110, 1) },
   prismaPatrulatera: { label: 'Prismă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(60, 60), 130, 1) },
-  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 100, 1, hexProjectGP) },
-  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 120, 0) },
+  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidHexagonFrontNudge(60, 240, 1.18), 100, 1, hexProjectGP) },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 120, 0) },
   piramidaPatrulatera: { label: 'Piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(65, 65), 130, 0) },
   piramidaHexagonala: { label: 'Piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 130, 0, hexProjectGP) },
-  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidRegularNGon(3, 65, -60), 95, 0.5) },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 95, 0.5) },
   trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(70, 70), 95, 0.5) },
   trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 95, 0.5, hexProjectGP) },
   cilindru: { label: 'Cilindru', build: () => buildRoundSolidLocal(60, 60, 110) },
@@ -5207,6 +5262,30 @@ function insertSolidShape(shapeKey) {
   updateStatus();
   showToast(`✓ ${spec.label} — selectat(ă), trage pentru a muta sau scala`);
 }
+
+// Dialog de confirmare propriu — window.confirm() nativ forțează browserul să iasă din
+// modul fullscreen; acesta rămâne în pagină, deci nu întrerupe fullscreen-ul.
+const confirmModalBackdrop = document.getElementById('confirm-modal-backdrop');
+const confirmModalMsg = document.getElementById('confirm-modal-msg');
+const confirmModalOk = document.getElementById('confirm-modal-ok');
+const confirmModalCancel = document.getElementById('confirm-modal-cancel');
+let confirmModalResolve = null;
+function customConfirm(message) {
+  return new Promise(resolve => {
+    confirmModalResolve = resolve;
+    confirmModalMsg.textContent = message;
+    confirmModalBackdrop.classList.add('show');
+  });
+}
+function closeConfirmModal(result) {
+  confirmModalBackdrop.classList.remove('show');
+  if (confirmModalResolve) { confirmModalResolve(result); confirmModalResolve = null; }
+}
+confirmModalOk.onclick = () => closeConfirmModal(true);
+confirmModalCancel.onclick = () => closeConfirmModal(false);
+confirmModalBackdrop.addEventListener('mousedown', (e) => {
+  if (e.target === confirmModalBackdrop) closeConfirmModal(false);
+});
 
 const solidsMenuEl = document.getElementById('solids-menu');
 const btnSolids = document.getElementById('btn-solids');
@@ -5480,8 +5559,8 @@ document.getElementById('btn-redo').onclick = () => {
   }
 };
 
-document.getElementById('btn-clear').onclick = () => {
-  if (confirm('Ștergi complet pagina?')) {
+document.getElementById('btn-clear').onclick = async () => {
+  if (await customConfirm('Ștergi complet pagina?')) {
     const p = getCurrentPage();
     p.strokes = []; p.images = [];
     undoStack = undoStack.filter(a => a.page !== p);
