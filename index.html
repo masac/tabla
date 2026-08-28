@@ -8,13 +8,15 @@
   <script src="lib/jspdf.min.js"></script>
 <script src="lib/pdf-worker.js"></script>
 <script src="lib/pdf.min.js"></script>
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-touch-callout: none; }
     html, body { overflow: hidden; overscroll-behavior: none; touch-action: none; }
     #app { display: flex; flex-direction: column; height: 100vh; background: #ffffff; overflow: hidden; }
-    #toolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: #f5f5f9; border-bottom: 0.5px solid #c8c8cd; flex-wrap: nowrap; user-select: none; overflow-x: auto; touch-action: pan-x; -webkit-overflow-scrolling: touch; }
-    .tool-group { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+    #toolbar { display: flex; align-items: center; gap: 4px; row-gap: 6px; padding: 6px 8px; background: #f5f5f9; border-bottom: 0.5px solid #c8c8cd; flex-wrap: wrap; user-select: none; max-height: 34vh; overflow-y: auto; }
+    .tool-group { display: flex; align-items: center; gap: 3px; row-gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
     .sep { width: 0.5px; height: 20px; background: #d0d0d5; margin: 0 2px; flex-shrink: 0; }
     button.tool { background: transparent; border: 0.5px solid #b8b8bd; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #444; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: background 0.1s; white-space: nowrap; min-width: 38px; min-height: 38px; justify-content: center; touch-action: manipulation; }
     button.tool:hover { background: #e2e2e8; }
@@ -175,6 +177,9 @@
     #status-bar { height: 28px; background: #f0f0f4; border-top: 1px solid #c8c8cd; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 12px; color: #444; user-select: none; }
     #toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 18px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 100; }
     #toast.show { opacity: 1; }
+
+    #angle-readout { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: #0055cc; color: #fff; padding: 8px 18px; border-radius: 8px; font-size: 15px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 101; font-variant-numeric: tabular-nums; }
+    #angle-readout.show { opacity: 1; }
 
     
 
@@ -431,6 +436,7 @@
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
       <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
+      <button class="tool" id="btn-3d" title="Corp 3D interactiv (rotește liber, apoi inserează)"><i class="ti ti-rotate-3d"></i></button>
       <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
       </button>
@@ -482,6 +488,11 @@
       <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
       <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
       <input type="file" id="session-file-input" accept=".wbs" style="display:none">
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i> Ajutor</button>
+      <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i> Licență</button>
     </div>
     <div class="sep"></div>
     <div class="sep"></div>
@@ -595,6 +606,7 @@
 </div>
 
 <div id="toast"></div>
+<div id="angle-readout"></div>
 
 <div id="solids-menu"></div>
 
@@ -632,6 +644,78 @@
 .confirm-modal-actions button { padding: 8px 14px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; }
 .confirm-modal-actions .ok { background: #c0392b; color: #fff; }
 .confirm-modal-actions .cancel { background: #eee; color: #333; }
+</style>
+
+<div id="info-modal-backdrop">
+  <div id="info-modal">
+    <div id="info-modal-header">
+      <h3 id="info-modal-title"></h3>
+      <button id="info-modal-close" aria-label="Închide">✕</button>
+    </div>
+    <div id="info-modal-body"></div>
+  </div>
+</div>
+<style>
+#info-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+}
+#info-modal-backdrop.show { display: flex; }
+#info-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 0;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+}
+#info-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e5ea;
+  flex-shrink: 0;
+}
+#info-modal-header h3 { margin: 0; font-size: 17px; color: #111; }
+#info-modal-close {
+  border: none;
+  background: #f0f0f2;
+  color: #444;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#info-modal-close:hover { background: #e2e2e6; }
+#info-modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  color: #333;
+  line-height: 1.55;
+}
+#info-modal-body h4 { margin: 16px 0 6px; font-size: 14px; color: #111; }
+#info-modal-body h4:first-child { margin-top: 0; }
+#info-modal-body ul { margin: 4px 0 10px; padding-left: 20px; }
+#info-modal-body li { margin-bottom: 4px; }
+#info-modal-body p { margin: 6px 0; }
+#info-modal-body code { background: #f0f0f2; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+#info-modal-body table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 12.5px; }
+#info-modal-body th, #info-modal-body td { border: 1px solid #e0e0e5; padding: 5px 8px; text-align: left; }
+#info-modal-body th { background: #f7f7f9; }
 </style>
 
 <style>

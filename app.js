@@ -59,6 +59,12 @@ let resizeOriginalStroke = null;
 let resizeAnchor = { x: 0, y: 0 };
 let resizeStartDist = 1;
 let currentResizeHandle = null; // { x, y, strokeIdx }
+let isRotatingSolid = false;
+let rotateStrokeIndex = -1;
+let rotateOriginalStroke = null;
+let rotateStartX = 0;
+let rotateStartRotationY = 0;
+let currentRotateHandle = null; // { x, y, strokeIdx }
 let dragStartMouseX = 0, dragStartMouseY = 0;
 let dragStartPositions = new Map();
 let moveUndoSnapshots = new Map();
@@ -784,6 +790,29 @@ function showToast(msg, duration = 3000) {
   toastTimer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
+let angleReadoutTimer = null;
+function showAngleReadout(rotationYRadians, opts = {}) {
+  const el = document.getElementById('angle-readout');
+  if (!el) return;
+  let deg = (rotationYRadians * 180 / Math.PI) % 360;
+  if (deg < 0) deg += 360;
+  el.textContent = `Unghi rotație: ${deg.toFixed(1)}°`;
+  el.classList.add('show');
+  clearTimeout(angleReadoutTimer);
+  if (opts.persist) {
+    // stays visible while actively dragging; hidden explicitly via hideAngleReadout()
+    return;
+  }
+  const duration = opts.duration != null ? opts.duration : 4000;
+  angleReadoutTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+function hideAngleReadout(duration = 4000) {
+  const el = document.getElementById('angle-readout');
+  if (!el) return;
+  clearTimeout(angleReadoutTimer);
+  angleReadoutTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
 function initCanvas() {
   DPR = window.devicePixelRatio || 1;
   const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -808,7 +837,7 @@ function drawBg() {
 function drawStrokeOn(c, stroke) {
   if (!stroke) return;
 
-  if (stroke.type === 'solid3d') {
+  if (stroke.type === 'solid3d' || stroke.type === 'solidNet') {
     c.save();
     const baseWidth = stroke.size || 2.4;
     c.lineJoin = 'round';
@@ -1254,6 +1283,12 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
     case 'solid3d': {
       out.visible = (orig.visible || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
       out.hidden = (orig.hidden || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
+      out.baseScale = (orig.baseScale || 1) * factor;
+      break;
+    }
+    case 'solidNet': {
+      out.visible = (orig.visible || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
+      out.hidden = (orig.hidden || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
       break;
     }
     default: {
@@ -1328,7 +1363,7 @@ function getStrokeBoundingBox(stroke) {
     const pad = stroke.size || 5;
     return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
   }
-  if (stroke.type === 'solid3d') {
+  if (stroke.type === 'solid3d' || stroke.type === 'solidNet') {
     const allPts = [];
     (stroke.visible || []).forEach(seg => allPts.push(...seg));
     (stroke.hidden || []).forEach(seg => allPts.push(...seg));
@@ -1403,7 +1438,7 @@ function findStrokeAt(x, y, page) {
       const d1 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray1.x, s.ray1.y);
       const d2 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray2.x, s.ray2.y);
       if (Math.min(d1, d2) < 12) return i;
-    } else if (s.type === 'solid3d') {
+    } else if (s.type === 'solid3d' || s.type === 'solidNet') {
       const allSegs = [...(s.visible || []), ...(s.hidden || [])];
       for (const seg of allSegs) {
         const d = distToSegment(x, y, seg[0].x, seg[0].y, seg[1].x, seg[1].y);
@@ -1491,6 +1526,46 @@ function drawSelectionHighlights() {
       selCtx.restore();
     }
   }
+
+  // Mâner de rotire — doar pentru corpuri 3D poligonale/rotunde (nu și pentru sferă, care arată
+  // la fel din orice unghi), poziționat în colțul opus mânerului de scalare.
+  currentRotateHandle = null;
+  if (selectedStrokes.size === 1) {
+    const idx = [...selectedStrokes][0];
+    const stroke = page.strokes[idx];
+    if (stroke && stroke.type === 'solid3d') {
+      const spec = SOLID_SHAPES[stroke.shape];
+      if (spec && !spec.noRotate) {
+        const bbox = getStrokeBoundingBox(stroke);
+        const rx = bbox.x - 2;
+        const ry = bbox.y - 2;
+        currentRotateHandle = { x: rx, y: ry, strokeIdx: idx };
+        selCtx.save();
+        selCtx.fillStyle = '#2d7dd2';
+        selCtx.strokeStyle = '#ffffff';
+        selCtx.lineWidth = 3;
+        selCtx.beginPath();
+        selCtx.arc(rx, ry, 13, 0, Math.PI * 2);
+        selCtx.fill();
+        selCtx.stroke();
+        // săgeată circulară simplă ca indiciu vizual de rotire
+        selCtx.strokeStyle = '#ffffff';
+        selCtx.lineWidth = 1.8;
+        selCtx.beginPath();
+        selCtx.arc(rx, ry, 6, -0.3 * Math.PI, 1.2 * Math.PI);
+        selCtx.stroke();
+        const ah = 1.2 * Math.PI;
+        const ahx = rx + 6 * Math.cos(ah), ahy = ry + 6 * Math.sin(ah);
+        selCtx.beginPath();
+        selCtx.moveTo(ahx, ahy);
+        selCtx.lineTo(ahx - 4, ahy - 2);
+        selCtx.moveTo(ahx, ahy);
+        selCtx.lineTo(ahx - 1, ahy + 4);
+        selCtx.stroke();
+        selCtx.restore();
+      }
+    }
+  }
 }
 
 function toggleSelection(idx, shiftKey) {
@@ -1574,7 +1649,7 @@ function snapshotStrokePosition(stroke) {
     ray2: { x: stroke.ray2.x, y: stroke.ray2.y }
   };
   if (stroke.points) return { points: stroke.points.map(p => ({ x: p.x, y: p.y })) };
-  if (stroke.type === 'solid3d') {
+  if (stroke.type === 'solid3d' || stroke.type === 'solidNet') {
     return {
       visible: (stroke.visible || []).map(seg => seg.map(p => ({ x: p.x, y: p.y }))),
       hidden: (stroke.hidden || []).map(seg => seg.map(p => ({ x: p.x, y: p.y })))
@@ -1612,7 +1687,7 @@ function restoreStrokePosition(stroke, snap) {
     stroke.vertex = { x: snap.vertex.x, y: snap.vertex.y };
     stroke.ray1 = { x: snap.ray1.x, y: snap.ray1.y };
     stroke.ray2 = { x: snap.ray2.x, y: snap.ray2.y };
-  } else if (stroke.type === 'solid3d' && snap.visible) {
+  } else if ((stroke.type === 'solid3d' || stroke.type === 'solidNet') && snap.visible) {
     stroke.visible = snap.visible.map(seg => seg.map(p => ({ x: p.x, y: p.y })));
     stroke.hidden = (snap.hidden || []).map(seg => seg.map(p => ({ x: p.x, y: p.y })));
   } else if (stroke.type === 'function' && snap.segments) {
@@ -1680,6 +1755,25 @@ function handlePointerDown(e) {
     const p = pos(e);
     const page = getCurrentPage();
 
+    if (currentRotateHandle && selectedStrokes.has(currentRotateHandle.strokeIdx)) {
+      const rhx = p.x - currentRotateHandle.x, rhy = p.y - currentRotateHandle.y;
+      const rotHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      if (Math.sqrt(rhx * rhx + rhy * rhy) < rotHitRadius && page) {
+        const stroke = page.strokes[currentRotateHandle.strokeIdx];
+        if (stroke) {
+          isRotatingSolid = true;
+          rotateStrokeIndex = currentRotateHandle.strokeIdx;
+          rotateOriginalStroke = JSON.parse(JSON.stringify(stroke));
+          rotateStartX = p.x;
+          rotateStartRotationY = stroke.rotationY || 0;
+          drawC.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          showToast('↻ Trage stânga/dreapta pentru a roti');
+          return;
+        }
+      }
+    }
+
     if (currentResizeHandle && selectedStrokes.has(currentResizeHandle.strokeIdx)) {
       const dhx = p.x - currentResizeHandle.x, dhy = p.y - currentResizeHandle.y;
       const hitRadius = e.pointerType === 'touch' ? 30 : 16;
@@ -1746,7 +1840,7 @@ function handlePointerDown(e) {
               ray1: { x: s.ray1.x, y: s.ray1.y },
               ray2: { x: s.ray2.x, y: s.ray2.y }
             });
-          } else if (s.type === 'solid3d') {
+          } else if (s.type === 'solid3d' || s.type === 'solidNet') {
             dragStartPositions.set(si, {
               visible: (s.visible || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y }))),
               hidden: (s.hidden || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y })))
@@ -1877,6 +1971,22 @@ function handlePointerMove(e) {
     drawC.style.cursor = (gd < GUIDE_SNAP_DIST) ? GEO_PEN_CURSOR : '';
   }
 
+  if (tool === 'select' && isRotatingSolid) {
+    const page = getCurrentPage();
+    if (page && rotateOriginalStroke) {
+      const stroke = page.strokes[rotateStrokeIndex];
+      if (stroke) {
+        const dx = p.x - rotateStartX;
+        const newRotationY = rotateStartRotationY + dx * 0.012;
+        rotateSolid3D(stroke, newRotationY);
+        showAngleReadout(newRotationY, { persist: true });
+        redrawStrokes();
+        drawSelectionHighlights();
+      }
+    }
+    return;
+  }
+
   if (tool === 'select' && isResizingStroke) {
     const page = getCurrentPage();
     if (page && resizeOriginalStroke) {
@@ -1986,7 +2096,7 @@ function handlePointerMove(e) {
         s.ray1.y = start.ray1.y + dy;
         s.ray2.x = start.ray2.x + dx;
         s.ray2.y = start.ray2.y + dy;
-      } else if (s.type === 'solid3d' && start.visible) {
+      } else if ((s.type === 'solid3d' || s.type === 'solidNet') && start.visible) {
         s.visible = start.visible.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
         s.hidden = (start.hidden || []).map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
       } else if (s.type === 'function' && start.segments) {
@@ -2136,6 +2246,27 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp(e) {
+
+  if (tool === 'select' && isRotatingSolid) {
+    isRotatingSolid = false;
+    const page = getCurrentPage();
+    const stroke = page ? page.strokes[rotateStrokeIndex] : null;
+    if (page && stroke && rotateOriginalStroke) {
+      const after = JSON.parse(JSON.stringify(stroke));
+      if (JSON.stringify(after) !== JSON.stringify(rotateOriginalStroke)) {
+        undoStack.push({ type: 'resizeStroke', page, stroke, before: rotateOriginalStroke, after });
+        redoStack = [];
+        let deg = ((stroke.rotationY || 0) * 180 / Math.PI) % 360;
+        if (deg < 0) deg += 360;
+        showToast(`✓ Rotit (${deg.toFixed(1)}°)`);
+      }
+    }
+    hideAngleReadout(5000);
+    rotateOriginalStroke = null;
+    rotateStrokeIndex = -1;
+    updateStatus();
+    return;
+  }
 
   if (tool === 'select' && isResizingStroke) {
     isResizingStroke = false;
@@ -2493,6 +2624,10 @@ function setTool(t) {
   isResizingStroke = false;
   resizeOriginalStroke = null;
   resizeStrokeIndex = -1;
+  isRotatingSolid = false;
+  rotateOriginalStroke = null;
+  rotateStrokeIndex = -1;
+  hideAngleReadout(0);
   dragStartPositions.clear();
   moveUndoSnapshots.clear();
   overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
@@ -3822,47 +3957,62 @@ function solidProjectGP(X, Z, Y) {
   };
 }
 
-// Proiecție fără forfecare (doar o "turtire" pe verticală a adâncimii, fără deplasare pe orizontală) —
-// folosită pentru hexagon, ca să rămână aproape regulat (laturi aproape egale) și fața din față
-// să fie un dreptunghi / triunghi isoscel / trapez isoscel curat, la fel ca la corpurile rotunde.
-const HEX_SQUASH = 0.85;
+// Proiecție cu forfecare (aceeași convenție cavalieră ca la celelalte corpuri) — folosită și
+// pentru hexagon. Fără forfecare, la anumite rotații un vârf din spate (ascuns) putea ajunge mai
+// în afară pe orizontală decât conturul vizibil din față, făcând ca o muchie punctată să iasă
+// vizibil în afara conturului plin — o "umflătură" clar greșită. Forfecarea ține vârfurile din
+// spate mai "trase înăuntru" pe măsură ce corpul se rotește, la fel ca la cub/prismă/piramidă.
 function hexProjectGP(X, Z, Y) {
-  return { x: X, y: -Y - Z * HEX_SQUASH };
+  return solidProjectGP(X, Z, Y);
 }
 
-// Determină, pentru fiecare muchie a unui poligon (dat prin puncte {x,z}), dacă fața laterală
-// corespunzătoare e vizibilă (orientată spre privitor) sau ascunsă (spre spate).
-function solidPolygonVisibility(pts) {
+// Comutator global: dacă e true, muchiile "din spate" ale corpurilor 3D se desenează cu linie
+// întreruptă (convenția clasică de manual, implicit); dacă e false, toate muchiile sunt continue.
+let SOLID_SHOW_HIDDEN_LINES = true;
+
+// Determină, pentru fiecare muchie a bazei unui corp (prismă/trunchi/piramidă), dacă fața
+// laterală corespunzătoare e vizibilă (spre privitor) sau ascunsă, în proiecția oblică
+// (cavalieră) folosită de toate corpurile. Calculul e geometric EXACT în 3D: pentru fiecare
+// față laterală (patrulater Vi,Vj,Tj,Ti — sau triunghi Vi,Vj,Apex la piramide, unde topScale=0)
+// se calculează normala reală (produs vectorial pe muchiile feței, ținând cont de înălțime și
+// de topScale — cât de mult se îngustează partea de sus față de bază) și se compară cu direcția
+// reală de proiecție a desenului oblic (unghiul SOLID_OBLIQUE_ANGLE, factorul SOLID_OBLIQUE_K).
+// Nu se mai folosește nicio aproximare bazată doar pe conturul bazei (de sus) și niciun
+// histerezis artificial — fiecare muchie își schimbă starea exact la unghiul la care fața ei
+// devine cu adevărat vizibilă/ascunsă, ceea ce e corect indiferent de formă, înălțime sau cât
+// de asimetrică e baza (ex. o piramidă cu vârful din față deplasat lateral).
+function solidPolygonVisibility(pts, height, topScale) {
   const n = pts.length;
   const cx = pts.reduce((s, p) => s + p.x, 0) / n;
   const cz = pts.reduce((s, p) => s + p.z, 0) / n;
+  const s = (topScale == null ? 0 : topScale) - 1; // 0 -> -1 (piramidă), 1 -> 0 (prismă)
+  const a = SOLID_OBLIQUE_K * Math.cos(SOLID_OBLIQUE_ANGLE);
+  const b = SOLID_OBLIQUE_K * Math.sin(SOLID_OBLIQUE_ANGLE);
   const vis = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    let nx = pts[j].z - pts[i].z, nz = -(pts[j].x - pts[i].x);
+    const dx = pts[j].x - pts[i].x, dz = pts[j].z - pts[i].z;
+    // normala orizontală "spre exterior" a bazei, pt orientarea corectă a normalei feței 3D
+    let nxg = dz, nzg = -dx;
     const mx = (pts[i].x + pts[j].x) / 2, mz = (pts[i].z + pts[j].z) / 2;
-    if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
-    // O muchie e vizibilă dacă peretele ei "privește" spre spectator (nz < 0, adică spre față).
-    // Doar când peretele e exact perpendicular pe adâncime (nz ≈ 0, ca la o cutie axă-aliniată,
-    // unde pereții stânga/dreapta au normala pur orizontală) se folosește nx ca rezolvare:
-    // convenția standard arată fața dreaptă, nu pe cea stângă.
-    const EPS = 1e-6;
-    let visible;
-    if (nz < -EPS) visible = true;
-    else if (nz > EPS) visible = false;
-    else visible = nx > 0;
-    vis.push(visible);
+    if (nxg * (mx - cx) + nzg * (mz - cz) < 0) { nxg = -nxg; nzg = -nzg; }
+    const ex = s * (pts[i].x - cx), ez = s * (pts[i].z - cz);
+    let Nx = -dz * height, Ny = dz * ex - dx * ez, Nz = dx * height;
+    if (Nx * nxg + Nz * nzg < 0) { Nx = -Nx; Ny = -Ny; Nz = -Nz; }
+    const NdotD = Nx * (-a) + Ny * (-b) + Nz;
+    vis.push(NdotD < -1e-9);
   }
   return vis;
 }
 
-// Construiește muchiile (vizibile/ascunse) pentru o prismă, piramidă sau trunchi de piramidă,
-// pornind de la un poligon de bază (basePts), o înălțime și un factor de scalare pentru fața de sus
-// (1 = prismă, 0 = piramidă/vârf unic, între 0 și 1 = trunchi de piramidă).
-function buildPolygonalSolidLocal(basePts, height, topScale, projectFn) {
+// Construiește muchiile pentru o prismă, piramidă sau trunchi de piramidă, pornind de la un
+// poligon de bază (basePts), o înălțime și un factor de scalare pentru fața de sus (1 = prismă,
+// 0 = piramidă/vârf unic, între 0 și 1 = trunchi de piramidă). Implicit toate muchiile sunt
+// continue; dacă SOLID_SHOW_HIDDEN_LINES e activ, muchiile din spate devin întrerupte.
+function buildPolygonalSolidLocal(basePts, height, topScale, projectFn, rot, hysteresisDeg) {
   const proj = projectFn || solidProjectGP;
   const n = basePts.length;
-  const edgeVis = solidPolygonVisibility(basePts);
+  const edgeVis = SOLID_SHOW_HIDDEN_LINES ? solidPolygonVisibility(basePts, height, topScale) : null;
   const cx = basePts.reduce((s, p) => s + p.x, 0) / n;
   const cz = basePts.reduce((s, p) => s + p.z, 0) / n;
   const baseScreen = basePts.map(p => proj(p.x, p.z, 0));
@@ -3875,7 +4025,8 @@ function buildPolygonalSolidLocal(basePts, height, topScale, projectFn) {
   const visible = [], hidden = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    (edgeVis[i] ? visible : hidden).push([baseScreen[i], baseScreen[j]]);
+    const isVis = !edgeVis || edgeVis[i];
+    (isVis ? visible : hidden).push([baseScreen[i], baseScreen[j]]);
   }
   if (topScreen) {
     for (let i = 0; i < n; i++) {
@@ -3884,9 +4035,9 @@ function buildPolygonalSolidLocal(basePts, height, topScale, projectFn) {
     }
   }
   for (let i = 0; i < n; i++) {
-    const vis = edgeVis[(i - 1 + n) % n] || edgeVis[i];
     const p2 = apexScreen || topScreen[i];
-    (vis ? visible : hidden).push([baseScreen[i], p2]);
+    const isVis = !edgeVis || edgeVis[(i - 1 + n) % n] || edgeVis[i];
+    (isVis ? visible : hidden).push([baseScreen[i], p2]);
   }
   return { visible, hidden };
 }
@@ -3925,7 +4076,8 @@ function solidHexagonFrontNudge(R, phaseDeg, nudge) {
 }
 
 // Construiește cilindrul / conul / trunchiul de con (R2 = 0 înseamnă con, cu vârf unic)
-function buildRoundSolidLocal(R1, R2, height) {
+function buildRoundSolidLocal(R1, R2, height, rot) {
+  rot = rot || 0;
   const segs = 48;
   const squash = 0.4; // raportul rază-verticală / rază-orizontală al elipselor (ca la sferă)
 
@@ -3956,7 +4108,13 @@ function buildRoundSolidLocal(R1, R2, height) {
     apexScreen = { x: 0, y: -height };
   }
 
-  const leftIdx = Math.round(segs / 2), rightIdx = 0;
+  // Conturul (elipsele) rămâne fix — un cilindru/con arată la fel din orice unghi de rotație în
+  // jurul axei sale. Doar punctele folosite pentru liniile tangente/diametru "se rotesc" pe acest
+  // contur fix, dând senzația vizuală de rotire a "cusăturii" fără să deformeze silueta reală.
+  let idxOffset = Math.round(rot / (2 * Math.PI) * segs);
+  idxOffset = ((idxOffset % segs) + segs) % segs;
+  const leftIdx = (Math.round(segs / 2) + idxOffset) % segs;
+  const rightIdx = idxOffset % segs;
   const leftTop = topScreen ? topScreen[leftIdx] : apexScreen;
   const rightTop = topScreen ? topScreen[rightIdx] : apexScreen;
   visible.push([baseScreen[leftIdx], leftTop]);
@@ -3968,7 +4126,8 @@ function buildRoundSolidLocal(R1, R2, height) {
   return { visible, hidden };
 }
 
-// Construiește sfera: un cerc exterior (mereu vizibil) + o elipsă "ecuator" (parțial ascunsă)
+// Construiește sfera: un cerc exterior (mereu vizibil) + o elipsă "ecuator" (parțial ascunsă).
+// Sfera arată identic din orice unghi de vizualizare, deci nu primește parametru de rotație.
 function buildSphereLocal(R) {
   const segs = 48;
   const outer = [];
@@ -3994,23 +4153,33 @@ function buildSphereLocal(R) {
   return { visible, hidden };
 }
 
+// Rotește punctele bazei (plan orizontal x,z) în jurul axei verticale — folosit pentru rotirea
+// interactivă a corpurilor cu mâna/mouse-ul.
+function rotateGroundPts(pts, angle) {
+  if (!angle) return pts;
+  const c = Math.cos(angle), s = Math.sin(angle);
+  return pts.map(p => ({ x: p.x * c - p.z * s, z: p.x * s + p.z * c }));
+}
+
 const SOLID_SHAPES = {
-  cub: { label: 'Cub', build: () => buildPolygonalSolidLocal(solidRectBase(55, 55), 110, 1) },
-  paralelipiped: { label: 'Paralelipiped dreptunghic', build: () => buildPolygonalSolidLocal(solidRectBase(75, 45), 90, 1) },
-  prismaTriunghiulara: { label: 'Prismă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 110, 1) },
-  prismaPatrulatera: { label: 'Prismă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(60, 60), 130, 1) },
-  prismaHexagonala: { label: 'Prismă hexagonală', build: () => buildPolygonalSolidLocal(solidHexagonFrontNudge(60, 240, 1.18), 100, 1, hexProjectGP) },
-  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 120, 0) },
-  piramidaPatrulatera: { label: 'Piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(65, 65), 130, 0) },
-  piramidaHexagonala: { label: 'Piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 130, 0, hexProjectGP) },
-  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', build: () => buildPolygonalSolidLocal(solidTriangleFrontShift(65, 28), 95, 0.5) },
-  trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', build: () => buildPolygonalSolidLocal(solidRectBase(70, 70), 95, 0.5) },
-  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', build: () => buildPolygonalSolidLocal(solidRegularNGon(6, 60, 240), 95, 0.5, hexProjectGP) },
-  cilindru: { label: 'Cilindru', build: () => buildRoundSolidLocal(60, 60, 110) },
-  con: { label: 'Con', build: () => buildRoundSolidLocal(60, 0, 125) },
-  trunchiCon: { label: 'Trunchiul de con', build: () => buildRoundSolidLocal(65, 32, 100) },
-  sfera: { label: 'Sferă', build: () => buildSphereLocal(65) }
+  cub: { label: 'Cub', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(55, 55), rot), 110, 1, undefined, rot) },
+  paralelipiped: { label: 'Paralelipiped dreptunghic', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(75, 45), rot), 90, 1, undefined, rot) },
+  prismaTriunghiulara: { label: 'Prismă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 110, 1, undefined, rot) },
+  prismaPatrulatera: { label: 'Prismă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(60, 60), rot), 130, 1, undefined, rot) },
+  prismaHexagonala: { label: 'Prismă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidHexagonFrontNudge(75, 240, 1.18), rot), 100, 1, hexProjectGP, rot) },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 120, 0, undefined, rot) },
+  piramidaPatrulatera: { label: 'Piramidă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(65, 65), rot), 130, 0, undefined, rot) },
+  piramidaHexagonala: { label: 'Piramidă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 130, 0, hexProjectGP, rot) },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 95, 0.5, undefined, rot) },
+  trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(70, 70), rot), 95, 0.5, undefined, rot) },
+  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 95, 0.5, hexProjectGP, rot) },
+  cilindru: { label: 'Cilindru', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 60, 110, rot) },
+  con: { label: 'Con', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 0, 125, rot) },
+  trunchiCon: { label: 'Trunchiul de con', kind: 'round', build: (rot) => buildRoundSolidLocal(65, 32, 100, rot) },
+  sfera: { label: 'Sferă', kind: 'sphere', noRotate: true, build: () => buildSphereLocal(65) }
 };
+
+
 
 // Randează un mic SVG-pictogramă pentru o formă, refolosind exact aceeași geometrie ca desenul real.
 function buildShapeIconSVG(shapeKey, size) {
@@ -4050,7 +4219,10 @@ function insertSolidShape(shapeKey) {
   const page = getCurrentPage();
   if (!page) return;
 
-  const built = spec.build();
+  // Prisma hexagonală arată mai bine rotită ușor spre dreapta chiar de la afișarea inițială
+  // (nu exact la 0°), în loc să pornească nerotită ca restul corpurilor.
+  const initialRotationY = shapeKey === 'prismaHexagonala' ? (12 * Math.PI / 180) : 0;
+  const built = spec.build(initialRotationY);
   const allPts = [];
   built.visible.forEach(s => allPts.push(...s));
   built.hidden.forEach(s => allPts.push(...s));
@@ -4071,6 +4243,826 @@ function insertSolidShape(shapeKey) {
     shape: shapeKey,
     color: color,
     size: 2.4,
+    rotationY: initialRotationY,
+    baseScale: 1,
+    visible: built.visible.map(shift),
+    hidden: built.hidden.map(shift)
+  };
+
+  pushStroke(page, stroke);
+  setTool('select');
+  selectedStrokes = new Set([page.strokes.length - 1]);
+  selectedImages.clear();
+  updateImageSelection();
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast(`✓ ${spec.label} — selectat(ă), trage pentru a muta sau scala`);
+}
+
+// Reconstruiește un corp 3D la un nou unghi de rotație, păstrând poziția curentă pe ecran
+// (centrul conturului) și scara curentă (baseScale) — folosit la rotirea interactivă cu mâna/mouse.
+function rotateSolid3D(stroke, newRotationY) {
+  const spec = SOLID_SHAPES[stroke.shape];
+  if (!spec) return false;
+  if (spec.noRotate) return false;
+
+  const allPts = [];
+  (stroke.visible || []).forEach(seg => allPts.push(...seg));
+  (stroke.hidden || []).forEach(seg => allPts.push(...seg));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allPts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const curCenterX = (minX + maxX) / 2, curCenterY = (minY + maxY) / 2;
+
+  const built = spec.build(newRotationY);
+  const freshPts = [];
+  built.visible.forEach(seg => freshPts.push(...seg));
+  built.hidden.forEach(seg => freshPts.push(...seg));
+  let fMinX = Infinity, fMinY = Infinity, fMaxX = -Infinity, fMaxY = -Infinity;
+  freshPts.forEach(p => {
+    if (p.x < fMinX) fMinX = p.x;
+    if (p.y < fMinY) fMinY = p.y;
+    if (p.x > fMaxX) fMaxX = p.x;
+    if (p.y > fMaxY) fMaxY = p.y;
+  });
+  const freshCenterX = (fMinX + fMaxX) / 2, freshCenterY = (fMinY + fMaxY) / 2;
+  const scale = stroke.baseScale || 1;
+  const place = p => ({ x: (p.x - freshCenterX) * scale + curCenterX, y: (p.y - freshCenterY) * scale + curCenterY });
+
+  stroke.visible = built.visible.map(seg => seg.map(place));
+  stroke.hidden = built.hidden.map(seg => seg.map(place));
+  stroke.rotationY = newRotationY;
+  return true;
+}
+
+// ================================================================
+// DESFĂȘURAREA ÎN PLAN A CORPURILOR GEOMETRICE
+// ================================================================
+
+// Dintr-o listă de poligoane plane (fiecare = listă de puncte {x,y}), extrage muchiile:
+// cele care apar în DOUĂ poligoane (muchie comună = linie de îndoit) devin punctate;
+// cele care apar într-un singur poligon (contur exterior, de tăiat) rămân pline.
+function netEdgesFromPolygons(polys) {
+  const edgeMap = new Map();
+  const r = v => Math.round(v * 100) / 100;
+  function key(p1, p2) {
+    const a = `${r(p1.x)},${r(p1.y)}`, b = `${r(p2.x)},${r(p2.y)}`;
+    return a < b ? a + '|' + b : b + '|' + a;
+  }
+  polys.forEach(poly => {
+    const n = poly.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = poly[i], p2 = poly[(i + 1) % n];
+      const k = key(p1, p2);
+      if (!edgeMap.has(k)) edgeMap.set(k, { p1, p2, count: 0 });
+      edgeMap.get(k).count++;
+    }
+  });
+  const visible = [], hidden = [];
+  edgeMap.forEach(e => (e.count > 1 ? hidden : visible).push([e.p1, e.p2]));
+  return { visible, hidden };
+}
+
+function netNgonFlat(n, R) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * 2 * Math.PI / n - Math.PI / 2;
+    pts.push({ x: R * Math.cos(a), y: R * Math.sin(a) });
+  }
+  return pts;
+}
+
+// Un n-gon regulat cu o muchie fixată exact la (x0,y0)-(x0+s,y0), extinzându-se mai sus sau mai jos.
+function netNgonEdgeAttached(n, s, x0, y0, below) {
+  const R = s / (2 * Math.sin(Math.PI / n));
+  const apo = s / (2 * Math.tan(Math.PI / n));
+  const midX = x0 + s / 2;
+  const cy = below ? y0 + apo : y0 - apo;
+  const cx = midX;
+  const ang0 = Math.atan2(y0 - cy, x0 - cx);
+  const step = 2 * Math.PI / n;
+  const testX = cx + R * Math.cos(ang0 + step), testY = cy + R * Math.sin(ang0 + step);
+  const sign = (Math.abs(testX - (x0 + s)) < 0.05 && Math.abs(testY - y0) < 0.05) ? 1 : -1;
+  const pts = [];
+  for (let k = 0; k < n; k++) {
+    const a = ang0 + sign * step * k;
+    pts.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+  }
+  return pts;
+}
+
+// Ca mai sus, dar muchia poate avea orice orientare (nu doar orizontală) — folosit pt a
+// atașa un n-gon la muchia unei alte fețe oriunde ar fi ea în planul desfășurării.
+function netNgonAttachedToEdge(n, p1, p2, below) {
+  const s = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const R = s / (2 * Math.sin(Math.PI / n));
+  const apo = s / (2 * Math.tan(Math.PI / n));
+  const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
+  const dx = (p2.x - p1.x) / s, dy = (p2.y - p1.y) / s;
+  const perpX = -dy, perpY = dx;
+  const sign = below ? -1 : 1;
+  const cx = midX + perpX * apo * sign, cy = midY + perpY * apo * sign;
+  const ang0 = Math.atan2(p1.y - cy, p1.x - cx);
+  const step = 2 * Math.PI / n;
+  const testX = cx + R * Math.cos(ang0 + step), testY = cy + R * Math.sin(ang0 + step);
+  const dirSign = (Math.hypot(testX - p2.x, testY - p2.y) < 0.05) ? 1 : -1;
+  const pts = [];
+  for (let k = 0; k < n; k++) {
+    const a = ang0 + dirSign * step * k;
+    pts.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+  }
+  return pts;
+}
+
+// Cub / paralelipiped / prismă patrulateră: desfășurare "cruce" (6 dreptunghiuri).
+function netBoxFaces(W, D, H) {
+  const rect = (x0, y0, x1, y1) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+  return [
+    rect(0, 0, W, H),
+    rect(-D, 0, 0, H),
+    rect(W, 0, W + D, H),
+    rect(W + D, 0, 2 * W + D, H),
+    rect(0, -D, W, 0),
+    rect(0, H, W, H + D)
+  ];
+}
+
+// Prismă (n-gon): fâșie de n dreptunghiuri laterale + cele două baze atașate.
+function netPrismFaces(n, R, H) {
+  const s = 2 * R * Math.sin(Math.PI / n);
+  const faces = [];
+  let x = 0;
+  for (let i = 0; i < n; i++) {
+    faces.push([{ x: x, y: 0 }, { x: x + s, y: 0 }, { x: x + s, y: H }, { x: x, y: H }]);
+    x += s;
+  }
+  faces.push(netNgonEdgeAttached(n, s, 0, 0, false));
+  faces.push(netNgonEdgeAttached(n, s, 0, H, true));
+  return { faces, s };
+}
+
+// Piramidă (n-gon): baza + n triunghiuri isoscele "înflorite" în jurul ei.
+function netPyramidFaces(n, R, height) {
+  const base = netNgonFlat(n, R);
+  const apoBase = R * Math.cos(Math.PI / n);
+  const slant = Math.sqrt(height * height + apoBase * apoBase);
+  const faces = [base];
+  for (let i = 0; i < n; i++) {
+    const p1 = base[i], p2 = base[(i + 1) % n];
+    const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
+    const dlen = Math.hypot(midX, midY) || 1;
+    const dx = midX / dlen, dy = midY / dlen;
+    const apex = { x: midX + dx * slant, y: midY + dy * slant };
+    faces.push([p1, p2, apex]);
+  }
+  return faces;
+}
+
+// Trunchi de piramidă (n-gon): baza mare + n trapeze isoscele în jur + vârful mic
+// atașat la muchia superioară a primului trapez (participă la împăturire, ca un net real).
+function netFrustumFaces(n, R1, R2, height) {
+  const base = netNgonFlat(n, R1);
+  const apoB = R1 * Math.cos(Math.PI / n), apoT = R2 * Math.cos(Math.PI / n);
+  const slant = Math.sqrt(height * height + (apoB - apoT) * (apoB - apoT));
+  const s2 = 2 * R2 * Math.sin(Math.PI / n);
+  const faces = [base];
+  let firstTA = null, firstTB = null;
+  for (let i = 0; i < n; i++) {
+    const p1 = base[i], p2 = base[(i + 1) % n];
+    const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
+    const dlen = Math.hypot(midX, midY) || 1;
+    const dx = midX / dlen, dy = midY / dlen;
+    const topMidX = midX + dx * slant, topMidY = midY + dy * slant;
+    const perpX = -dy, perpY = dx;
+    const t1 = { x: topMidX - perpX * s2 / 2, y: topMidY - perpY * s2 / 2 };
+    const t2 = { x: topMidX + perpX * s2 / 2, y: topMidY + perpY * s2 / 2 };
+    const dT1P1 = Math.hypot(t1.x - p1.x, t1.y - p1.y), dT1P2 = Math.hypot(t1.x - p2.x, t1.y - p2.y);
+    const [tA, tB] = dT1P1 < dT1P2 ? [t1, t2] : [t2, t1];
+    faces.push([p1, p2, tB, tA]);
+    if (i === 0) { firstTA = tA; firstTB = tB; }
+  }
+  const topFace = netNgonAttachedToEdge(n, firstTB, firstTA, false);
+  faces.push(topFace);
+  return faces;
+}
+
+function buildNetFromFaces(faces) {
+  const built = netEdgesFromPolygons(faces);
+  return { visible: built.visible, hidden: built.hidden, faces };
+}
+
+// ====================================================================
+// ANIMAȚIA DE ÎMPĂTURIRE / DESPĂTURIRE A DESFĂȘURĂRILOR
+// (arată procesul, nu doar rezultatul final plat)
+// ====================================================================
+
+// ---- vectori & rotații 3D minimale ----
+function netVnorm(a) { const l = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) || 1; return { x: a.x / l, y: a.y / l, z: a.z / l }; }
+function netMatVec(R, p) {
+  return {
+    x: R[0] * p.x + R[1] * p.y + R[2] * p.z,
+    y: R[3] * p.x + R[4] * p.y + R[5] * p.z,
+    z: R[6] * p.x + R[7] * p.y + R[8] * p.z
+  };
+}
+function netMatMul(A, B) {
+  const R = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0;
+    for (let k = 0; k < 3; k++) s += A[i * 3 + k] * B[k * 3 + j];
+    R[i * 3 + j] = s;
+  }
+  return R;
+}
+const NET_MAT_ID = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const NET_RT_ID = { R: NET_MAT_ID, T: { x: 0, y: 0, z: 0 } };
+
+// rotație Rodrigues în jurul unei axe (versor) ce trece prin origine
+function netRodrigues(axis, angle) {
+  const { x: ux, y: uy, z: uz } = axis;
+  const c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
+  return [
+    t * ux * ux + c, t * ux * uy - s * uz, t * ux * uz + s * uy,
+    t * ux * uy + s * uz, t * uy * uy + c, t * uy * uz - s * ux,
+    t * ux * uz - s * uy, t * uy * uz + s * ux, t * uz * uz + c
+  ];
+}
+// rotație în jurul dreptei p1->p2, cu unghi dat — returnează transformarea rigidă {R,T}
+function netRotationAboutLine(p1, p2, angle) {
+  const axis = netVnorm({ x: p2.x - p1.x, y: p2.y - p1.y, z: 0 });
+  const R = netRodrigues(axis, angle);
+  const Rp1 = netMatVec(R, { x: p1.x, y: p1.y, z: 0 });
+  return { R, T: { x: p1.x - Rp1.x, y: p1.y - Rp1.y, z: -Rp1.z } };
+}
+function netComposeRT(outer, inner) {
+  const R = netMatMul(outer.R, inner.R);
+  const Ti = netMatVec(outer.R, inner.T);
+  return { R, T: { x: Ti.x + outer.T.x, y: Ti.y + outer.T.y, z: Ti.z + outer.T.z } };
+}
+function netApplyRT(tr, p) {
+  const rp = netMatVec(tr.R, p);
+  return { x: rp.x + tr.T.x, y: rp.y + tr.T.y, z: rp.z + tr.T.z };
+}
+// proiecție pseudo-3D: privim de sus, ușor înclinat (tilt), pt un efect vizual de adâncime
+function netProject(p3, tilt) {
+  return { x: p3.x, y: p3.y * Math.cos(tilt) - p3.z * Math.sin(tilt) };
+}
+// proiecție 3D->2D pt animație: la t=1 e IDENTICĂ cu proiecția oblică folosită de corpurile 3D
+// reale (solidProjectGP), la t=0 devine o proiecție plată de sus (exact desfășurarea statică) —
+// asigură că forma de start a animației arată exact ca desenul din butonul "Corpuri geometrice".
+function netProjectAssembled(p3, t) {
+  const Kc = SOLID_OBLIQUE_K * Math.cos(SOLID_OBLIQUE_ANGLE);
+  const Ks = SOLID_OBLIQUE_K * Math.sin(SOLID_OBLIQUE_ANGLE);
+  return {
+    x: p3.x + t * Kc * p3.y,
+    y: (1 - t) * p3.y - t * p3.z - t * Ks * p3.y
+  };
+}
+function netEase(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+
+// unghiul diedru corect de îndoire pt fiecare tip de desfășurare (nu un 90° arbitrar):
+// - box: fețele laterale sunt mereu perpendiculare pe bază -> 90°
+// - prism: fâșia laterală se împăturește cu unghiul exterior al poligonului (360°/n) între
+//   fețele laterale consecutive, iar capacele se ridică perpendicular (90°) pe fâșie
+// - piramidă: unghiul la care trebuie ridicată fața triunghiulară ca vârful să ajungă la
+//   înălțimea reală = arctan(înălțime / apotema bazei)
+// - trunchi de piramidă: analog, cu diferența de apoteme în loc de apotema simplă
+function netHingeMaxAngle(netKind, p, childFaceIdx) {
+  if (netKind === 'prism') {
+    return childFaceIdx < p.n ? (2 * Math.PI / p.n) : Math.PI / 2;
+  }
+  if (netKind === 'pyramid') {
+    const apo = p.R * Math.cos(Math.PI / p.n);
+    return Math.PI - Math.atan2(p.height, apo);
+  }
+  if (netKind === 'frustum') {
+    const apoB = p.R1 * Math.cos(Math.PI / p.n), apoT = p.R2 * Math.cos(Math.PI / p.n);
+    const delta1 = Math.PI - Math.atan2(p.height, Math.abs(apoB - apoT));
+    // capacul mic e atașat la primul trapez lateral (nu la bază) — axele celor două
+    // balamale (bază→trapez și trapez→capac) sunt paralele, deci unghiurile se compun
+    // prin adunare; ca planul capacului să ajungă orizontal (paralel cu baza), suma
+    // trebuie să fie 180°.
+    if (childFaceIdx > p.n) return Math.PI - delta1;
+    return delta1;
+  }
+  return Math.PI / 2; // box / implicit
+}
+function netAnnotateHingeAngles(forest, netKind, p) {
+  forest.hinge.forEach((h, idx) => {
+    if (!h) return;
+    h.maxAngle = netHingeMaxAngle(netKind, p, idx);
+  });
+}
+
+// ---- construiește arborele de "balamale" dintr-o listă de fețe (poligoane 2D) ----
+function netFacesTopology(faces) {
+  const r = v => Math.round(v * 100) / 100;
+  const ptKey = p => r(p.x) + ',' + r(p.y);
+  const edgeMap = new Map();
+  faces.forEach((poly, fi) => {
+    const n = poly.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = poly[i], p2 = poly[(i + 1) % n];
+      const a = ptKey(p1), b = ptKey(p2);
+      const k = a < b ? a + '|' + b : b + '|' + a;
+      if (!edgeMap.has(k)) edgeMap.set(k, []);
+      edgeMap.get(k).push({ faceIdx: fi, i });
+    }
+  });
+  const edgeEntries = [...edgeMap.values()];
+  const edgesIndexed = edgeEntries.map(list => ({ ref: list[0], hidden: list.length > 1 }));
+  const adj = faces.map(() => []);
+  edgeEntries.forEach(list => {
+    if (list.length === 2 && list[0].faceIdx !== list[1].faceIdx) {
+      const [a, b] = list;
+      adj[a.faceIdx].push({ other: b.faceIdx, i: a.i });
+      adj[b.faceIdx].push({ other: a.faceIdx, i: b.i });
+    }
+  });
+  return { edgesIndexed, adj };
+}
+
+function buildHingeForest(faces) {
+  const { edgesIndexed, adj } = netFacesTopology(faces);
+  const n = faces.length;
+  const parent = new Array(n).fill(-1);
+  const hinge = new Array(n).fill(null);
+  const visited = new Array(n).fill(false);
+  for (let start = 0; start < n; start++) {
+    if (visited[start]) continue;
+    visited[start] = true;
+    const queue = [start];
+    while (queue.length) {
+      const cur = queue.shift();
+      adj[cur].forEach(({ other, i }) => {
+        if (visited[other]) return;
+        visited[other] = true;
+        parent[other] = cur;
+        const poly = faces[cur];
+        const p1 = poly[i], p2 = poly[(i + 1) % poly.length];
+        // semn ales ca fața copil să se "ridice" (z pozitiv) când se împăturește
+        const hd = netVnorm({ x: p2.x - p1.x, y: p2.y - p1.y, z: 0 });
+        let ccx = 0, ccy = 0;
+        faces[other].forEach(pt => { ccx += pt.x; ccy += pt.y; });
+        ccx /= faces[other].length; ccy /= faces[other].length;
+        const toC = { x: ccx - p1.x, y: ccy - p1.y };
+        const sign = (hd.x * toC.y - hd.y * toC.x) >= 0 ? 1 : -1;
+        hinge[other] = { p1, p2, sign };
+        queue.push(other);
+      });
+    }
+  }
+  return { parent, hinge, edgesIndexed };
+}
+
+function netFaceTransforms(faces, parent, hinge, t) {
+  const n = faces.length;
+  const transforms = new Array(n);
+  const done = new Array(n).fill(false);
+  function resolve(i) {
+    if (done[i]) return transforms[i];
+    if (parent[i] === -1) {
+      transforms[i] = NET_RT_ID;
+    } else {
+      const pT = resolve(parent[i]);
+      const h = hinge[i];
+      const maxAngle = h.maxAngle != null ? h.maxAngle : Math.PI / 2;
+      transforms[i] = netComposeRT(pT, netRotationAboutLine(h.p1, h.p2, t * maxAngle * h.sign));
+    }
+    done[i] = true;
+    return transforms[i];
+  }
+  for (let i = 0; i < n; i++) resolve(i);
+  return transforms;
+}
+
+// construiește o funcție renderAt(t) reutilizabilă atât de auto-play cât și de slider-ul manual
+// (t: 1 = asamblat ca la "Corpuri geometrice" -> 0 = plat/desfășurat complet)
+function makeNetRenderer(faces, forest, shiftPoint, strokeColor, lineSize) {
+  const { parent, hinge, edgesIndexed } = forest;
+  return function renderAt(t) {
+    const transforms = netFaceTransforms(faces, parent, hinge, t);
+    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    overlayCtx.save();
+    overlayCtx.lineJoin = 'round';
+    overlayCtx.lineCap = 'round';
+    overlayCtx.strokeStyle = strokeColor;
+    edgesIndexed.forEach(({ ref, hidden }) => {
+      const poly = faces[ref.faceIdx];
+      const i1 = ref.i, i2 = (ref.i + 1) % poly.length;
+      const tr = transforms[ref.faceIdx];
+      const a3 = netApplyRT(tr, { x: poly[i1].x, y: poly[i1].y, z: 0 });
+      const b3 = netApplyRT(tr, { x: poly[i2].x, y: poly[i2].y, z: 0 });
+      const a = shiftPoint(netProjectAssembled(a3, t));
+      const b = shiftPoint(netProjectAssembled(b3, t));
+      overlayCtx.globalAlpha = hidden ? 0.5 : 1;
+      overlayCtx.lineWidth = hidden ? Math.max(1, lineSize * 0.75) : lineSize;
+      overlayCtx.setLineDash(hidden ? [lineSize * 3, lineSize * 2.4] : []);
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(a.x, a.y);
+      overlayCtx.lineTo(b.x, b.y);
+      overlayCtx.stroke();
+    });
+    overlayCtx.restore();
+  };
+}
+
+function makeCylinderRenderer(R, H, shiftPoint, strokeColor, lineSize) {
+  const circumf = 2 * Math.PI * R;
+  const segs = 48, nSub = 24;
+  const eX = Math.max(1, circumf * 0.002), eY = Math.max(0.5, H * 0.01);
+  return function renderAt(t) {
+    const b = t, tilt = t * 0.55;
+    const angleTotal = b * 2 * Math.PI;
+    const radiusB = angleTotal > 1e-4 ? circumf / angleTotal : null;
+    const bend = (x, y) => {
+      if (radiusB === null) return { x: x - circumf / 2, y, z: 0 };
+      const theta = (x / circumf - 0.5) * angleTotal;
+      return { x: radiusB * Math.sin(theta), y, z: radiusB * (1 - Math.cos(theta)) };
+    };
+    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    overlayCtx.save();
+    overlayCtx.lineJoin = 'round';
+    overlayCtx.lineCap = 'round';
+    overlayCtx.strokeStyle = strokeColor;
+    overlayCtx.lineWidth = lineSize;
+    overlayCtx.setLineDash([]);
+    overlayCtx.globalAlpha = 1;
+    const seg = (p1, p2) => {
+      const a = shiftPoint(netProject(p1, tilt)), c = shiftPoint(netProject(p2, tilt));
+      overlayCtx.beginPath(); overlayCtx.moveTo(a.x, a.y); overlayCtx.lineTo(c.x, c.y); overlayCtx.stroke();
+    };
+    for (let i = 0; i < nSub; i++) {
+      const x1 = circumf * i / nSub, x2 = circumf * (i + 1) / nSub;
+      seg(bend(x1, 0), bend(x2, 0));
+      seg(bend(x1, H), bend(x2, H));
+    }
+    seg(bend(0, 0), bend(0, H));
+    seg(bend(circumf, 0), bend(circumf, H));
+    // capacele: atașate printr-o balama reală (rotație rigidă la punctul de tangență)
+    [[0, -1, -R], [H, 1, H + R]].forEach(([y0, flipSign, cy0]) => {
+      const x0 = circumf / 2;
+      const bend2 = (x, y) => bend(x, y);
+      const attachFlat = { x: x0 - circumf / 2, y: y0, z: 0 };
+      const foldAt = (px, py) => threeFoldCapPoint(bend2, x0, y0, px - attachFlat.x, py - attachFlat.y, t, eX, eY, flipSign);
+      const pts = []; for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; pts.push(foldAt(R * Math.cos(a), cy0 + R * Math.sin(a))); }
+      for (let i = 0; i < segs; i++) seg(pts[i], pts[i + 1]);
+    });
+    overlayCtx.restore();
+  };
+}
+
+function makeConeRenderer(R, G, shiftPoint, strokeColor, lineSize) {
+  const angle = 2 * Math.PI * R / G, halfAngle = angle / 2;
+  const alpha = Math.asin(Math.min(1, R / G));
+  const segs = 48;
+  const ptAt = (r, a, b) => {
+    const flat = { x: r * Math.sin(a), y: -r * Math.cos(a), z: 0 };
+    if (b <= 0.0005) return flat;
+    const phi = a * (Math.PI / halfAngle);
+    const radial = r * Math.sin(alpha), axisH = r * Math.cos(alpha);
+    const closed = { x: radial * Math.cos(phi), y: radial * Math.sin(phi), z: axisH };
+    return { x: flat.x + (closed.x - flat.x) * b, y: flat.y + (closed.y - flat.y) * b, z: flat.z + (closed.z - flat.z) * b };
+  };
+  return function renderAt(t) {
+    const b = t, tilt = t * 0.55;
+    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    overlayCtx.save();
+    overlayCtx.lineJoin = 'round';
+    overlayCtx.lineCap = 'round';
+    overlayCtx.strokeStyle = strokeColor;
+    overlayCtx.lineWidth = lineSize;
+    overlayCtx.setLineDash([]);
+    overlayCtx.globalAlpha = 1;
+    const seg = (p1, p2) => {
+      const a = shiftPoint(netProject(p1, tilt)), c = shiftPoint(netProject(p2, tilt));
+      overlayCtx.beginPath(); overlayCtx.moveTo(a.x, a.y); overlayCtx.lineTo(c.x, c.y); overlayCtx.stroke();
+    };
+    for (let i = 0; i < segs; i++) {
+      const a1 = -halfAngle + angle * i / segs, a2 = -halfAngle + angle * (i + 1) / segs;
+      seg(ptAt(G, a1, b), ptAt(G, a2, b));
+    }
+    seg(ptAt(0, 0, b), ptAt(G, -halfAngle, b));
+    seg(ptAt(0, 0, b), ptAt(G, halfAngle, b));
+    // capacul: atașat prin interpolare analitică (plat -> perpendicular pe axă)
+    const cy0 = -G - R;
+    const pts = []; for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; pts.push(threeConeCapPoint(R * Math.cos(a), cy0 + R * Math.sin(a), G, alpha, b)); }
+    for (let i = 0; i < segs; i++) seg(pts[i], pts[i + 1]);
+    overlayCtx.restore();
+  };
+}
+
+function makeConeFrustumRenderer(R1, R2, Gf, shiftPoint, strokeColor, lineSize) {
+  const rInner = Gf * R2 / (R1 - R2);
+  const rOuter = rInner + Gf;
+  const angle = 2 * Math.PI * R1 / rOuter, halfAngle = angle / 2;
+  const alpha = Math.asin(Math.min(1, R1 / rOuter));
+  const segs = 48;
+  const ptAt = (r, a, b) => {
+    const flat = { x: r * Math.sin(a), y: -r * Math.cos(a), z: 0 };
+    if (b <= 0.0005) return flat;
+    const phi = a * (Math.PI / halfAngle);
+    const radial = r * Math.sin(alpha), axisH = r * Math.cos(alpha);
+    const closed = { x: radial * Math.cos(phi), y: radial * Math.sin(phi), z: axisH };
+    return { x: flat.x + (closed.x - flat.x) * b, y: flat.y + (closed.y - flat.y) * b, z: flat.z + (closed.z - flat.z) * b };
+  };
+  return function renderAt(t) {
+    const b = t, tilt = t * 0.55;
+    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    overlayCtx.save();
+    overlayCtx.lineJoin = 'round';
+    overlayCtx.lineCap = 'round';
+    overlayCtx.strokeStyle = strokeColor;
+    overlayCtx.lineWidth = lineSize;
+    overlayCtx.setLineDash([]);
+    overlayCtx.globalAlpha = 1;
+    const seg = (p1, p2) => {
+      const a = shiftPoint(netProject(p1, tilt)), c = shiftPoint(netProject(p2, tilt));
+      overlayCtx.beginPath(); overlayCtx.moveTo(a.x, a.y); overlayCtx.lineTo(c.x, c.y); overlayCtx.stroke();
+    };
+    for (let i = 0; i < segs; i++) {
+      const a1 = -halfAngle + angle * i / segs, a2 = -halfAngle + angle * (i + 1) / segs;
+      seg(ptAt(rOuter, a1, b), ptAt(rOuter, a2, b));
+      seg(ptAt(rInner, a1, b), ptAt(rInner, a2, b));
+    }
+    seg(ptAt(rInner, -halfAngle, b), ptAt(rOuter, -halfAngle, b));
+    seg(ptAt(rInner, halfAngle, b), ptAt(rOuter, halfAngle, b));
+    // ambele capace: atașate prin rotație rigidă, tangente la razele reale — capacul mic se
+    // extinde spre originea desfășurării (ca să nu se suprapună cu sectorul lateral), deci
+    // folosește o rotație diferită (90°, nu 180° ca cel mare)
+    [[rOuter, -rOuter - R1, R1, -1], [rInner, -rInner + R2, R2, 1]].forEach(([rAttach, cy0, r, extendSign]) => {
+      const pts = []; for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; pts.push(threeConeCapPoint(r * Math.cos(a), cy0 + r * Math.sin(a), rAttach, alpha, b, extendSign)); }
+      for (let i = 0; i < segs; i++) seg(pts[i], pts[i + 1]);
+    });
+    overlayCtx.restore();
+  };
+}
+
+// ---- panoul cu slider interactiv: control manual al împăturirii/rulării ----
+function netCreateSliderPanel(label) {
+  const wrap = document.createElement('div');
+  wrap.id = 'net-slider-panel';
+  wrap.style.cssText = 'position:fixed; left:50%; bottom:44px; transform:translateX(-50%);'
+    + 'background:#222; color:#fff; padding:10px 16px; border-radius:10px; font-size:13px; z-index:200;'
+    + 'display:flex; flex-direction:column; gap:6px; width:min(92vw,420px); box-shadow:0 4px 18px rgba(0,0,0,0.4);'
+    + 'font-family:inherit;';
+  wrap.innerHTML =
+    '<div style="display:flex; align-items:center; justify-content:space-between;">' +
+    '<span style="font-weight:600;">' + label + '</span>' +
+    '<span id="net-slider-pct" style="opacity:0.75;">0%</span>' +
+    '</div>' +
+    '<input id="net-slider-input" type="range" min="0" max="100" value="0" step="1" style="width:100%; accent-color:#4da3ff;">' +
+    '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; opacity:0.7;">' +
+    '<span>◀ Asamblat</span><span>Desfășurat ▶</span>' +
+    '</div>' +
+    '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">' +
+    '<button id="net-slider-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:6px; padding:7px 12px; font-size:12px;">✕ Renunță</button>' +
+    '<button id="net-slider-done" style="background:#4da3ff; color:#fff; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:600;">✓ Gata</button>' +
+    '</div>';
+  document.body.appendChild(wrap);
+  return {
+    el: wrap,
+    slider: wrap.querySelector('#net-slider-input'),
+    pctLabel: wrap.querySelector('#net-slider-pct'),
+    doneBtn: wrap.querySelector('#net-slider-done'),
+    cancelBtn: wrap.querySelector('#net-slider-cancel'),
+    destroy() { wrap.remove(); }
+  };
+}
+
+// rulează animația automat o dată, apoi lasă sliderul deschis pt control manual;
+// se rezolvă cu true dacă utilizatorul apasă "Gata", sau false dacă apasă "Renunță"
+function netRunInteractive(renderAt, label, autoplayDuration) {
+  return new Promise(resolve => {
+    const panel = netCreateSliderPanel(label);
+    let userInteracting = false;
+    let rafId = null;
+
+    function setT(t) {
+      const pct = Math.round((1 - t) * 100);
+      panel.slider.value = String(pct);
+      panel.pctLabel.textContent = pct + '%';
+      renderAt(t);
+    }
+
+    setT(1); // start: complet asamblat, ca la "Corpuri geometrice"
+
+    const start = performance.now();
+    function frame(now) {
+      if (userInteracting) return;
+      const p = Math.min(1, (now - start) / autoplayDuration);
+      const t = 1 - netEase(p);
+      setT(t);
+      if (p < 1) rafId = requestAnimationFrame(frame);
+    }
+    rafId = requestAnimationFrame(frame);
+
+    const stopAutoplay = () => { userInteracting = true; if (rafId) cancelAnimationFrame(rafId); };
+    panel.slider.addEventListener('pointerdown', stopAutoplay);
+    panel.slider.addEventListener('input', () => {
+      stopAutoplay();
+      const pct = parseInt(panel.slider.value, 10);
+      panel.pctLabel.textContent = pct + '%';
+      renderAt(1 - pct / 100);
+    });
+
+    function finish(result) {
+      if (rafId) cancelAnimationFrame(rafId);
+      panel.destroy();
+      resolve(result);
+    }
+    panel.doneBtn.addEventListener('click', () => finish(true));
+    panel.cancelBtn.addEventListener('click', () => finish(false));
+  });
+}
+
+// Cilindru: dreptunghi (circumferință × înălțime) + 2 cercuri, tangente la marginile lungi.
+function buildCylinderNet(R, H) {
+  const circumf = 2 * Math.PI * R;
+  const visible = [];
+  visible.push([{ x: 0, y: 0 }, { x: circumf, y: 0 }]);
+  visible.push([{ x: circumf, y: 0 }, { x: circumf, y: H }]);
+  visible.push([{ x: circumf, y: H }, { x: 0, y: H }]);
+  visible.push([{ x: 0, y: H }, { x: 0, y: 0 }]);
+  const segs = 48;
+  function circle(cx, cy) {
+    const pts = [];
+    for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; pts.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }); }
+    for (let i = 0; i < segs; i++) visible.push([pts[i], pts[i + 1]]);
+  }
+  circle(circumf / 2, -R);
+  circle(circumf / 2, H + R);
+  return { visible, hidden: [] };
+}
+
+// Con: sector circular (rază = apotema laterală G) + 1 cerc, tangent la arc.
+function buildConeNet(R, G) {
+  const angle = 2 * Math.PI * R / G;
+  const visible = [];
+  const segs = 48;
+  const arcPts = [];
+  for (let i = 0; i <= segs; i++) {
+    const a = -angle / 2 + angle * i / segs;
+    arcPts.push({ x: G * Math.sin(a), y: -G * Math.cos(a) });
+  }
+  for (let i = 0; i < segs; i++) visible.push([arcPts[i], arcPts[i + 1]]);
+  visible.push([{ x: 0, y: 0 }, arcPts[0]]);
+  visible.push([{ x: 0, y: 0 }, arcPts[segs]]);
+  const circleCenter = { x: 0, y: -G - R };
+  const circlePts = [];
+  for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; circlePts.push({ x: circleCenter.x + R * Math.cos(a), y: circleCenter.y + R * Math.sin(a) }); }
+  for (let i = 0; i < segs; i++) visible.push([circlePts[i], circlePts[i + 1]]);
+  return { visible, hidden: [] };
+}
+
+// Trunchi de con: sector inelar (între două arce) + 2 cercuri.
+function buildConeFrustumNet(R1, R2, Gf) {
+  const rInner = Gf * R2 / (R1 - R2);
+  const rOuter = rInner + Gf;
+  const angle = 2 * Math.PI * R1 / rOuter;
+  const segs = 48;
+  const visible = [];
+  const outerPts = [], innerPts = [];
+  for (let i = 0; i <= segs; i++) {
+    const a = -angle / 2 + angle * i / segs;
+    outerPts.push({ x: rOuter * Math.sin(a), y: -rOuter * Math.cos(a) });
+    innerPts.push({ x: rInner * Math.sin(a), y: -rInner * Math.cos(a) });
+  }
+  for (let i = 0; i < segs; i++) visible.push([outerPts[i], outerPts[i + 1]]);
+  for (let i = 0; i < segs; i++) visible.push([innerPts[i], innerPts[i + 1]]);
+  visible.push([innerPts[0], outerPts[0]]);
+  visible.push([innerPts[segs], outerPts[segs]]);
+  const bigCenter = { x: 0, y: -rOuter - R1 };
+  const bigPts = [];
+  for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; bigPts.push({ x: bigCenter.x + R1 * Math.cos(a), y: bigCenter.y + R1 * Math.sin(a) }); }
+  for (let i = 0; i < segs; i++) visible.push([bigPts[i], bigPts[i + 1]]);
+  const smallCenter = { x: 0, y: -rInner + R2 };
+  const smallPts = [];
+  for (let i = 0; i <= segs; i++) { const a = i / segs * 2 * Math.PI; smallPts.push({ x: smallCenter.x + R2 * Math.cos(a), y: smallCenter.y + R2 * Math.sin(a) }); }
+  for (let i = 0; i < segs; i++) visible.push([smallPts[i], smallPts[i + 1]]);
+  return { visible, hidden: [] };
+}
+
+const NET_SHAPES = {
+  cub: { label: 'Cub (desfășurare)', build: () => buildNetFromFaces(netBoxFaces(90, 90, 90)), netKind: 'box' },
+  paralelipiped: { label: 'Paralelipiped (desfășurare)', build: () => buildNetFromFaces(netBoxFaces(110, 60, 70)), netKind: 'box' },
+  prismaTriunghiulara: { label: 'Prismă triunghiulară (desfășurare)', build: () => buildNetFromFaces(netPrismFaces(3, 55, 110).faces), netKind: 'prism', netParams: { n: 3 } },
+  prismaPatrulatera: { label: 'Prismă patrulateră (desfășurare)', build: () => buildNetFromFaces(netBoxFaces(85, 85, 120)), netKind: 'box' },
+  prismaHexagonala: { label: 'Prismă hexagonală (desfășurare)', build: () => buildNetFromFaces(netPrismFaces(6, 45, 95).faces), netKind: 'prism', netParams: { n: 6 } },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară (desfășurare)', build: () => buildNetFromFaces(netPyramidFaces(3, 55, 110)), netKind: 'pyramid', netParams: { n: 3, R: 55, height: 110 } },
+  piramidaPatrulatera: { label: 'Piramidă patrulateră (desfășurare)', build: () => buildNetFromFaces(netPyramidFaces(4, 55, 115)), netKind: 'pyramid', netParams: { n: 4, R: 55, height: 115 } },
+  piramidaHexagonala: { label: 'Piramidă hexagonală (desfășurare)', build: () => buildNetFromFaces(netPyramidFaces(6, 50, 120)), netKind: 'pyramid', netParams: { n: 6, R: 50, height: 120 } },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchi piramidă triunghiulară (desfășurare)', build: () => buildNetFromFaces(netFrustumFaces(3, 60, 33, 85)), netKind: 'frustum', netParams: { n: 3, R1: 60, R2: 33, height: 85 } },
+  trunchiPiramidaPatrulatera: { label: 'Trunchi piramidă patrulateră (desfășurare)', build: () => buildNetFromFaces(netFrustumFaces(4, 60, 33, 85)), netKind: 'frustum', netParams: { n: 4, R1: 60, R2: 33, height: 85 } },
+  trunchiPiramidaHexagonala: { label: 'Trunchi piramidă hexagonală (desfășurare)', build: () => buildNetFromFaces(netFrustumFaces(6, 55, 30, 85)), netKind: 'frustum', netParams: { n: 6, R1: 55, R2: 30, height: 85 } },
+  cilindru: { label: 'Cilindru (desfășurare)', build: () => buildCylinderNet(45, 110), curved: 'cilindru', params: { R: 45, H: 110 } },
+  con: { label: 'Con (desfășurare)', build: () => buildConeNet(50, 120), curved: 'con', params: { R: 50, G: 120 } },
+  trunchiCon: { label: 'Trunchi de con (desfășurare)', build: () => buildConeFrustumNet(55, 28, 95), curved: 'trunchiCon', params: { R1: 55, R2: 28, Gf: 95 } }
+};
+
+function buildNetIconSVG(shapeKey, size) {
+  const spec = NET_SHAPES[shapeKey];
+  const built = spec.build();
+  const allPts = [];
+  built.visible.forEach(s => allPts.push(...s));
+  built.hidden.forEach(s => allPts.push(...s));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allPts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+  const pad = 2;
+  const scale = Math.min((size - 2 * pad) / w, (size - 2 * pad) / h);
+  const offX = pad - minX * scale + (size - 2 * pad - w * scale) / 2;
+  const offY = pad - minY * scale + (size - 2 * pad - h * scale) / 2;
+  const tp = p => ({ x: p.x * scale + offX, y: p.y * scale + offY });
+  let lines = '';
+  built.hidden.forEach(seg => {
+    const a = tp(seg[0]), b = tp(seg[1]);
+    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke-dasharray="2,2"/>`;
+  });
+  built.visible.forEach(seg => {
+    const a = tp(seg[0]), b = tp(seg[1]);
+    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
+  });
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">${lines}</svg>`;
+}
+
+async function insertSolidNet(shapeKey) {
+  const spec = NET_SHAPES[shapeKey];
+  if (!spec) return;
+  const page = getCurrentPage();
+  if (!page) return;
+
+  const built = spec.build();
+  const allPts = [];
+  built.visible.forEach(s => allPts.push(...s));
+  built.hidden.forEach(s => allPts.push(...s));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allPts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const rect = drawC.getBoundingClientRect();
+  const w = maxX - minX, h = maxY - minY;
+  // scalăm dacă desfășurarea e prea mare pentru fereastra curentă
+  const fitScale = Math.min(1, (rect.width * 0.7) / w, (rect.height * 0.6) / h);
+  const cx = rect.width / 2, cy = rect.height * 0.32;
+  const shift = seg => seg.map(p => ({
+    x: (p.x - (minX + maxX) / 2) * fitScale + cx,
+    y: (p.y - (minY + maxY) / 2) * fitScale + cy
+  }));
+  const shiftPoint = p => ({
+    x: (p.x - (minX + maxX) / 2) * fitScale + cx,
+    y: (p.y - (minY + maxY) / 2) * fitScale + cy
+  });
+
+  // ---- construim funcția de randare renderAt(t) potrivită formei, apoi arătăm panoul
+  //      cu slider: se joacă animația o dată automat, iar utilizatorul poate apoi trage
+  //      manual de slider între "Asamblat" (ca la Corpuri geometrice) și "Desfășurat" ----
+  const netLineSize = 2.2;
+  let renderAt = null;
+  if (built.faces && built.faces.length) {
+    const forest = buildHingeForest(built.faces);
+    netAnnotateHingeAngles(forest, spec.netKind, spec.netParams);
+    renderAt = makeNetRenderer(built.faces, forest, shiftPoint, color, netLineSize);
+  } else if (spec.curved === 'cilindru') {
+    const { R, H } = spec.params;
+    renderAt = makeCylinderRenderer(R, H, shiftPoint, color, netLineSize);
+  } else if (spec.curved === 'con') {
+    const { R, G } = spec.params;
+    renderAt = makeConeRenderer(R, G, shiftPoint, color, netLineSize);
+  } else if (spec.curved === 'trunchiCon') {
+    const { R1, R2, Gf } = spec.params;
+    renderAt = makeConeFrustumRenderer(R1, R2, Gf, shiftPoint, color, netLineSize);
+  }
+
+  let confirmed = true;
+  if (renderAt) {
+    try {
+      confirmed = await netRunInteractive(renderAt, spec.label, 1500);
+    } catch (e) {
+      console.warn('Eroare animație desfășurare:', e);
+    }
+  }
+  overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+  if (!confirmed) { showToast('Desfășurare anulată'); return; }
+
+  const stroke = {
+    type: 'solidNet',
+    shape: shapeKey,
+    color: color,
+    size: netLineSize,
     visible: built.visible.map(shift),
     hidden: built.hidden.map(shift)
   };
@@ -4145,6 +5137,600 @@ document.addEventListener('pointerdown', (e) => {
     closeSolidsMenu();
   }
 });
+
+// ====================================================================
+// MODUL 3D INTERACTIV — corpurile geometrice pot fi rotite liber (ca în
+// Blender: tragi cu degetul/mouse-ul, ciupești pt zoom), fețele sunt ușor
+// transparente (se văd și muchiile din plan secundar), iar un slider permite
+// animarea desfășurării în plan a corpului, direct în spațiul 3D (aceeași
+// matematică de împăturire — unghiuri diedre corecte — ca la desfășurările
+// 2D, dar aplicată acum ca poziții 3D reale, nu ca proiecție pe canvas).
+// La apăsarea "Inserează" se face o "poză" (PNG) a stării curente (asamblat,
+// pe jumătate desfăcut sau complet plat, din orice unghi), adăugată pe tablă
+// ca o imagine obișnuită (selectabilă/mutabilă/redimensionabilă).
+// ====================================================================
+const THREE_SOLID_COLOR = 0x5b8def;
+const THREE_FACE_OPACITY = 0.45;
+
+function threeMakeFaceMaterial() {
+  return new THREE.MeshPhongMaterial({
+    color: THREE_SOLID_COLOR, shininess: 25, flatShading: true,
+    side: THREE.DoubleSide, transparent: true, opacity: THREE_FACE_OPACITY, depthWrite: false
+  });
+}
+function threeMakeEdgeMaterial() {
+  // depthTest:false -> muchiile din plan secundar rămân vizibile prin fețele transparente
+  return new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthTest: false });
+}
+// convenția rețelei plate: x = stânga-dreapta, y = adâncimea din desfășurarea
+// plată, z = înălțimea de împăturire -> în Three.js (Y = sus) mapăm z->Y, y->Z
+function threeRemap(p) { return { x: p.x, y: p.z, z: p.y }; }
+
+// ---- grup animat pt desfășurări poligonale (cub, paralelipiped, prisme, piramide, trunchiuri) ----
+function buildAnimatedPolyNetGroup(faces, forest) {
+  const faceTris = faces.map(poly => {
+    const idx = [];
+    for (let i = 1; i < poly.length - 1; i++) idx.push([0, i, i + 1]);
+    return idx;
+  });
+  const totalTris = faceTris.reduce((s, t) => s + t.length, 0);
+
+  const faceGeo = new THREE.BufferGeometry();
+  faceGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(totalTris * 9), 3));
+  const faceMesh = new THREE.Mesh(faceGeo, threeMakeFaceMaterial());
+
+  const edgeGeo = new THREE.BufferGeometry();
+  edgeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(forest.edgesIndexed.length * 6), 3));
+  const edgeLines = new THREE.LineSegments(edgeGeo, threeMakeEdgeMaterial());
+  edgeLines.renderOrder = 10;
+
+  const group = new THREE.Group();
+  group.add(faceMesh, edgeLines);
+
+  function updateAt(t) {
+    const transforms = netFaceTransforms(faces, forest.parent, forest.hinge, t);
+    const fPos = faceGeo.attributes.position.array;
+    let vi = 0;
+    faces.forEach((poly, fi) => {
+      const tr = transforms[fi];
+      const pts3 = poly.map(p => threeRemap(netApplyRT(tr, { x: p.x, y: p.y, z: 0 })));
+      faceTris[fi].forEach(([a, b, c]) => {
+        [pts3[a], pts3[b], pts3[c]].forEach(p => { fPos[vi++] = p.x; fPos[vi++] = p.y; fPos[vi++] = p.z; });
+      });
+    });
+    faceGeo.attributes.position.needsUpdate = true;
+    faceGeo.computeVertexNormals();
+    faceGeo.computeBoundingSphere();
+
+    const ePos = edgeGeo.attributes.position.array;
+    let ei = 0;
+    forest.edgesIndexed.forEach(({ ref }) => {
+      const poly = faces[ref.faceIdx];
+      const tr = transforms[ref.faceIdx];
+      const i1 = ref.i, i2 = (ref.i + 1) % poly.length;
+      const a3 = threeRemap(netApplyRT(tr, { x: poly[i1].x, y: poly[i1].y, z: 0 }));
+      const b3 = threeRemap(netApplyRT(tr, { x: poly[i2].x, y: poly[i2].y, z: 0 }));
+      ePos[ei++] = a3.x; ePos[ei++] = a3.y; ePos[ei++] = a3.z;
+      ePos[ei++] = b3.x; ePos[ei++] = b3.y; ePos[ei++] = b3.z;
+    });
+    edgeGeo.attributes.position.needsUpdate = true;
+    edgeGeo.computeBoundingSphere();
+  }
+  updateAt(1);
+  return { group, updateAt };
+}
+
+// ---- grup animat generic pt suprafețe curbe (cilindru / con / trunchi de con) ----
+// bendFn(x, y, t) -> {x,y,z} pe rețeaua plată la parametrul de împăturire t (1=asamblat, 0=plat)
+// caps: listă de {cy0, r} pt discurile capacelor (0, 1 sau 2 capace)
+// îndoaie un punct al unui capac (disc) în jurul liniei tangente la marginea curbă de care
+// e atașat, la parametrul curent de asamblare — cadrul local (tangentă + direcție de
+// extindere) se calculează numeric (derivată), ca să funcționeze la fel pt orice
+// parametrizare (cilindru: x=poziție pe circumferință, con/trunchi: x=unghi, y=rază).
+function threeFoldCapPoint(bend2, x0, y0, dx, dy, foldFrac, epsX, epsY, flipSign) {
+  const P = bend2(x0, y0);
+  const A1 = bend2(x0 - epsX, y0), B1 = bend2(x0 + epsX, y0);
+  const e1 = netVnorm({ x: B1.x - A1.x, y: B1.y - A1.y, z: B1.z - A1.z });
+  const A2 = bend2(x0, y0 - epsY), B2 = bend2(x0, y0 + epsY);
+  const e2 = netVnorm({ x: B2.x - A2.x, y: B2.y - A2.y, z: B2.z - A2.z });
+  const e3 = netVnorm({ x: e1.y * e2.z - e1.z * e2.y, y: e1.z * e2.x - e1.x * e2.z, z: e1.x * e2.y - e1.y * e2.x });
+  const phi = (Math.PI / 2) * foldFrac * flipSign;
+  const c = Math.cos(phi), s = Math.sin(phi);
+  return {
+    x: P.x + dx * e1.x + dy * (c * e2.x + s * e3.x),
+    y: P.y + dx * e1.y + dy * (c * e2.y + s * e3.y),
+    z: P.z + dx * e1.z + dy * (c * e2.z + s * e3.z)
+  };
+}
+
+function buildAnimatedCurvedGroup(xMax, H, bendFn, caps) {
+  const nSub = 48, segs = 48;
+  const group = new THREE.Group();
+
+  const lateralGeo = new THREE.BufferGeometry();
+  lateralGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nSub * 6 * 3), 3));
+  const lateralMesh = new THREE.Mesh(lateralGeo, threeMakeFaceMaterial());
+  group.add(lateralMesh);
+
+  const edgeGeo = new THREE.BufferGeometry();
+  edgeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((nSub * 2 + 2) * 2 * 3), 3));
+  const edgeLines = new THREE.LineSegments(edgeGeo, threeMakeEdgeMaterial());
+  edgeLines.renderOrder = 10;
+  group.add(edgeLines);
+
+  const capMeshes = caps.map(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs * 9), 3));
+    const mesh = new THREE.Mesh(geo, threeMakeFaceMaterial());
+    const edGeo = new THREE.BufferGeometry();
+    edGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs * 2 * 3), 3));
+    const edLines = new THREE.LineSegments(edGeo, threeMakeEdgeMaterial());
+    edLines.renderOrder = 10;
+    group.add(mesh, edLines);
+    return { mesh, edLines };
+  });
+
+  function updateAt(t) {
+    const bend2 = (x, y) => bendFn(x, y, t);
+    const rowBottom = [], rowTop = [];
+    for (let i = 0; i <= nSub; i++) {
+      const x = xMax * i / nSub;
+      rowBottom.push(threeRemap(bend2(x, 0)));
+      rowTop.push(threeRemap(bend2(x, H)));
+    }
+    const fPos = lateralGeo.attributes.position.array;
+    let vi = 0;
+    for (let i = 0; i < nSub; i++) {
+      const a = rowBottom[i], b2 = rowBottom[i + 1], c = rowTop[i], d = rowTop[i + 1];
+      [a, b2, d, a, d, c].forEach(p => { fPos[vi++] = p.x; fPos[vi++] = p.y; fPos[vi++] = p.z; });
+    }
+    lateralGeo.attributes.position.needsUpdate = true;
+    lateralGeo.computeVertexNormals();
+    lateralGeo.computeBoundingSphere();
+
+    const ePos = edgeGeo.attributes.position.array;
+    let ei = 0;
+    const pushEdge = (p1, p2) => { ePos[ei++] = p1.x; ePos[ei++] = p1.y; ePos[ei++] = p1.z; ePos[ei++] = p2.x; ePos[ei++] = p2.y; ePos[ei++] = p2.z; };
+    for (let i = 0; i < nSub; i++) { pushEdge(rowBottom[i], rowBottom[i + 1]); pushEdge(rowTop[i], rowTop[i + 1]); }
+    pushEdge(rowBottom[0], rowTop[0]);
+    pushEdge(rowBottom[nSub], rowTop[nSub]);
+    edgeGeo.attributes.position.needsUpdate = true;
+    edgeGeo.computeBoundingSphere();
+
+    caps.forEach((cap, ci) => {
+      const { mesh, edLines } = capMeshes[ci];
+      const foldAt = (px, py) => cap.foldPoint(px, py, t);
+      const center = threeRemap(foldAt(cap.cx, cap.cy0));
+      const arr = mesh.geometry.attributes.position.array;
+      const earr = edLines.geometry.attributes.position.array;
+      let k = 0, ek = 0;
+      const rimPts = [];
+      for (let i = 0; i <= segs; i++) {
+        const a = i / segs * 2 * Math.PI;
+        rimPts.push(threeRemap(foldAt(cap.cx + cap.r * Math.cos(a), cap.cy0 + cap.r * Math.sin(a))));
+      }
+      for (let i = 0; i < segs; i++) {
+        [center, rimPts[i], rimPts[i + 1]].forEach(p => { arr[k++] = p.x; arr[k++] = p.y; arr[k++] = p.z; });
+        earr[ek++] = rimPts[i].x; earr[ek++] = rimPts[i].y; earr[ek++] = rimPts[i].z;
+        earr[ek++] = rimPts[i + 1].x; earr[ek++] = rimPts[i + 1].y; earr[ek++] = rimPts[i + 1].z;
+      }
+      mesh.geometry.attributes.position.needsUpdate = true;
+      mesh.geometry.computeVertexNormals();
+      mesh.geometry.computeBoundingSphere();
+      edLines.geometry.attributes.position.needsUpdate = true;
+      edLines.geometry.computeBoundingSphere();
+    });
+  }
+  updateAt(1);
+  return { group, updateAt };
+}
+
+function buildAnimatedCylinderGroup(R, H) {
+  const circumf = 2 * Math.PI * R;
+  const bendFn = (x, y, t) => {
+    const angleTotal = t * 2 * Math.PI;
+    const radiusB = angleTotal > 1e-4 ? circumf / angleTotal : null;
+    if (radiusB === null) return { x: x - circumf / 2, y, z: 0 };
+    const theta = (x / circumf - 0.5) * angleTotal;
+    return { x: radiusB * Math.sin(theta), y, z: radiusB * (1 - Math.cos(theta)) };
+  };
+  const eX = Math.max(1, circumf * 0.002), eY = Math.max(0.5, H * 0.01);
+  const makeFold = (y0, flipSign) => (px, py, t) => {
+    const x0 = circumf / 2;
+    const bend2 = (x, y) => bendFn(x, y, t);
+    const attachFlat = bendFn(x0, y0, 0);
+    return threeFoldCapPoint(bend2, x0, y0, px - attachFlat.x, py - attachFlat.y, t, eX, eY, flipSign);
+  };
+  const caps = [
+    { cx: 0, cy0: -R, r: R, foldPoint: makeFold(0, -1) },
+    { cx: 0, cy0: H + R, r: R, foldPoint: makeFold(H, 1) }
+  ];
+  return buildAnimatedCurvedGroup(circumf, H, bendFn, caps);
+}
+
+// pt suprafețele conice (con/trunchi de con), îndoirea laterală e o interpolare directă
+// (nu o rotație rigidă), deci și capacul se calculează analitic prin interpolare între
+// poziția plată și poziția finală corectă (tangentă + rotită perpendicular pe axă),
+// nu prin derivate numerice locale (care nu au sens pt o interpolare, doar pt o rotație).
+// pt capacele conice (con/trunchi de con): rotație reală (nu doar interpolare liniară a
+// poziției), analog cu balamaua rigidă de la cilindru — axa și unghiul total de rotație
+// sunt fixe (independente de raza de atașare), calculate o singură dată din geometria
+// generică a atașării tangente la arc (unghi a0=0). Pivotul (punctul de tangență) se
+// translatează odată cu restul suprafeței laterale, dar orientarea capacului se ROTEȘTE
+// rigid în jurul lui, nu alunecă în linie dreaptă.
+// capacul care se extinde spre exterior (departe de originea desfășurării) — rotație 180°
+// în jurul unei axe diagonale (derivată analitic din geometria atașării tangente)
+const CONE_CAP_AXIS_OUT = netVnorm({ x: 1, y: 1, z: 0 });
+const CONE_CAP_ANGLE_OUT = -Math.PI;
+// capacul care se extinde spre originea desfășurării (necesar când extinderea spre exterior
+// s-ar suprapune cu sectorul lateral, ex. baza mică a trunchiului de con) — rotație 90° în
+// jurul axei Z locale (derivată analitic separat, geometria fiind oglindită)
+const CONE_CAP_AXIS_IN = { x: 0, y: 0, z: 1 };
+const CONE_CAP_ANGLE_IN = Math.PI / 2;
+function threeConeCapPoint(capX, capY, rAttach, alpha, t, extendSign) {
+  const radial = rAttach * Math.sin(alpha), axisH = rAttach * Math.cos(alpha);
+  const originFlat = { x: 0, y: -rAttach, z: 0 };
+  const originClosed = { x: radial, y: 0, z: axisH };
+  const pivot = {
+    x: originFlat.x + (originClosed.x - originFlat.x) * t,
+    y: originFlat.y + (originClosed.y - originFlat.y) * t,
+    z: originFlat.z + (originClosed.z - originFlat.z) * t
+  };
+  const localVec = { x: capX, y: capY - originFlat.y, z: 0 };
+  const axis = extendSign > 0 ? CONE_CAP_AXIS_IN : CONE_CAP_AXIS_OUT;
+  const angle = (extendSign > 0 ? CONE_CAP_ANGLE_IN : CONE_CAP_ANGLE_OUT) * t;
+  const Rt = netRodrigues(axis, angle);
+  const rotated = netMatVec(Rt, localVec);
+  return { x: pivot.x + rotated.x, y: pivot.y + rotated.y, z: pivot.z + rotated.z };
+}
+
+function buildAnimatedConeGroup(R, G) {
+  const angle = 2 * Math.PI * R / G, halfAngle = angle / 2;
+  const alpha = Math.asin(Math.min(1, R / G));
+  const bendFn = (r, a0, t) => {
+    // aici parametrii "x,y" ai bendFn generic sunt refolositi ca (raza r, unghi a) pt con
+    const flat = { x: r * Math.sin(a0), y: -r * Math.cos(a0), z: 0 };
+    if (t <= 0.0005) return flat;
+    const phi = a0 * (Math.PI / halfAngle);
+    const radial = r * Math.sin(alpha), axisH = r * Math.cos(alpha);
+    const closed = { x: radial * Math.cos(phi), y: radial * Math.sin(phi), z: axisH };
+    return { x: flat.x + (closed.x - flat.x) * t, y: flat.y + (closed.y - flat.y) * t, z: flat.z + (closed.z - flat.z) * t };
+  };
+  // adaptam la semnatura (x,y,t) folosita de buildAnimatedCurvedGroup: x=unghi deplasat, y=raza
+  const wrapped = (xShift, r, t) => bendFn(r, xShift - halfAngle, t);
+  const caps = [{ cx: 0, cy0: -G - R, r: R, foldPoint: (px, py, t) => threeConeCapPoint(px, py, G, alpha, t) }];
+  return buildAnimatedCurvedGroup(angle, G, (x, y, t) => wrapped(x, y, t), caps);
+}
+
+function buildAnimatedConeFrustumGroup(R1, R2, Gf) {
+  const rInner = Gf * R2 / (R1 - R2);
+  const rOuter = rInner + Gf;
+  const angle = 2 * Math.PI * R1 / rOuter, halfAngle = angle / 2;
+  const alpha = Math.asin(Math.min(1, R1 / rOuter));
+  const ptAt = (r, a0, t) => {
+    const flat = { x: r * Math.sin(a0), y: -r * Math.cos(a0), z: 0 };
+    if (t <= 0.0005) return flat;
+    const phi = a0 * (Math.PI / halfAngle);
+    const radial = r * Math.sin(alpha), axisH = r * Math.cos(alpha);
+    const closed = { x: radial * Math.cos(phi), y: radial * Math.sin(phi), z: axisH };
+    return { x: flat.x + (closed.x - flat.x) * t, y: flat.y + (closed.y - flat.y) * t, z: flat.z + (closed.z - flat.z) * t };
+  };
+  const wrapped = (xShift, y, t) => ptAt(rInner + y, xShift - halfAngle, t);
+  const caps = [
+    { cx: 0, cy0: -rOuter - R1, r: R1, foldPoint: (px, py, t) => threeConeCapPoint(px, py, rOuter, alpha, t, -1) },
+    { cx: 0, cy0: -rInner + R2, r: R2, foldPoint: (px, py, t) => threeConeCapPoint(px, py, rInner, alpha, t, 1) }
+  ];
+  return buildAnimatedCurvedGroup(angle, Gf, (x, y, t) => wrapped(x, y, t), caps);
+}
+
+function build3DShapeGroupAnimated(shapeKey) {
+  if (shapeKey === 'sfera') {
+    const geo = new THREE.SphereGeometry(65, 32, 24);
+    const mat = new THREE.MeshPhongMaterial({ color: THREE_SOLID_COLOR, shininess: 25, transparent: true, opacity: THREE_FACE_OPACITY + 0.1, depthWrite: false });
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geo, mat));
+    return { group, updateAt: null };
+  }
+  const spec = NET_SHAPES[shapeKey];
+  if (!spec) return null;
+  if (spec.curved === 'cilindru') { const { R, H } = spec.params; return buildAnimatedCylinderGroup(R, H); }
+  if (spec.curved === 'con') { const { R, G } = spec.params; return buildAnimatedConeGroup(R, G); }
+  if (spec.curved === 'trunchiCon') { const { R1, R2, Gf } = spec.params; return buildAnimatedConeFrustumGroup(R1, R2, Gf); }
+  const built = spec.build();
+  const forest = buildHingeForest(built.faces);
+  netAnnotateHingeAngles(forest, spec.netKind, spec.netParams);
+  return buildAnimatedPolyNetGroup(built.faces, forest);
+}
+
+function disposeThreeGroup(group) {
+  group.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else obj.material.dispose();
+    }
+  });
+}
+
+// decupează canvas-ul WebGL la conturul obiectului (elimină spațiul gol transparent din jur)
+function captureTrimmedSnapshot(sourceCanvas, padding) {
+  const off = document.createElement('canvas');
+  off.width = sourceCanvas.width;
+  off.height = sourceCanvas.height;
+  const octx = off.getContext('2d');
+  octx.drawImage(sourceCanvas, 0, 0);
+  let minX = off.width, minY = off.height, maxX = 0, maxY = 0, found = false;
+  const { data, width, height } = octx.getImageData(0, 0, off.width, off.height);
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      if (data[(y * width + x) * 4 + 3] > 10) {
+        found = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (!found) return off.toDataURL('image/png');
+  minX = Math.max(0, minX - padding);
+  minY = Math.max(0, minY - padding);
+  maxX = Math.min(width, maxX + padding);
+  maxY = Math.min(height, maxY + padding);
+  const crop = document.createElement('canvas');
+  crop.width = maxX - minX;
+  crop.height = maxY - minY;
+  crop.getContext('2d').drawImage(off, minX, minY, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  return crop.toDataURL('image/png');
+}
+
+function open3DViewer() {
+  if (typeof THREE === 'undefined') { showToast('Modulul 3D nu s-a putut încărca'); return; }
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'viewer3d-backdrop';
+  backdrop.style.cssText = 'position:fixed; inset:0; background:rgba(10,10,10,0.96); z-index:500; display:flex; flex-direction:column;';
+
+  const topBar = document.createElement('div');
+  topBar.style.cssText = 'flex:0 0 auto; padding:10px 12px; display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; background:#161616; border-bottom:1px solid #333;';
+  Object.keys(NET_SHAPES).concat(['sfera']).forEach(key => {
+    const label = (SOLID_SHAPES[key] && SOLID_SHAPES[key].label) || key;
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.dataset.shapeKey = key;
+    btn.style.cssText = 'flex:0 0 auto; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 14px; font-size:13px; white-space:nowrap; cursor:pointer;';
+    topBar.appendChild(btn);
+  });
+  backdrop.appendChild(topBar);
+
+  const viewerArea = document.createElement('div');
+  viewerArea.style.cssText = 'flex:1 1 auto; position:relative; touch-action:none; overflow:hidden;';
+  backdrop.appendChild(viewerArea);
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Trage pentru a roti • Ciupește / derulează pentru zoom';
+  hint.style.cssText = 'position:absolute; top:10px; left:50%; transform:translateX(-50%); color:#bbb; font-size:12px; background:rgba(0,0,0,0.5); padding:5px 12px; border-radius:6px; pointer-events:none;';
+  viewerArea.appendChild(hint);
+
+  // ---- panoul cu sliderul de desfășurare în plan (ascuns pt sferă, care nu are desfășurare) ----
+  const foldBar = document.createElement('div');
+  foldBar.style.cssText = 'flex:0 0 auto; padding:8px 16px 4px; background:#161616; border-top:1px solid #333;';
+  foldBar.innerHTML =
+    '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; color:#bbb; margin-bottom:2px;">' +
+    '<span>◀ Asamblat</span><span id="viewer3d-fold-pct">0%</span><span>Desfășurat ▶</span>' +
+    '</div>' +
+    '<div style="display:flex; align-items:center; gap:10px;">' +
+    '<button id="viewer3d-fold-play" title="Redă animația de desfășurare" style="flex:0 0 auto; width:30px; height:30px; border-radius:50%; border:none; background:#4da3ff; color:#fff; font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">▶</button>' +
+    '<input id="viewer3d-fold-slider" type="range" min="0" max="100" value="0" step="1" style="flex:1 1 auto; width:100%; accent-color:#4da3ff;">' +
+    '</div>';
+  backdrop.appendChild(foldBar);
+  const foldSlider = foldBar.querySelector('#viewer3d-fold-slider');
+  const foldPct = foldBar.querySelector('#viewer3d-fold-pct');
+  const foldPlayBtn = foldBar.querySelector('#viewer3d-fold-play');
+
+  // ---- panoul cu sliderul de viteză a rotației automate (merge indiferent dacă
+  //      forma e asamblată, pe jumătate desfăcută sau complet plată) ----
+  const rotateBar = document.createElement('div');
+  rotateBar.style.cssText = 'flex:0 0 auto; padding:8px 16px; background:#161616; border-top:1px solid #333;';
+  rotateBar.innerHTML =
+    '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; color:#bbb; margin-bottom:2px;">' +
+    '<span>⟲ Rotație automată</span><span id="viewer3d-rotate-val">Oprită</span>' +
+    '</div>' +
+    '<input id="viewer3d-rotate-slider" type="range" min="-10" max="10" value="0" step="1" style="width:100%; accent-color:#4da3ff;">';
+  backdrop.appendChild(rotateBar);
+  const rotateSlider = rotateBar.querySelector('#viewer3d-rotate-slider');
+  const rotateVal = rotateBar.querySelector('#viewer3d-rotate-val');
+
+  const bottomBar = document.createElement('div');
+  bottomBar.style.cssText = 'flex:0 0 auto; padding:12px; display:flex; justify-content:center; gap:12px; background:#161616; border-top:1px solid #333;';
+  bottomBar.innerHTML =
+    '<button id="viewer3d-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:8px; padding:10px 22px; font-size:14px;">✕ Renunță</button>' +
+    '<button id="viewer3d-ok" style="background:#4da3ff; color:#fff; border:none; border-radius:8px; padding:10px 26px; font-size:14px; font-weight:600;">✓ Inserează pe tablă</button>';
+  backdrop.appendChild(bottomBar);
+
+  document.body.appendChild(backdrop);
+
+  // ---- scena Three.js ----
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, 1, 1, 6000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.domElement.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
+  viewerArea.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  dirLight.position.set(150, 220, 180);
+  scene.add(dirLight);
+  const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.35);
+  dirLight2.position.set(-150, -80, -120);
+  scene.add(dirLight2);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 0, 0);
+  controls.autoRotate = false;
+  controls.autoRotateSpeed = 0;
+
+  rotateSlider.addEventListener('input', () => {
+    const v = parseInt(rotateSlider.value, 10);
+    controls.autoRotateSpeed = v * 3; // OrbitControls: implicit 2 ≈ 30s/tură; scalăm pt control mai vizibil
+    controls.autoRotate = v !== 0;
+    rotateVal.textContent = v === 0 ? 'Oprită' : (v > 0 ? `→ ${v}` : `← ${Math.abs(v)}`);
+  });
+
+  let currentGroup = null;
+  let currentUpdateAt = null;
+  function loadShape(key) {
+    stopFoldPlay();
+    if (currentGroup) { scene.remove(currentGroup); disposeThreeGroup(currentGroup); }
+    const built = build3DShapeGroupAnimated(key);
+    if (!built) return;
+    currentGroup = built.group;
+    currentUpdateAt = built.updateAt;
+    scene.add(currentGroup);
+
+    const hasFold = !!currentUpdateAt;
+    foldBar.style.display = hasFold ? '' : 'none';
+    foldSlider.value = '0';
+    foldPct.textContent = '0%';
+
+    // distanța camerei se calculează pt cel mai mare caz (starea complet desfăcută e
+    // de obicei mult mai întinsă decât cea asamblată) — ca toată plaja sliderului să încapă
+    let maxSize = 0;
+    if (currentUpdateAt) {
+      currentUpdateAt(0);
+      maxSize = new THREE.Box3().setFromObject(currentGroup).getSize(new THREE.Vector3()).length();
+      currentUpdateAt(1);
+    }
+    const box = new THREE.Box3().setFromObject(currentGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    currentGroup.position.sub(center);
+    const size = box.getSize(new THREE.Vector3());
+    maxSize = Math.max(maxSize, size.length());
+    const dist = maxSize * 1.1 + 60;
+    camera.position.set(dist * 0.6, dist * 0.45, dist * 0.75);
+    camera.near = 1; camera.far = dist * 10;
+    camera.updateProjectionMatrix();
+    controls.target.set(0, 0, 0);
+    controls.update();
+    [...topBar.children].forEach(b => { b.style.background = b.dataset.shapeKey === key ? '#4da3ff' : '#2a2a2a'; });
+  }
+
+  function applyFold(pct) {
+    foldSlider.value = String(pct);
+    foldPct.textContent = Math.round(pct) + '%';
+    if (currentUpdateAt) {
+      currentUpdateAt(1 - pct / 100);
+      currentGroup.position.set(0, 0, 0);
+      const box = new THREE.Box3().setFromObject(currentGroup);
+      const center = box.getCenter(new THREE.Vector3());
+      currentGroup.position.sub(center);
+    }
+  }
+
+  foldSlider.addEventListener('input', () => {
+    stopFoldPlay();
+    applyFold(parseInt(foldSlider.value, 10));
+  });
+
+  // ---- animație PLAY: desfășoară automat corpul, apoi îl reasamblează, în buclă ----
+  let foldPlayRafId = null;
+  let foldPlayDir = 1; // 1 = spre desfășurat, -1 = spre asamblat
+  const FOLD_PLAY_PCT_PER_FRAME = 0.8;
+  function stopFoldPlay() {
+    if (foldPlayRafId !== null) {
+      cancelAnimationFrame(foldPlayRafId);
+      foldPlayRafId = null;
+    }
+    foldPlayBtn.textContent = '▶';
+  }
+  function stepFoldPlay() {
+    let pct = parseInt(foldSlider.value, 10) + foldPlayDir * FOLD_PLAY_PCT_PER_FRAME;
+    if (pct >= 100) { pct = 100; foldPlayDir = -1; }
+    else if (pct <= 0) { pct = 0; foldPlayDir = 1; }
+    applyFold(pct);
+    foldPlayRafId = requestAnimationFrame(stepFoldPlay);
+  }
+  foldPlayBtn.addEventListener('click', () => {
+    if (foldPlayRafId !== null) {
+      stopFoldPlay();
+      return;
+    }
+    if (parseInt(foldSlider.value, 10) >= 100) foldPlayDir = -1;
+    else foldPlayDir = 1;
+    foldPlayBtn.textContent = '⏸';
+    foldPlayRafId = requestAnimationFrame(stepFoldPlay);
+  });
+
+  function resize() {
+    const w = viewerArea.clientWidth, h = viewerArea.clientHeight;
+    if (!w || !h) return;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  let rafId;
+  function animate() {
+    controls.update();
+    renderer.render(scene, camera);
+    rafId = requestAnimationFrame(animate);
+  }
+  animate();
+
+  topBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-shape-key]');
+    if (btn) loadShape(btn.dataset.shapeKey);
+  });
+
+  loadShape('cub');
+
+  function cleanup() {
+    stopFoldPlay();
+    cancelAnimationFrame(rafId);
+    window.removeEventListener('resize', resize);
+    controls.dispose();
+    if (currentGroup) disposeThreeGroup(currentGroup);
+    renderer.dispose();
+    backdrop.remove();
+  }
+
+  document.getElementById('viewer3d-cancel').addEventListener('click', cleanup);
+
+  document.getElementById('viewer3d-ok').addEventListener('click', () => {
+    renderer.render(scene, camera);
+    const dataUrl = captureTrimmedSnapshot(renderer.domElement, 24);
+    const img = new Image();
+    img.onload = () => {
+      const maxW = wrap.clientWidth * 0.5;
+      const maxH = wrap.clientHeight * 0.5;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxW) { h = h * maxW / w; w = maxW; }
+      if (h > maxH) { w = w * maxH / h; h = maxH; }
+      const x = Math.max(20, (wrap.clientWidth - w) / 2);
+      const y = Math.max(20, (wrap.clientHeight - h) / 2);
+      const page = getCurrentPage();
+      const id = addImageToPage(page, img, x, y, w, h);
+      const imgData = page.images[page.images.length - 1];
+      undoStack.push({ type: 'imageAdd', page, img: imgData });
+      redoStack = [];
+      setTool('select');
+      selectedImages.clear();
+      selectedImages.add(id);
+      updateImageSelection();
+      updateStatus();
+      showToast('✓ Corp 3D inserat pe tablă');
+    };
+    img.src = dataUrl;
+    cleanup();
+  });
+}
+
+document.getElementById('btn-3d').addEventListener('click', () => open3DViewer());
 
 // ================================================================
 // EVENT LISTENERS BUTOANE
@@ -5431,6 +7017,145 @@ function snapToGuides(p) {
   });
   lastSnapGuideName = bestName;
   return best || p;
+}
+
+// ================================================================
+// AJUTOR ȘI LICENȚĂ
+// ================================================================
+
+const HELP_CONTENT_HTML = `
+<h4>Desen</h4>
+<ul>
+  <li><b>Creion</b> — desen liber cu mâna.</li>
+  <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
+  <li><b>Cerc</b> — trage din centru spre exterior.</li>
+  <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi apasă bifa (✓) ca să închizi forma.</li>
+  <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
+</ul>
+
+<h4>Matematică</h4>
+<ul>
+  <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
+  <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
+  <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
+  <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
+  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
+</ul>
+
+<h4>Rotirea corpurilor 3D</h4>
+<ul>
+  <li>Selectează corpul, apoi trage de mânerul de rotire (cercul albastru).</li>
+  <li>Cât timp tragi, jos apare unghiul curent de rotație.</li>
+  <li>Implicit, muchiile din spate (ascunse privirii) se desenează cu linie întreruptă — convenția clasică de manual.</li>
+  <li>Dacă preferi ca toate muchiile să fie continue, bifează opțiunea de mai jos.</li>
+</ul>
+<p style="display:flex;align-items:center;gap:8px;">
+  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+    <input type="checkbox" id="toggle-hidden-lines"> Arată toate muchiile cu linie continuă
+  </label>
+</p>
+
+<h4>Selecție și editare</h4>
+<ul>
+  <li><b>Selectare</b> — atinge sau încercuiește (lasou) elementele dorite.</li>
+  <li><b>Selecție multiplă</b> — utilă pe ecran tactil, fără tasta Shift.</li>
+  <li>Un element selectat poate fi mutat, redimensionat (mânerul portocaliu) sau șters (tasta Delete / butonul radieră).</li>
+</ul>
+
+<h4>Culoare și grosime</h4>
+<p>Alege o culoare din paletă sau selectorul de culoare, iar grosimea liniei cu butoanele <code>−</code> / <code>+</code>.</p>
+
+<h4>Imagini și fișe PDF</h4>
+<ul>
+  <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă.</li>
+</ul>
+
+<h4>Fișier și istoric</h4>
+<ul>
+  <li><b>Anulează / Refă</b> — undo/redo pentru orice acțiune.</li>
+  <li><b>Șterge tot</b> — golește pagina curentă.</li>
+  <li><b>Exportă PDF</b> — salvează tabla curentă ca document PDF.</li>
+  <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior.</li>
+</ul>
+
+<h4>Pagini și fundal</h4>
+<p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
+`;
+
+const LICENSE_CONTENT_HTML = `
+<h4>Licența aplicației</h4>
+<p>Acest software este pus la dispoziție "ca atare", fără nicio garanție explicită sau implicită. Utilizarea lui este pe propria răspundere.</p>
+
+<h4>Biblioteci terțe folosite</h4>
+<p>Aplicația este construită folosind exclusiv biblioteci gratuite și open-source:</p>
+<table>
+  <tr><th>Bibliotecă</th><th>Scop</th><th>Licență</th></tr>
+  <tr><td>Tabler Icons</td><td>Set de iconițe pentru interfață</td><td>MIT</td></tr>
+  <tr><td>jsPDF</td><td>Generarea și exportul fișierelor PDF</td><td>MIT</td></tr>
+  <tr><td>PDF.js</td><td>Afișarea fișelor de lucru încărcate în format PDF</td><td>Apache 2.0</td></tr>
+  <tr><td>Three.js</td><td>Randarea corpului 3D interactiv</td><td>MIT</td></tr>
+  <tr><td>OrbitControls (Three.js)</td><td>Rotirea/zoom-ul cu mouse-ul sau degetul în modulul 3D interactiv</td><td>MIT</td></tr>
+</table>
+<p>Fiecare bibliotecă terță rămâne sub licența proprie, publicată de autorii ei originali; nicio bibliotecă folosită aici nu impune costuri de utilizare.</p>
+
+<h4>Conținut generat de utilizator</h4>
+<p>Desenele, textele și fișierele PDF/sesiune create sau încărcate de tine rămân proprietatea ta. Aplicația nu revendică niciun drept asupra lor.</p>
+
+<h4>Contact</h4>
+<p>Pentru întrebări legate de licențiere sau utilizare, contactează administratorul aplicației.</p>
+`;
+
+function openInfoModal(title, bodyHtml) {
+  const backdrop = document.getElementById('info-modal-backdrop');
+  const titleEl = document.getElementById('info-modal-title');
+  const bodyEl = document.getElementById('info-modal-body');
+  if (!backdrop || !titleEl || !bodyEl) return;
+  titleEl.textContent = title;
+  bodyEl.innerHTML = bodyHtml;
+  backdrop.classList.add('show');
+  const hiddenLinesToggle = document.getElementById('toggle-hidden-lines');
+  if (hiddenLinesToggle) {
+    // Bifat = "arată toate muchiile continue" → SOLID_SHOW_HIDDEN_LINES = false.
+    // Nebifat (implicit) = muchiile din spate întrerupte → SOLID_SHOW_HIDDEN_LINES = true.
+    hiddenLinesToggle.checked = !SOLID_SHOW_HIDDEN_LINES;
+    hiddenLinesToggle.addEventListener('change', () => {
+      SOLID_SHOW_HIDDEN_LINES = !hiddenLinesToggle.checked;
+      rebuildAllSolid3DStrokes();
+      redrawStrokes();
+      drawSelectionHighlights();
+    });
+  }
+}
+function closeInfoModal() {
+  const backdrop = document.getElementById('info-modal-backdrop');
+  if (backdrop) backdrop.classList.remove('show');
+}
+
+// Reconstruiește (la aceeași rotație) toate corpurile 3D deja desenate, pe toate paginile —
+// folosit când se schimbă comutatorul de linii ascunse, ca schimbarea să se vadă imediat și
+// pe formele plasate deja, nu doar pe cele noi.
+function rebuildAllSolid3DStrokes() {
+  pages.forEach(page => {
+    (page.strokes || []).forEach(stroke => {
+      if (stroke.type === 'solid3d' && SOLID_SHAPES[stroke.shape]) {
+        rotateSolid3D(stroke, stroke.rotationY || 0);
+      }
+    });
+  });
+}
+
+const btnHelp = document.getElementById('btn-help');
+if (btnHelp) btnHelp.addEventListener('click', () => openInfoModal('Ajutor', HELP_CONTENT_HTML));
+const btnLicense = document.getElementById('btn-license');
+if (btnLicense) btnLicense.addEventListener('click', () => openInfoModal('Licență', LICENSE_CONTENT_HTML));
+const infoModalClose = document.getElementById('info-modal-close');
+if (infoModalClose) infoModalClose.addEventListener('click', closeInfoModal);
+const infoModalBackdrop = document.getElementById('info-modal-backdrop');
+if (infoModalBackdrop) {
+  infoModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === infoModalBackdrop) closeInfoModal();
+  });
 }
 
 // ================================================================
