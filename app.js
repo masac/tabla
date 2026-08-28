@@ -42,6 +42,10 @@ let isCompassRadiusPreview = false;
 let protractorPhase = 0;
 
 let bgColor = '#000000';
+let boardRuling = 'none'; // 'none' | 'grid' | 'dictando' | 'music'
+let rulingSize = 28; // distanța de bază (px) dintre liniile/pătratele liniaturii
+let rulingColor = '#ffffff'; // culoarea liniaturii; implicit alb, fiindcă tabla pornește cu fundal negru
+let rulingOpacity = 0.5; // opacitatea liniaturii (0-1); implicit 50%
 
 // ================================================================
 // VARIABILE PENTRU SELECTARE ȘI MUTARE
@@ -832,6 +836,75 @@ function drawBg() {
   bgCtx.clearRect(0, 0, bgC.width, bgC.height);
   bgCtx.fillStyle = bgColor;
   bgCtx.fillRect(0, 0, bgC.width, bgC.height);
+  drawBoardRuling();
+}
+
+// Convertește o culoare (hex #rrggbb sau rgba(...)) într-un string rgba cu opacitatea dată,
+// suprascriind orice canal alfa existent.
+function colorWithOpacity(colorStr, opacity) {
+  let r, g, b;
+  if (colorStr.startsWith('#')) {
+    const h = colorStr.replace('#', '');
+    r = parseInt(h.substring(0, 2), 16);
+    g = parseInt(h.substring(2, 4), 16);
+    b = parseInt(h.substring(4, 6), 16);
+  } else {
+    const m = colorStr.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
+    r = m ? +m[1] : 255; g = m ? +m[2] : 255; b = m ? +m[3] : 255;
+  }
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
+// Culoare de liniatură puternic contrastantă ("stridentă") față de fundal, ca liniile
+// caietului să rămână clar vizibile indiferent de culoarea aleasă pentru tablă. Dacă
+// utilizatorul a ales manual o culoare (rulingColor), aceasta are prioritate.
+function getRulingColor() {
+  const base = rulingColor || (isColorDark(bgColor) ? '#ffe100' : '#e6007e');
+  return colorWithOpacity(base, rulingOpacity);
+}
+
+// Desenează, peste culoarea de fundal, liniatura aleasă de utilizator: caroiaj (ca în
+// caietul de matematică), liniatură dictando (linii orizontale simple, ca în caietul de
+// scriere/dictando) sau portativ (ca în caietul de muzică). Toate distanțele se scalează
+// proporțional cu rulingSize, controlat din bara de instrumente. Se folosesc dimensiuni CSS
+// (nu cele scalate cu DPR), fiindcă bgCtx e deja scalat cu bgCtx.scale(DPR, DPR) în initCanvas().
+function drawBoardRuling() {
+  if (boardRuling === 'none') return;
+  const w = bgC.width / DPR, h = bgC.height / DPR;
+  const cx = bgCtx;
+  const scale = rulingSize / 28;
+  cx.save();
+  cx.strokeStyle = getRulingColor();
+
+  if (boardRuling === 'grid') {
+    const step = rulingSize;
+    cx.lineWidth = 1;
+    cx.beginPath();
+    for (let x = 0; x <= w; x += step) { cx.moveTo(x + 0.5, 0); cx.lineTo(x + 0.5, h); }
+    for (let y = 0; y <= h; y += step) { cx.moveTo(0, y + 0.5); cx.lineTo(w, y + 0.5); }
+    cx.stroke();
+  } else if (boardRuling === 'dictando') {
+    // linii orizontale simple, egal distanțate, exact ca în caietul de dictando din imagine.
+    const step = rulingSize;
+    cx.lineWidth = 1;
+    cx.beginPath();
+    for (let y = step; y <= h; y += step) { cx.moveTo(0, y + 0.5); cx.lineTo(w, y + 0.5); }
+    cx.stroke();
+  } else if (boardRuling === 'music') {
+    const lineGap = 9 * scale, staffGap = 56 * scale;
+    const staffHeight = lineGap * 4;
+    const period = staffHeight + staffGap;
+    cx.lineWidth = 1.2;
+    for (let top = 40 * scale; top < h; top += period) {
+      cx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const y = top + i * lineGap + 0.5;
+        cx.moveTo(0, y); cx.lineTo(w, y);
+      }
+      cx.stroke();
+    }
+  }
+  cx.restore();
 }
 
 function drawStrokeOn(c, stroke) {
@@ -3319,6 +3392,25 @@ function setBackgroundColor(newColor, btnId) {
   updateGeoToolContrast();
   drawBg();
   redrawStrokes();
+  syncRulingColorPicker();
+}
+
+function setBoardRuling(type, btnId) {
+  boardRuling = type;
+  document.querySelectorAll('.ruling-btn').forEach(b => b.classList.remove('active'));
+  if (btnId) {
+    document.getElementById(btnId).classList.add('active');
+  }
+  drawBg();
+}
+
+// Actualizează swatch-ul selectorului de culoare al liniaturii ca să reflecte culoarea
+// efectiv folosită: cea aleasă manual (rulingColor), sau — dacă e pe automat — o variantă
+// opacă a culorii de contrast calculate pentru fundalul curent.
+function syncRulingColorPicker() {
+  const picker = document.getElementById('ruling-color-pick');
+  if (!picker) return;
+  picker.value = rulingColor || (isColorDark(bgColor) ? '#ffe100' : '#e6007e');
 }
 
 function setColorFromButton(c, btnId) {
@@ -5782,6 +5874,35 @@ document.getElementById('bg-lightgray').onclick = () => setBackgroundColor('#d3d
 document.getElementById('bg-beige').onclick = () => setBackgroundColor('#f5f5dc', 'bg-beige');
 document.getElementById('bg-blue').onclick = () => setBackgroundColor('#add8e6', 'bg-blue');
 document.getElementById('bg-green').onclick = () => setBackgroundColor('#90ee90', 'bg-green');
+document.getElementById('ruling-none').onclick = () => setBoardRuling('none', 'ruling-none');
+document.getElementById('ruling-grid').onclick = () => setBoardRuling('grid', 'ruling-grid');
+document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
+document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
+document.getElementById('ruling-size-minus').onclick = () => {
+  rulingSize = Math.max(10, rulingSize - 4);
+  document.getElementById('ruling-size-val').textContent = rulingSize;
+  drawBg();
+};
+document.getElementById('ruling-size-plus').onclick = () => {
+  rulingSize = Math.min(80, rulingSize + 4);
+  document.getElementById('ruling-size-val').textContent = rulingSize;
+  drawBg();
+};
+document.getElementById('ruling-color-pick').addEventListener('input', (e) => {
+  rulingColor = e.target.value;
+  drawBg();
+});
+document.getElementById('ruling-opacity-minus').onclick = () => {
+  rulingOpacity = Math.max(0.1, Math.round((rulingOpacity - 0.1) * 10) / 10);
+  document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
+  drawBg();
+};
+document.getElementById('ruling-opacity-plus').onclick = () => {
+  rulingOpacity = Math.min(1, Math.round((rulingOpacity + 0.1) * 10) / 10);
+  document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
+  drawBg();
+};
+syncRulingColorPicker();
 
 document.getElementById('btn-upload').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = e => {
@@ -6047,6 +6168,10 @@ async function saveSession() {
     currentPageIdx,
     pages: pagesData,
     bgColor: bgColor,
+    boardRuling: boardRuling,
+    rulingSize: rulingSize,
+    rulingColor: rulingColor,
+    rulingOpacity: rulingOpacity,
     imageIdCounter: imageIdCounter
   };
 
@@ -6125,6 +6250,18 @@ function loadSession(file) {
           document.getElementById(btnMap[bgColor]).classList.add('active-bg');
         }
       }
+
+      boardRuling = data.boardRuling || 'none';
+      document.querySelectorAll('.ruling-btn').forEach(b => b.classList.remove('active'));
+      const rulingBtnMap = { none: 'ruling-none', grid: 'ruling-grid', dictando: 'ruling-dictando', music: 'ruling-music' };
+      const activeRulingBtn = document.getElementById(rulingBtnMap[boardRuling]);
+      if (activeRulingBtn) activeRulingBtn.classList.add('active');
+      rulingSize = data.rulingSize || 28;
+      document.getElementById('ruling-size-val').textContent = rulingSize;
+      rulingColor = data.rulingColor || '#ffffff';
+      rulingOpacity = (data.rulingOpacity != null) ? data.rulingOpacity : 0.5;
+      document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
+      syncRulingColorPicker();
       
       selectedStrokes.clear();
       selectedImages.clear();
@@ -7081,6 +7218,7 @@ const HELP_CONTENT_HTML = `
 
 <h4>Pagini și fundal</h4>
 <p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
+<p>Din grupul alăturat de butoane poți alege și o liniatură pentru tablă: <b>caroiaj</b> (ca în caietul de matematică), <b>dictando</b> (linii ca în caietul de scriere/dictando) sau <b>portativ</b> (ca în caietul de muzică). Cu butoanele −/+ reglezi mărimea pătratelor/liniilor și opacitatea lor, iar cu selectorul de culoare alegi manual culoarea liniaturii — implicit e alb, la 50% opacitate, potrivit fundalului negru al tablei.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
