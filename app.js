@@ -24,7 +24,7 @@ let selCtx = selC.getContext('2d');
 let boardUndoStack = [];
 let boardRedoStack = [];
 
-let DPR = window.devicePixelRatio || 1;
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
 let tool = 'pen', color = '#ffffff';
 let lastPenSize = 3, lastEraserSize = 25;
 
@@ -413,8 +413,8 @@ window.addEventListener('resize', function() {
   if (pdfModeActive) {
     initPaneDrawCanvas('top');
     renderPdfPane('top');
-    initCanvas();
   }
+  initCanvas();
 });
 
 function addImageToPage(page, img, x, y, w, h) {
@@ -818,7 +818,7 @@ function hideAngleReadout(duration = 4000) {
 }
 
 function initCanvas() {
-  DPR = window.devicePixelRatio || 1;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
   const w = wrap.clientWidth, h = wrap.clientHeight;
   [bgC, drawC, overlayC, selC].forEach(c => {
     c.width = w * DPR; c.height = h * DPR;
@@ -4024,7 +4024,7 @@ function submitFunctionModal() {
 
 document.getElementById('fn-ok-btn').onclick = submitFunctionModal;
 document.getElementById('fn-cancel-btn').onclick = closeFunctionModal;
-fnModalBackdrop.addEventListener('mousedown', (e) => {
+fnModalBackdrop.addEventListener('pointerdown', (e) => {
   if (e.target === fnModalBackdrop) closeFunctionModal();
 });
 fnExprInput.addEventListener('keydown', (e) => {
@@ -5190,7 +5190,7 @@ function closeConfirmModal(result) {
 }
 confirmModalOk.onclick = () => closeConfirmModal(true);
 confirmModalCancel.onclick = () => closeConfirmModal(false);
-confirmModalBackdrop.addEventListener('mousedown', (e) => {
+confirmModalBackdrop.addEventListener('pointerdown', (e) => {
   if (e.target === confirmModalBackdrop) closeConfirmModal(false);
 });
 
@@ -5587,10 +5587,11 @@ function open3DViewer() {
   topBar.style.cssText = 'flex:0 0 auto; padding:10px 12px; display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; background:#161616; border-bottom:1px solid #333;';
   Object.keys(NET_SHAPES).concat(['sfera']).forEach(key => {
     const label = (SOLID_SHAPES[key] && SOLID_SHAPES[key].label) || key;
+    const icon = buildShapeIconSVG(key, 18);
     const btn = document.createElement('button');
-    btn.textContent = label;
+    btn.innerHTML = `<span style="display:inline-flex; align-items:center; justify-content:center;">${icon}</span><span>${label}</span>`;
     btn.dataset.shapeKey = key;
-    btn.style.cssText = 'flex:0 0 auto; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 14px; font-size:13px; white-space:nowrap; cursor:pointer;';
+    btn.style.cssText = 'flex:0 0 auto; display:flex; align-items:center; gap:6px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 14px; font-size:13px; white-space:nowrap; cursor:pointer;';
     topBar.appendChild(btn);
   });
   backdrop.appendChild(topBar);
