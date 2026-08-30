@@ -1451,6 +1451,8 @@ function getStrokeBoundingBox(stroke) {
     return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
   }
   if (stroke.type === 'function') {
+    const allPts = [];
+    if (stroke.segments) stroke.segments.forEach(seg => allPts.push(...seg));
     if (stroke.xAxis) allPts.push(...stroke.xAxis);
     if (stroke.yAxis) allPts.push(...stroke.yAxis);
     (stroke.xTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
