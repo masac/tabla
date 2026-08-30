@@ -5578,6 +5578,7 @@ function captureTrimmedSnapshot(sourceCanvas, padding) {
 
 function open3DViewer() {
   if (typeof THREE === 'undefined') { showToast('Modulul 3D nu s-a putut încărca'); return; }
+  if (document.getElementById('viewer3d-backdrop')) return; // deja deschis — evită dublarea contextelor WebGL
 
   const backdrop = document.createElement('div');
   backdrop.id = 'viewer3d-backdrop';
@@ -5789,6 +5790,12 @@ function open3DViewer() {
     controls.dispose();
     if (currentGroup) disposeThreeGroup(currentGroup);
     renderer.dispose();
+    // renderer.dispose() nu eliberează neapărat contextul WebGL în sine — pe dispozitive
+    // cu un număr limitat de contexte WebGL simultane (frecvent pe Android/GPU-uri mobile),
+    // deschiderile repetate ale acestui viewer ar epuiza contextele disponibile și ar duce
+    // la un ecran gol la a N-a deschidere. forceContextLoss() eliberează explicit contextul.
+    if (typeof renderer.forceContextLoss === 'function') renderer.forceContextLoss();
+    renderer.domElement = null;
     backdrop.remove();
   }
 
