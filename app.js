@@ -1,4 +1,261 @@
 // ====================================================================
+// I18N — sistem de traducere Română (implicit) / Engleză
+// ====================================================================
+let LANG = (function () {
+  try {
+    const saved = localStorage.getItem('wb-lang');
+    if (saved === 'ro' || saved === 'en') return saved;
+  } catch (e) {}
+  return 'ro';
+})();
+
+// Traduceri pentru atribute statice (title / placeholder / aria-label),
+// indexate după textul românesc exact (implicit).
+const UI_TEXT = {
+  'Linie întreruptă': 'Dashed line',
+  'Cerc (trage din centru)': 'Circle (drag from center)',
+  'Dreptunghi': 'Rectangle',
+  'Poligon': 'Polygon',
+  'Finalizează poligonul (utilă pe ecran tactil)': 'Finish the polygon (useful on touchscreens)',
+  'Reprezintă grafic o funcție f(x)': 'Plot a function f(x)',
+  'Corpuri geometrice': 'Geometric solids',
+  'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
+  'Mijlocul unui segment (click pe un segment)': 'Midpoint of a segment (click on a segment)',
+  'Selecție multiplă (pentru ecran tactil, fără tastă Shift)': 'Multi-select (for touchscreens, no Shift key needed)',
+  'Riglă': 'Ruler',
+  'Echer': 'Set square',
+  'Raportor': 'Protractor',
+  'Compas': 'Compass',
+  'Culoare': 'Color',
+  'Roșu': 'Red',
+  'Verde deschis': 'Light green',
+  'Albastru': 'Blue',
+  'Violet': 'Purple',
+  'Galben': 'Yellow',
+  'Negru': 'Black',
+  'Alb': 'White',
+  'Încarcă o fișă de lucru/test în format PDF': 'Load a worksheet/test as PDF',
+  'Comută între tabla normală și fișa PDF': 'Switch between the normal board and the PDF sheet',
+  'Gri': 'Gray',
+  'Gri deschis': 'Light gray',
+  'Bej': 'Beige',
+  'Albastru deschis': 'Light blue',
+  'Fără liniatură': 'No ruling',
+  'Caroiaj (ca în caietul de matematică)': 'Grid (like a math notebook)',
+  'Liniatură dictando (ca în caietul de dictando)': 'Ruled lines (like a writing notebook)',
+  'Portativ (ca în caietul de muzică)': 'Staff lines (like a music notebook)',
+  'Micșorează liniatura': 'Decrease ruling size',
+  'Mărește liniatura': 'Increase ruling size',
+  'Culoare liniatură': 'Ruling color',
+  'Scade opacitatea liniaturii': 'Decrease ruling opacity',
+  'Crește opacitatea liniaturii': 'Increase ruling opacity',
+  'Ajutor': 'Help',
+  'Licență': 'License',
+  'Ecran complet (F11)': 'Fullscreen (F11)',
+  'Pagina anterioară': 'Previous page',
+  'Pagina următoare': 'Next page',
+  'Micșorează': 'Zoom out',
+  'Mărește': 'Zoom in',
+  'Centrează (păstrează zoom-ul)': 'Center (keeps zoom)',
+  'Resetează poziția/zoom': 'Reset position/zoom',
+  'Mută sus': 'Move up',
+  'Mută jos': 'Move down',
+  'Mută stânga': 'Move left',
+  'Mută dreapta': 'Move right',
+  'Trage pentru a redimensiona ferestrele': 'Drag to resize panels',
+  'Dimensiune font': 'Font size',
+  'Aliniere stânga': 'Align left',
+  'Centrat': 'Center',
+  'Aliniere dreapta': 'Align right',
+  'Culoare text': 'Text color',
+  'Confirmă (Ctrl+Enter)': 'Confirm (Ctrl+Enter)',
+  'Anulează (Esc)': 'Cancel (Esc)',
+  'Verde': 'Green',
+  'Portocaliu': 'Orange',
+  'Roșu închis': 'Dark red',
+  'Turcoaz': 'Turquoise',
+  'Trage pentru a redimensiona': 'Drag to resize',
+  'Șterge pagina curentă': 'Delete current page',
+  'Închide': 'Close',
+  'ex: x^2 - 3x + 2': 'e.g. x^2 - 3x + 2',
+  'Scrie text...': 'Type text...',
+  'Limbă / Language': 'Language / Limbă'
+};
+
+// Reguli de traducere pentru mesaje construite dinamic (toast-uri, hint-uri,
+// dialoguri de confirmare) — potrivire pe expresii regulate, cu grupuri
+// capturate pentru părțile numerice/variabile.
+const RO_EN_RULES = [
+  [/^✓ Fișă PDF încărcată \((\d+) pagini\)$/, '✓ PDF sheet loaded ($1 pages)'],
+  [/^🔒 Imagine blocată$/, '🔒 Image locked'],
+  [/^🔓 Imagine deblocată$/, '🔓 Image unlocked'],
+  [/^🔒 Imaginea e blocată — deblocheaz-o întâi$/, '🔒 The image is locked — unlock it first'],
+  [/^✓ (\d+) imagini șterse \((\d+) blocate au fost păstrate\)$/, '✓ $1 images deleted ($2 locked ones kept)'],
+  [/^✓ (\d+) imagini șterse$/, '✓ $1 images deleted'],
+  [/^✓ (\d+) stroke-uri șterse$/, '✓ $1 strokes deleted'],
+  [/^✓ Poligon desenat \((\d+) laturi\)$/, '✓ Polygon drawn ($1 sides)'],
+  [/^✓ Mijlocul segmentului a fost adăugat$/, '✓ Segment midpoint added'],
+  [/^⚠ Dă click chiar pe un segment \(linie dreaptă\)$/, '⚠ Click exactly on a segment (straight line)'],
+  [/^↻ Trage stânga\/dreapta pentru a roti$/, '↻ Drag left/right to rotate'],
+  [/^↔ Trage pentru a scala$/, '↔ Drag to scale'],
+  [/^📦 (\d+) elemente selectate - trage pentru a muta$/, '📦 $1 elements selected - drag to move'],
+  [/^🟨 Poligon: punctul 1 \((-?\d+), (-?\d+)\) - click pentru următorul punct$/, '🟨 Polygon: point 1 ($1, $2) - click for the next point'],
+  [/^🟨 Poligon: punctul (\d+) \((-?\d+), (-?\d+)\) - dublu-click pentru finalizare$/, '🟨 Polygon: point $1 ($2, $3) - double-click to finish'],
+  [/^✏️ Editare text - Enter pentru a salva$/, '✏️ Editing text - Enter to save'],
+  [/^✓ Rotit \((-?\d+\.?\d*)°\)$/, '✓ Rotated ($1°)'],
+  [/^✓ Stroke scalat$/, '✓ Stroke scaled'],
+  [/^✓ (\d+) stroke-uri mutate$/, '✓ $1 strokes moved'],
+  [/^✓ Riglă: (-?\d+\.?\d*) cm$/, '✓ Ruler: $1 cm'],
+  [/^✓ Unghi desenat: (-?\d+\.?\d*)°$/, '✓ Angle drawn: $1°'],
+  [/^✓ Pătrat desenat \((\d+)×(\d+)\)$/, '✓ Square drawn ($1×$2)'],
+  [/^✓ Dreptunghi desenat \((\d+)×(\d+)\)$/, '✓ Rectangle drawn ($1×$2)'],
+  [/^❌ Poligon anulat$/, '❌ Polygon cancelled'],
+  [/^❌ Selecție anulată$/, '❌ Selection cancelled'],
+  [/^✓ Pagina ștearsă$/, '✓ Page deleted'],
+  [/^✓ (\d+) imagini încărcate \(câte una pe pagină\)$/, '✓ $1 images loaded (one per page)'],
+  [/^⚠ (\d+) imagini încărcate, unele au eșuat$/, '⚠ $1 images loaded, some failed'],
+  [/^✓ Grafic desenat: f\(x\) = ([\s\S]*)$/, '✓ Graph plotted: f(x) = $1'],
+  [/^✓ ([\s\S]+) — selectat\(ă\), trage pentru a muta sau scala$/, '✓ $1 — selected, drag to move or scale'],
+  [/^Desfășurare anulată$/, 'Unfolding cancelled'],
+  [/^Modulul 3D nu s-a putut încărca$/, 'The 3D module could not be loaded'],
+  [/^✓ Corp 3D inserat pe tablă$/, '✓ 3D solid inserted on the board'],
+  [/^✓ Selecție multiplă activă \(fiecare atingere adaugă la selecție\)$/, '✓ Multi-select active (each tap adds to selection)'],
+  [/^Selecție multiplă dezactivată$/, 'Multi-select disabled'],
+  [/^✓ Imagine încărcată$/, '✓ Image loaded'],
+  [/^✓ Imagine din clipboard adăugată$/, '✓ Image from clipboard added'],
+  [/^✓ Sesiunea a fost salvată!$/, '✓ Session saved!'],
+  [/^✓ Sesiunea a fost restaurată! \((\d+) pagini, (\d+) imagini\)$/, '✓ Session restored! ($1 pages, $2 images)'],
+  [/^⚠ Fișier invalid sau corupt\.$/, '⚠ Invalid or corrupted file.'],
+  [/^⚠ Setați mai întâi un unghi pe raportor$/, '⚠ First set an angle on the protractor'],
+  [/^✓ Cerc complet desenat: raza (-?\d+\.?\d*) cm$/, '✓ Full circle drawn: radius $1 cm'],
+  [/^✓ Arc desenat: (-?\d+\.?\d*)°  \|  rază (-?\d+\.?\d*) cm$/, '✓ Arc drawn: $1°  |  radius $2 cm'],
+  [/^✓ Arc construit: (-?\d+)°$/, '✓ Arc built: $1°'],
+  [/^⬆ Adusă în față$/, '⬆ Brought to front'],
+  [/^⬇ Trimisă în spate$/, '⬇ Sent to back'],
+  [/^↑ Un nivel mai sus$/, '↑ One level up'],
+  [/^↓ Un nivel mai jos$/, '↓ One level down'],
+  [/^Ordine actualizată$/, 'Order updated'],
+  // showMathInfo
+  [/^📏 (-?\d+\.?\d*) cm  \|  (-?\d+\.?\d*)°  \(snap activ\)$/, '📏 $1 cm  |  $2°  (snap active)'],
+  [/^📏 (-?\d+\.?\d*) cm  \|  (-?\d+\.?\d*)°  \|  Shift = snap unghi$/, '📏 $1 cm  |  $2°  |  Shift = snap angle'],
+  [/^📐 (-?\d+\.?\d*)°  \(snap 5°\)$/, '📐 $1°  (snap 5°)'],
+  [/^📐 (-?\d+\.?\d*)°  \|  Shift = snap 5°$/, '📐 $1°  |  Shift = snap 5°'],
+  [/^🔄 Trage pentru a roti a doua latură  \|  Shift = snap 5°$/, '🔄 Drag to rotate the second side  |  Shift = snap 5°'],
+  [/^🖱️ Click pe stroke sau imagine pentru a selecta \| Trage pentru a muta \| Shift = selecție multiplă \| Delete pentru ștergere$/, '🖱️ Click a stroke or image to select | Drag to move | Shift = multi-select | Delete to remove'],
+  [/^🟨 Clickuri pentru puncte, dublu-click sau Enter pentru finalizare \| Esc pentru anulare$/, '🟨 Click for points, double-click or Enter to finish | Esc to cancel'],
+  [/^▭ Trage pentru a desena un dreptunghi\/patrat  \|  Shift = pătrat$/, '▭ Drag to draw a rectangle/square  |  Shift = square'],
+  [/^⭕ Rază: (-?\d+\.?\d*) cm  \|  Click stânga = confirmare rază  \|  Dublu-click = cerc complet$/, '⭕ Radius: $1 cm  |  Left click = confirm radius  |  Double-click = full circle'],
+  [/^⭕ Rază: (-?\d+\.?\d*) cm  \|  Arc: (-?\d+\.?\d*)°  \|  Dublu-click = cerc complet$/, '⭕ Radius: $1 cm  |  Arc: $2°  |  Double-click = full circle'],
+  [/^🔄 Rază: (-?\d+\.?\d*) cm  \|  Arc: ([\s\S]*)$/, '🔄 Radius: $1 cm  |  Arc: $2'],
+  [/^⭕ Albastru = centru \(trage pentru a muta\)  \|  Pătrățel gri = trage liber pentru a roti \/ a mări-micșora raza, fără să deseneze  \|  Roșu = trage pentru a desena cercul\/arcul$/, '⭕ Blue = center (drag to move)  |  Gray square = drag freely to rotate / resize the radius, without drawing  |  Red = drag to draw the circle/arc'],
+  [/^📐 Mânerul verde: trage-l de-a lungul raportorului pentru a seta unghiul  \|  Bifează căsuța pentru a construi arcul$/, '📐 Green handle: drag it along the protractor to set the angle  |  Check the box to build the arc'],
+  // confirmări
+  [/^Ștergi această imagine\?$/, 'Delete this image?'],
+  [/^Aceasta este singura pagină\. Ștergerea îi va goli tot conținutul \(linii, imagini\)\. Continui\?$/, 'This is the only page. Deleting it will clear all its content (lines, images). Continue?'],
+  [/^Ștergi pagina (\d+) din (\d+)\? Acțiunea nu poate fi anulată\.$/, 'Delete page $1 of $2? This action cannot be undone.'],
+  [/^Ștergi complet pagina\?$/, 'Delete the page completely?'],
+  // alert
+  [/^Eroare la încărcarea PDF: ([\s\S]*)$/, 'Error loading PDF: $1']
+];
+
+// Traduce un mesaj deja construit (cu valori interpolate) folosind regulile de mai sus.
+function trMsg(str) {
+  if (LANG !== 'en' || typeof str !== 'string') return str;
+  for (const [pattern, replacement] of RO_EN_RULES) {
+    if (pattern.test(str)) return str.replace(pattern, replacement);
+  }
+  return str;
+}
+
+function setElText(id, ro, en) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = LANG === 'en' ? en : ro;
+}
+
+function setBtnText(id, ro, en) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3 && node.textContent.trim()) {
+      node.textContent = ' ' + (LANG === 'en' ? en : ro);
+      return;
+    }
+  }
+}
+
+// Aplică traducerile pe elementele statice din pagină (title/placeholder/aria-label
+// generice, plus câteva texte specifice care nu pot fi deduse automat).
+function applyStaticUI() {
+  document.querySelectorAll('[title]').forEach(el => {
+    if (!el.dataset.roTitle) el.dataset.roTitle = el.getAttribute('title');
+    const ro = el.dataset.roTitle;
+    el.setAttribute('title', LANG === 'en' ? (UI_TEXT[ro] || ro) : ro);
+  });
+  document.querySelectorAll('[placeholder]').forEach(el => {
+    if (!el.dataset.roPlaceholder) el.dataset.roPlaceholder = el.getAttribute('placeholder');
+    const ro = el.dataset.roPlaceholder;
+    el.setAttribute('placeholder', LANG === 'en' ? (UI_TEXT[ro] || ro) : ro);
+  });
+  document.querySelectorAll('[aria-label]').forEach(el => {
+    if (!el.dataset.roAria) el.dataset.roAria = el.getAttribute('aria-label');
+    const ro = el.dataset.roAria;
+    el.setAttribute('aria-label', LANG === 'en' ? (UI_TEXT[ro] || ro) : ro);
+  });
+
+  setBtnText('btn-load-pdf', 'Fișă PDF', 'PDF Sheet');
+  setBtnText('btn-help', 'Ajutor', 'Help');
+  setBtnText('btn-license', 'Licență', 'License');
+
+  setElText('gros-label', 'Gros.', 'Thick.');
+  setElText('txt-colors-label', 'Culori:', 'Colors:');
+
+  document.querySelectorAll('.pdf-pane-empty').forEach(el => {
+    el.textContent = LANG === 'en' ? '📄 No file loaded' : '📄 Nicio fișă încărcată';
+  });
+
+  setElText('confirm-modal-ok', 'Confirmă', 'Confirm');
+  setElText('confirm-modal-cancel', 'Anulează', 'Cancel');
+
+  const fnModalTitle = document.querySelector('#function-modal h3');
+  if (fnModalTitle) fnModalTitle.textContent = LANG === 'en' ? 'Plot a function' : 'Reprezintă grafic o funcție';
+  const fnExprLabel = document.getElementById('fn-expr-label');
+  if (fnExprLabel) {
+    fnExprLabel.innerHTML = LANG === 'en'
+      ? 'Function f(x) — you can write LaTeX (e.g. <code>x^2-3x+2</code>, <code>\\sin(x)</code>, <code>\\sqrt{x}</code>, <code>\\frac{1}{x}</code>)'
+      : 'Funcție f(x) — poți scrie în LaTeX (ex: <code>x^2-3x+2</code>, <code>\\sin(x)</code>, <code>\\sqrt{x}</code>, <code>\\frac{1}{x}</code>)';
+  }
+  setElText('fn-xmin-label', 'x minim', 'x min');
+  setElText('fn-xmax-label', 'x maxim', 'x max');
+  setElText('fn-color-label', 'Culoare', 'Color');
+  setElText('fn-cancel-btn', 'Anulează', 'Cancel');
+  const fnOkBtn = document.getElementById('fn-ok-btn');
+  if (fnOkBtn) fnOkBtn.textContent = LANG === 'en' ? '✓ Plot function' : '✓ Reprezintă grafic';
+
+  const langSelect = document.getElementById('lang-select');
+  if (langSelect) langSelect.value = LANG;
+
+  if (typeof buildSolidsMenu === 'function') buildSolidsMenu();
+
+  const helpBtnEl = document.getElementById('btn-help');
+  const licenseBtnEl = document.getElementById('btn-license');
+  const infoBackdrop = document.getElementById('info-modal-backdrop');
+  if (infoBackdrop && infoBackdrop.classList.contains('show') && typeof HELP_CONTENT_HTML === 'string') {
+    const titleEl = document.getElementById('info-modal-title');
+    const wasHelp = titleEl && (titleEl.textContent === 'Ajutor' || titleEl.textContent === 'Help');
+    if (wasHelp) openInfoModal(LANG === 'en' ? 'Help' : 'Ajutor', LANG === 'en' ? HELP_CONTENT_HTML_EN : HELP_CONTENT_HTML);
+    else openInfoModal(LANG === 'en' ? 'License' : 'Licență', LANG === 'en' ? LICENSE_CONTENT_HTML_EN : LICENSE_CONTENT_HTML);
+  }
+}
+
+function setLanguage(lang) {
+  LANG = (lang === 'en') ? 'en' : 'ro';
+  try { localStorage.setItem('wb-lang', LANG); } catch (e) {}
+  document.documentElement.lang = LANG;
+  applyStaticUI();
+  if (typeof updateStatus === 'function') updateStatus();
+}
+
+// ====================================================================
 // COD COMPLET - VERSIUNE FINALĂ 
 // ====================================================================
 
@@ -263,7 +520,7 @@ pdfFileInput.addEventListener('change', function(e) {
       showToast('✓ Fișă PDF încărcată (' + pdfTotalPages + ' pagini)');
       setBoardMode(true);
     }).catch(function(err) {
-      alert('Eroare la încărcarea PDF: ' + err.message);
+      alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
     });
   };
   reader.readAsArrayBuffer(file);
@@ -607,7 +864,7 @@ function reorderSelectedImages(direction) {
 
   renderImages();
   const labels = { front: '⬆ Adusă în față', back: '⬇ Trimisă în spate', forward: '↑ Un nivel mai sus', backward: '↓ Un nivel mai jos' };
-  showToast(labels[direction] || 'Ordine actualizată');
+  showToast(trMsg(labels[direction] || 'Ordine actualizată'));
 }
 
 function deleteSelectedImages() {
@@ -788,7 +1045,7 @@ function pushStroke(page, stroke) {
 let toastTimer = null;
 function showToast(msg, duration = 3000) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
+  t.textContent = trMsg(msg);
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), duration);
@@ -800,7 +1057,7 @@ function showAngleReadout(rotationYRadians, opts = {}) {
   if (!el) return;
   let deg = (rotationYRadians * 180 / Math.PI) % 360;
   if (deg < 0) deg += 360;
-  el.textContent = `Unghi rotație: ${deg.toFixed(1)}°`;
+  el.textContent = (LANG === 'en' ? 'Rotation angle: ' : 'Unghi rotație: ') + deg.toFixed(1) + '°';
   el.classList.add('show');
   clearTimeout(angleReadoutTimer);
   if (opts.persist) {
@@ -1245,8 +1502,9 @@ function updateStatus() {
   const imageCount = page ? page.images.length : 0;
 
   const selCount = selectedStrokes.size + selectedImages.size;
-  document.getElementById('status-strokes').textContent =
-    `${totalStrokes} linii  ·  ${imageCount} imagini`;
+  document.getElementById('status-strokes').textContent = (LANG === 'en')
+    ? `${totalStrokes} lines  ·  ${imageCount} images`
+    : `${totalStrokes} linii  ·  ${imageCount} imagini`;
 
   const selEl = document.getElementById('status-selection');
   if (selCount > 0) {
@@ -1254,9 +1512,15 @@ function updateStatus() {
     const imgSel = selectedImages.size;
     const strokeSel = selectedStrokes.size;
     let parts = [];
-    if (strokeSel > 0) parts.push(`${strokeSel} stroke-uri`);
-    if (imgSel > 0) parts.push(`${imgSel} imagini`);
-    selEl.textContent = `● ${parts.join(' + ')} selectate (Delete pentru ștergere)`;
+    if (LANG === 'en') {
+      if (strokeSel > 0) parts.push(`${strokeSel} strokes`);
+      if (imgSel > 0) parts.push(`${imgSel} images`);
+      selEl.textContent = `● ${parts.join(' + ')} selected (Delete to remove)`;
+    } else {
+      if (strokeSel > 0) parts.push(`${strokeSel} stroke-uri`);
+      if (imgSel > 0) parts.push(`${imgSel} imagini`);
+      selEl.textContent = `● ${parts.join(' + ')} selectate (Delete pentru ștergere)`;
+    }
   } else {
     selEl.style.display = 'none';
   }
@@ -1279,7 +1543,7 @@ function snapPointToAngle(start, end) {
 }
 
 function showMathInfo(text) {
-  mathInfo.textContent = text;
+  mathInfo.textContent = trMsg(text);
   mathInfo.classList.add('show');
   clearTimeout(mathInfo._hideTimer);
   mathInfo._hideTimer = setTimeout(() => mathInfo.classList.remove('show'), 4000);
@@ -4256,22 +4520,23 @@ function rotateGroundPts(pts, angle) {
 }
 
 const SOLID_SHAPES = {
-  cub: { label: 'Cub', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(55, 55), rot), 110, 1, undefined, rot) },
-  paralelipiped: { label: 'Paralelipiped dreptunghic', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(75, 45), rot), 90, 1, undefined, rot) },
-  prismaTriunghiulara: { label: 'Prismă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 110, 1, undefined, rot) },
-  prismaPatrulatera: { label: 'Prismă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(60, 60), rot), 130, 1, undefined, rot) },
-  prismaHexagonala: { label: 'Prismă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidHexagonFrontNudge(75, 240, 1.18), rot), 100, 1, hexProjectGP, rot) },
-  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 120, 0, undefined, rot) },
-  piramidaPatrulatera: { label: 'Piramidă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(65, 65), rot), 130, 0, undefined, rot) },
-  piramidaHexagonala: { label: 'Piramidă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 130, 0, hexProjectGP, rot) },
-  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 95, 0.5, undefined, rot) },
-  trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(70, 70), rot), 95, 0.5, undefined, rot) },
-  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 95, 0.5, hexProjectGP, rot) },
-  cilindru: { label: 'Cilindru', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 60, 110, rot) },
-  con: { label: 'Con', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 0, 125, rot) },
-  trunchiCon: { label: 'Trunchiul de con', kind: 'round', build: (rot) => buildRoundSolidLocal(65, 32, 100, rot) },
-  sfera: { label: 'Sferă', kind: 'sphere', noRotate: true, build: () => buildSphereLocal(65) }
+  cub: { label: 'Cub', labelEn: 'Cube', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(55, 55), rot), 110, 1, undefined, rot) },
+  paralelipiped: { label: 'Paralelipiped dreptunghic', labelEn: 'Rectangular cuboid', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(75, 45), rot), 90, 1, undefined, rot) },
+  prismaTriunghiulara: { label: 'Prismă triunghiulară', labelEn: 'Triangular prism', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 110, 1, undefined, rot) },
+  prismaPatrulatera: { label: 'Prismă patrulateră', labelEn: 'Quadrilateral prism', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(60, 60), rot), 130, 1, undefined, rot) },
+  prismaHexagonala: { label: 'Prismă hexagonală', labelEn: 'Hexagonal prism', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidHexagonFrontNudge(75, 240, 1.18), rot), 100, 1, hexProjectGP, rot) },
+  piramidaTriunghiulara: { label: 'Piramidă triunghiulară', labelEn: 'Triangular pyramid', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 120, 0, undefined, rot) },
+  piramidaPatrulatera: { label: 'Piramidă patrulateră', labelEn: 'Quadrilateral pyramid', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(65, 65), rot), 130, 0, undefined, rot) },
+  piramidaHexagonala: { label: 'Piramidă hexagonală', labelEn: 'Hexagonal pyramid', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 130, 0, hexProjectGP, rot) },
+  trunchiPiramidaTriunghiulara: { label: 'Trunchiul de piramidă triunghiulară', labelEn: 'Triangular pyramid frustum', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidTriangleFrontShift(65, 28), rot), 95, 0.5, undefined, rot) },
+  trunchiPiramidaPatrulatera: { label: 'Trunchiul de piramidă patrulateră', labelEn: 'Quadrilateral pyramid frustum', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRectBase(70, 70), rot), 95, 0.5, undefined, rot) },
+  trunchiPiramidaHexagonala: { label: 'Trunchiul de piramidă hexagonală', labelEn: 'Hexagonal pyramid frustum', kind: 'poly', build: (rot) => buildPolygonalSolidLocal(rotateGroundPts(solidRegularNGon(6, 75, 240), rot), 95, 0.5, hexProjectGP, rot) },
+  cilindru: { label: 'Cilindru', labelEn: 'Cylinder', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 60, 110, rot) },
+  con: { label: 'Con', labelEn: 'Cone', kind: 'round', build: (rot) => buildRoundSolidLocal(60, 0, 125, rot) },
+  trunchiCon: { label: 'Trunchiul de con', labelEn: 'Cone frustum', kind: 'round', build: (rot) => buildRoundSolidLocal(65, 32, 100, rot) },
+  sfera: { label: 'Sferă', labelEn: 'Sphere', kind: 'sphere', noRotate: true, build: () => buildSphereLocal(65) }
 };
+function shapeLabel(spec) { return (LANG === 'en' && spec.labelEn) ? spec.labelEn : spec.label; }
 
 
 
@@ -4351,7 +4616,7 @@ function insertSolidShape(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${spec.label} — selectat(ă), trage pentru a muta sau scala`);
+  showToast(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
 }
 
 // Reconstruiește un corp 3D la un nou unghi de rotație, păstrând poziția curentă pe ecran
@@ -5144,7 +5409,7 @@ async function insertSolidNet(shapeKey) {
   let confirmed = true;
   if (renderAt) {
     try {
-      confirmed = await netRunInteractive(renderAt, spec.label, 1500);
+      confirmed = await netRunInteractive(renderAt, shapeLabel(spec), 1500);
     } catch (e) {
       console.warn('Eroare animație desfășurare:', e);
     }
@@ -5169,7 +5434,7 @@ async function insertSolidNet(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${spec.label} — selectat(ă), trage pentru a muta sau scala`);
+  showToast(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
 }
 
 // Dialog de confirmare propriu — window.confirm() nativ forțează browserul să iasă din
@@ -5182,7 +5447,7 @@ let confirmModalResolve = null;
 function customConfirm(message) {
   return new Promise(resolve => {
     confirmModalResolve = resolve;
-    confirmModalMsg.textContent = message;
+    confirmModalMsg.textContent = trMsg(message);
     confirmModalBackdrop.classList.add('show');
   });
 }
@@ -5200,11 +5465,20 @@ const solidsMenuEl = document.getElementById('solids-menu');
 const btnSolids = document.getElementById('btn-solids');
 btnSolids.innerHTML = buildShapeIconSVG('cub', 20);
 
-solidsMenuEl.innerHTML = Object.keys(SOLID_SHAPES).map(key => {
-  const spec = SOLID_SHAPES[key];
-  const icon = buildShapeIconSVG(key, 22);
-  return `<div class="solids-menu-item" data-shape="${key}">${icon}<span>${spec.label}</span></div>`;
-}).join('');
+function buildSolidsMenu() {
+  solidsMenuEl.innerHTML = Object.keys(SOLID_SHAPES).map(key => {
+    const spec = SOLID_SHAPES[key];
+    const icon = buildShapeIconSVG(key, 22);
+    return `<div class="solids-menu-item" data-shape="${key}">${icon}<span>${shapeLabel(spec)}</span></div>`;
+  }).join('');
+  solidsMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
+    item.onclick = () => {
+      insertSolidShape(item.dataset.shape);
+      closeSolidsMenu();
+    };
+  });
+}
+buildSolidsMenu();
 
 function toggleSolidsMenu() {
   if (solidsMenuEl.classList.contains('show')) {
@@ -5220,12 +5494,6 @@ function closeSolidsMenu() {
   solidsMenuEl.classList.remove('show');
 }
 btnSolids.onclick = (e) => { e.stopPropagation(); toggleSolidsMenu(); };
-solidsMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
-  item.onclick = () => {
-    insertSolidShape(item.dataset.shape);
-    closeSolidsMenu();
-  };
-});
 document.addEventListener('pointerdown', (e) => {
   if (solidsMenuEl.classList.contains('show') && !solidsMenuEl.contains(e.target) && e.target !== btnSolids && !btnSolids.contains(e.target)) {
     closeSolidsMenu();
@@ -7254,6 +7522,90 @@ const LICENSE_CONTENT_HTML = `
 <p>Pentru întrebări legate de licențiere sau utilizare, contactează administratorul aplicației.</p>
 `;
 
+const HELP_CONTENT_HTML_EN = `
+<h4>Drawing</h4>
+<ul>
+  <li><b>Pencil</b> — free-hand drawing.</li>
+  <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
+  <li><b>Circle</b> — drag from the center outward.</li>
+  <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then press the check mark (✓) to close the shape.</li>
+  <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
+</ul>
+
+<h4>Math</h4>
+<ul>
+  <li><b>f(x)</b> — plot a function graph.</li>
+  <li><b>Geometric solids</b> — insert a predefined 3D solid (cube, prism, pyramid, frustum, etc.).</li>
+  <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
+  <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
+  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
+</ul>
+
+<h4>Rotating 3D solids</h4>
+<ul>
+  <li>Select the solid, then drag the rotation handle (the blue circle).</li>
+  <li>While dragging, the current rotation angle appears at the bottom.</li>
+  <li>By default, back edges (hidden from view) are drawn as dashed lines — the classic textbook convention.</li>
+  <li>If you'd rather have all edges solid, check the option below.</li>
+</ul>
+<p style="display:flex;align-items:center;gap:8px;">
+  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+    <input type="checkbox" id="toggle-hidden-lines"> Show all edges as solid lines
+  </label>
+</p>
+
+<h4>Selection and editing</h4>
+<ul>
+  <li><b>Select</b> — tap or lasso the elements you want.</li>
+  <li><b>Multi-select</b> — useful on touchscreens, without the Shift key.</li>
+  <li>A selected element can be moved, resized (orange handle) or deleted (Delete key / eraser button).</li>
+</ul>
+
+<h4>Color and thickness</h4>
+<p>Pick a color from the palette or the color picker, and set the line thickness with the <code>−</code> / <code>+</code> buttons.</p>
+
+<h4>Images and PDF sheets</h4>
+<ul>
+  <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet.</li>
+</ul>
+
+<h4>File and history</h4>
+<ul>
+  <li><b>Undo / Redo</b> — undo/redo any action.</li>
+  <li><b>Clear all</b> — clears the current page.</li>
+  <li><b>Export PDF</b> — saves the current board as a PDF document.</li>
+  <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later.</li>
+</ul>
+
+<h4>Pages and background</h4>
+<p>Navigate between pages with the corner arrows, add or delete pages, and change the board's background color from the palette at the bottom right of the toolbar.</p>
+<p>From the nearby button group you can also pick a ruling for the board: <b>grid</b> (like a math notebook), <b>ruled lines</b> (like a writing notebook) or <b>staff lines</b> (like a music notebook). Use the −/+ buttons to adjust the size of the squares/lines and their opacity, and use the color picker to manually choose the ruling color — it defaults to white at 50% opacity, suited to the board's black background.</p>
+`;
+
+const LICENSE_CONTENT_HTML_EN = `
+<h4>Application license</h4>
+<p>This software is provided "as is", without any express or implied warranty. Use it at your own risk.</p>
+
+<h4>Third-party libraries used</h4>
+<p>The application is built using only free, open-source libraries:</p>
+<table>
+  <tr><th>Library</th><th>Purpose</th><th>License</th></tr>
+  <tr><td>Tabler Icons</td><td>Icon set for the interface</td><td>MIT</td></tr>
+  <tr><td>jsPDF</td><td>Generating and exporting PDF files</td><td>MIT</td></tr>
+  <tr><td>PDF.js</td><td>Displaying loaded worksheets in PDF format</td><td>Apache 2.0</td></tr>
+  <tr><td>Three.js</td><td>Rendering the interactive 3D solid</td><td>MIT</td></tr>
+  <tr><td>OrbitControls (Three.js)</td><td>Mouse/touch rotation and zoom in the interactive 3D module</td><td>MIT</td></tr>
+</table>
+<p>Each third-party library remains under its own license, published by its original authors; none of the libraries used here impose usage costs.</p>
+
+<h4>User-generated content</h4>
+<p>Drawings, texts, and PDF/session files you create or load remain your property. The application claims no rights over them.</p>
+
+<h4>Contact</h4>
+<p>For questions about licensing or use, contact the application administrator.</p>
+`;
+
 function openInfoModal(title, bodyHtml) {
   const backdrop = document.getElementById('info-modal-backdrop');
   const titleEl = document.getElementById('info-modal-title');
@@ -7294,9 +7646,9 @@ function rebuildAllSolid3DStrokes() {
 }
 
 const btnHelp = document.getElementById('btn-help');
-if (btnHelp) btnHelp.addEventListener('click', () => openInfoModal('Ajutor', HELP_CONTENT_HTML));
+if (btnHelp) btnHelp.addEventListener('click', () => openInfoModal(LANG === 'en' ? 'Help' : 'Ajutor', LANG === 'en' ? HELP_CONTENT_HTML_EN : HELP_CONTENT_HTML));
 const btnLicense = document.getElementById('btn-license');
-if (btnLicense) btnLicense.addEventListener('click', () => openInfoModal('Licență', LICENSE_CONTENT_HTML));
+if (btnLicense) btnLicense.addEventListener('click', () => openInfoModal(LANG === 'en' ? 'License' : 'Licență', LANG === 'en' ? LICENSE_CONTENT_HTML_EN : LICENSE_CONTENT_HTML));
 const infoModalClose = document.getElementById('info-modal-close');
 if (infoModalClose) infoModalClose.addEventListener('click', closeInfoModal);
 const infoModalBackdrop = document.getElementById('info-modal-backdrop');
@@ -7315,3 +7667,7 @@ tool = 'pen';
 
 updateGeoToolContrast();
 setTimeout(initCanvas, 100);
+
+const langSelectEl = document.getElementById('lang-select');
+if (langSelectEl) langSelectEl.addEventListener('change', (e) => setLanguage(e.target.value));
+setLanguage(LANG);

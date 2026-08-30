@@ -412,6 +412,19 @@
     
     /* speed label compact */
     .speed-label-compact { font-size: 10px; color: #888; }
+
+    #lang-select {
+      background: transparent;
+      border: 0.5px solid #b8b8bd;
+      border-radius: 8px;
+      padding: 8px 6px;
+      font-size: 13px;
+      color: #444;
+      cursor: pointer;
+      min-height: 38px;
+      flex-shrink: 0;
+    }
+    #lang-select:hover { background: #e2e2e8; }
   </style>
 </head>
 <body>
@@ -462,7 +475,7 @@
       <button class="color-btn color-yellow" id="color-yellow" style="background:#f1c40f" title="Galben"></button>
       <button class="color-btn" id="color-black" style="background:#000000" title="Negru"></button>
       <button class="color-btn active-color" id="color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
-      <label class="compact-label">Gros.</label>
+      <label class="compact-label" id="gros-label">Gros.</label>
       <button class="tool" id="size-minus" style="padding:4px 5px; font-weight:700;">−</button>
       <span id="size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">3</span>
       <button class="tool" id="size-plus" style="padding:4px 5px; font-weight:700;">+</button>
@@ -515,6 +528,10 @@
     </div>
     <div class="sep"></div>
     <div class="tool-group" style="margin-left: auto;">
+      <select id="lang-select" title="Limbă / Language">
+        <option value="ro">🇷🇴 Română</option>
+        <option value="en">🇬🇧 English</option>
+      </select>
       <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i> Ajutor</button>
       <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i> Licență</button>
     </div>
@@ -577,7 +594,7 @@
           <button class="cancel" id="txt-cancel" title="Anulează (Esc)">✕</button>
         </div>
         <div class="color-palette" id="txt-color-palette">
-          <span style="font-size:9px;color:#888;margin-right:2px;">Culori:</span>
+          <span style="font-size:9px;color:#888;margin-right:2px;" id="txt-colors-label">Culori:</span>
           <span class="mini-color" style="background:#ff0000" data-color="#ff0000" title="Roșu"></span>
           <span class="mini-color" style="background:#2ecc71" data-color="#2ecc71" title="Verde"></span>
           <span class="mini-color" style="background:#3498db" data-color="#3498db" title="Albastru"></span>
@@ -769,19 +786,19 @@
 <div id="function-modal-backdrop">
   <div id="function-modal">
     <h3>Reprezintă grafic o funcție</h3>
-    <label for="fn-expr-input">Funcție f(x) — poți scrie în LaTeX (ex: <code>x^2-3x+2</code>, <code>\sin(x)</code>, <code>\sqrt{x}</code>, <code>\frac{1}{x}</code>)</label>
+    <label for="fn-expr-input" id="fn-expr-label">Funcție f(x) — poți scrie în LaTeX (ex: <code>x^2-3x+2</code>, <code>\sin(x)</code>, <code>\sqrt{x}</code>, <code>\frac{1}{x}</code>)</label>
     <input type="text" id="fn-expr-input" placeholder="ex: x^2 - 3x + 2" autocomplete="off">
     <div class="fn-modal-row">
       <div class="fn-modal-field">
-        <label for="fn-xmin-input">x minim</label>
+        <label for="fn-xmin-input" id="fn-xmin-label">x minim</label>
         <input type="number" id="fn-xmin-input" value="-10">
       </div>
       <div class="fn-modal-field">
-        <label for="fn-xmax-input">x maxim</label>
+        <label for="fn-xmax-input" id="fn-xmax-label">x maxim</label>
         <input type="number" id="fn-xmax-input" value="10">
       </div>
       <div class="fn-modal-field">
-        <label for="fn-color-input">Culoare</label>
+        <label for="fn-color-input" id="fn-color-label">Culoare</label>
         <input type="color" id="fn-color-input" value="#e74c3c">
       </div>
     </div>
