@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Tablă Interactivă</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="lib/tabler-icons.css">
   <script src="lib/jspdf.min.js"></script>
 <script src="lib/pdf-worker.js"></script>
@@ -756,22 +759,21 @@
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 8px 30px rgba(0,0,0,0.28);
-  padding: 6px;
-  max-height: 70vh;
-  overflow-y: auto;
-  width: 260px;
+  padding: 8px;
+  width: max-content;
   font-family: system-ui, sans-serif;
 }
-#solids-menu.show { display: block; }
+#solids-menu.show { display: flex; flex-direction: column; gap: 6px; }
+.solids-menu-row { display: flex; gap: 6px; }
 .solids-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
   cursor: pointer;
   color: #333;
-  font-size: 13.5px;
   user-select: none;
 }
 .solids-menu-item:hover, .solids-menu-item:active {

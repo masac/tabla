@@ -135,6 +135,14 @@ const RO_EN_RULES = [
   [/^↑ Un nivel mai sus$/, '↑ One level up'],
   [/^↓ Un nivel mai jos$/, '↓ One level down'],
   [/^Ordine actualizată$/, 'Order updated'],
+  [/^🖼 (\d+) imagine\(images\) selectată\(e\) \(Delete pentru ștergere\)$/, '🖼 $1 image(s) selected (Delete to remove)'],
+  [/^✓ (\d+) stroke-uri selectate \(Delete pentru ștergere\)$/, '✓ $1 strokes selected (Delete to remove)'],
+  [/^✓ (\d+) stroke-uri \+ (\d+) imagini selectate \(Delete pentru ștergere\)$/, '✓ $1 strokes + $2 images selected (Delete to remove)'],
+  [/^✓ (\d+) imagini selectate \(Delete pentru ștergere\)$/, '✓ $1 images selected (Delete to remove)'],
+  [/^✓ (\d+) elemente selectate \(Delete pentru ștergere\)$/, '✓ $1 elements selected (Delete to remove)'],
+  [/^📦 Trage pentru a selecta \(lasou\)$/, '📦 Drag to select (lasso)'],
+  [/^🖼 Imagine încărcată - trage colțul pentru redimensionare \(Delete pentru ștergere\)$/, '🖼 Image loaded - drag the corner to resize (Delete to remove)'],
+  [/^🖼 Imagine lipită - trage colțul pentru redimensionare \(Delete pentru ștergere\)$/, '🖼 Image pasted - drag the corner to resize (Delete to remove)'],
   // showMathInfo
   [/^📏 (-?\d+\.?\d*) cm  \|  (-?\d+\.?\d*)°  \(snap activ\)$/, '📏 $1 cm  |  $2°  (snap active)'],
   [/^📏 (-?\d+\.?\d*) cm  \|  (-?\d+\.?\d*)°  \|  Shift = snap unghi$/, '📏 $1 cm  |  $2°  |  Shift = snap angle'],
@@ -326,6 +334,7 @@ let rotateOriginalStroke = null;
 let rotateStartX = 0;
 let rotateStartRotationY = 0;
 let currentRotateHandle = null; // { x, y, strokeIdx }
+let currentDeleteHandle = null; // { x, y, strokeIdx } — X roșu, colțul din dreapta-sus al selecției
 let dragStartMouseX = 0, dragStartMouseY = 0;
 let dragStartPositions = new Map();
 let moveUndoSnapshots = new Map();
@@ -1846,6 +1855,7 @@ function drawSelectionHighlights() {
 
   // Mâner de scalare — vizibil doar când e selectat un singur stroke
   currentResizeHandle = null;
+  currentDeleteHandle = null;
   if (selectedStrokes.size === 1) {
     const idx = [...selectedStrokes][0];
     const stroke = page.strokes[idx];
@@ -1861,6 +1871,30 @@ function drawSelectionHighlights() {
       selCtx.beginPath();
       selCtx.arc(hx, hy, 13, 0, Math.PI * 2);
       selCtx.fill();
+      selCtx.stroke();
+      selCtx.restore();
+
+      // Mâner de ștergere (X roșu) — colțul din dreapta-sus, la fel ca la imagini
+      const dx = bbox.x + bbox.w + 2;
+      const dy = bbox.y - 2;
+      currentDeleteHandle = { x: dx, y: dy, strokeIdx: idx };
+      selCtx.save();
+      selCtx.fillStyle = '#cc0000';
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 2.5;
+      selCtx.beginPath();
+      selCtx.arc(dx, dy, 12, 0, Math.PI * 2);
+      selCtx.fill();
+      selCtx.stroke();
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 2.4;
+      selCtx.lineCap = 'round';
+      const xr = 5;
+      selCtx.beginPath();
+      selCtx.moveTo(dx - xr, dy - xr);
+      selCtx.lineTo(dx + xr, dy + xr);
+      selCtx.moveTo(dx + xr, dy - xr);
+      selCtx.lineTo(dx - xr, dy + xr);
       selCtx.stroke();
       selCtx.restore();
     }
@@ -1941,7 +1975,7 @@ function toggleSelection(idx, shiftKey) {
 }
 
 function showSelectionInfo(msg) {
-  selectionInfo.textContent = msg;
+  selectionInfo.textContent = trMsg(msg);
   selectionInfo.classList.add('show');
   clearTimeout(selectionInfo._hideTimer);
 }
@@ -2093,6 +2127,16 @@ function handlePointerDown(e) {
   if (tool === 'select') {
     const p = pos(e);
     const page = getCurrentPage();
+
+    if (currentDeleteHandle && selectedStrokes.has(currentDeleteHandle.strokeIdx)) {
+      const dhx2 = p.x - currentDeleteHandle.x, dhy2 = p.y - currentDeleteHandle.y;
+      const delHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      if (Math.sqrt(dhx2 * dhx2 + dhy2 * dhy2) < delHitRadius) {
+        e.preventDefault();
+        deleteSelectedStrokes();
+        return;
+      }
+    }
 
     if (currentRotateHandle && selectedStrokes.has(currentRotateHandle.strokeIdx)) {
       const rhx = p.x - currentRotateHandle.x, rhy = p.y - currentRotateHandle.y;
@@ -5465,11 +5509,24 @@ const solidsMenuEl = document.getElementById('solids-menu');
 const btnSolids = document.getElementById('btn-solids');
 btnSolids.innerHTML = buildShapeIconSVG('cub', 20);
 
+// Gruparea corpurilor pe rânduri în minifereastra "Corpuri geometrice":
+// rândul 1 = cub, paralelipiped și toate prismele; rândul 2 = piramidele
+// și trunchiurile de piramidă; rândul 3 = corpurile rotunde.
+const SOLIDS_MENU_ROWS = [
+  ['cub', 'paralelipiped', 'prismaTriunghiulara', 'prismaPatrulatera', 'prismaHexagonala'],
+  ['piramidaTriunghiulara', 'piramidaPatrulatera', 'piramidaHexagonala', 'trunchiPiramidaTriunghiulara', 'trunchiPiramidaPatrulatera', 'trunchiPiramidaHexagonala'],
+  ['cilindru', 'con', 'trunchiCon', 'sfera']
+];
+
 function buildSolidsMenu() {
-  solidsMenuEl.innerHTML = Object.keys(SOLID_SHAPES).map(key => {
-    const spec = SOLID_SHAPES[key];
-    const icon = buildShapeIconSVG(key, 22);
-    return `<div class="solids-menu-item" data-shape="${key}">${icon}<span>${shapeLabel(spec)}</span></div>`;
+  solidsMenuEl.innerHTML = SOLIDS_MENU_ROWS.map(row => {
+    const items = row.map(key => {
+      const spec = SOLID_SHAPES[key];
+      if (!spec) return '';
+      const icon = buildShapeIconSVG(key, 24);
+      return `<div class="solids-menu-item" data-shape="${key}" title="${shapeLabel(spec)}">${icon}</div>`;
+    }).join('');
+    return `<div class="solids-menu-row">${items}</div>`;
   }).join('');
   solidsMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
     item.onclick = () => {
@@ -5502,7 +5559,7 @@ document.addEventListener('pointerdown', (e) => {
 
 // ====================================================================
 // MODUL 3D INTERACTIV — corpurile geometrice pot fi rotite liber (ca în
-// Blender: tragi cu degetul/mouse-ul, ciupești pt zoom), fețele sunt ușor
+// Blender: tragi cu degetul/mouse-ul, derulezi pt zoom), fețele sunt ușor
 // transparente (se văd și muchiile din plan secundar), iar un slider permite
 // animarea desfășurării în plan a corpului, direct în spațiul 3D (aceeași
 // matematică de împăturire — unghiuri diedre corecte — ca la desfășurările
@@ -5846,6 +5903,19 @@ function captureTrimmedSnapshot(sourceCanvas, padding) {
   return crop.toDataURL('image/png');
 }
 
+// ---- renderer WebGL partajat: creat o singură dată și refolosit la fiecare
+//      deschidere a viewer-ului 3D, ca să nu se mai epuizeze niciodată
+//      contextele WebGL disponibile (limitate pe multe GPU-uri mobile) ----
+let sharedViewer3DRenderer = null;
+function getShared3DRenderer() {
+  if (!sharedViewer3DRenderer) {
+    sharedViewer3DRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    sharedViewer3DRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    sharedViewer3DRenderer.domElement.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
+  }
+  return sharedViewer3DRenderer;
+}
+
 function open3DViewer() {
   if (typeof THREE === 'undefined') { showToast('Modulul 3D nu s-a putut încărca'); return; }
   if (document.getElementById('viewer3d-backdrop')) return; // deja deschis — evită dublarea contextelor WebGL
@@ -5857,12 +5927,13 @@ function open3DViewer() {
   const topBar = document.createElement('div');
   topBar.style.cssText = 'flex:0 0 auto; padding:10px 12px; display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; background:#161616; border-bottom:1px solid #333;';
   Object.keys(NET_SHAPES).concat(['sfera']).forEach(key => {
-    const label = (SOLID_SHAPES[key] && SOLID_SHAPES[key].label) || key;
-    const icon = buildShapeIconSVG(key, 18);
+    const label = (SOLID_SHAPES[key] && shapeLabel(SOLID_SHAPES[key])) || key;
+    const icon = buildShapeIconSVG(key, 22);
     const btn = document.createElement('button');
-    btn.innerHTML = `<span style="display:inline-flex; align-items:center; justify-content:center;">${icon}</span><span>${label}</span>`;
+    btn.innerHTML = `<span style="display:inline-flex; align-items:center; justify-content:center;">${icon}</span>`;
+    btn.title = label;
     btn.dataset.shapeKey = key;
-    btn.style.cssText = 'flex:0 0 auto; display:flex; align-items:center; gap:6px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 14px; font-size:13px; white-space:nowrap; cursor:pointer;';
+    btn.style.cssText = 'flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; width:42px; height:42px; padding:0; cursor:pointer;';
     topBar.appendChild(btn);
   });
   backdrop.appendChild(topBar);
@@ -5872,7 +5943,7 @@ function open3DViewer() {
   backdrop.appendChild(viewerArea);
 
   const hint = document.createElement('div');
-  hint.textContent = 'Trage pentru a roti • Ciupește / derulează pentru zoom';
+  hint.textContent = LANG === 'en' ? 'Drag to rotate • Scroll to zoom' : 'Trage pentru a roti • Derulează pentru zoom';
   hint.style.cssText = 'position:absolute; top:10px; left:50%; transform:translateX(-50%); color:#bbb; font-size:12px; background:rgba(0,0,0,0.5); padding:5px 12px; border-radius:6px; pointer-events:none;';
   viewerArea.appendChild(hint);
 
@@ -5917,9 +5988,7 @@ function open3DViewer() {
   // ---- scena Three.js ----
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 1, 6000);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-  renderer.domElement.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
+  const renderer = getShared3DRenderer();
   viewerArea.appendChild(renderer.domElement);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -6059,13 +6128,12 @@ function open3DViewer() {
     window.removeEventListener('resize', resize);
     controls.dispose();
     if (currentGroup) disposeThreeGroup(currentGroup);
-    renderer.dispose();
-    // renderer.dispose() nu eliberează neapărat contextul WebGL în sine — pe dispozitive
-    // cu un număr limitat de contexte WebGL simultane (frecvent pe Android/GPU-uri mobile),
-    // deschiderile repetate ale acestui viewer ar epuiza contextele disponibile și ar duce
-    // la un ecran gol la a N-a deschidere. forceContextLoss() eliberează explicit contextul.
-    if (typeof renderer.forceContextLoss === 'function') renderer.forceContextLoss();
-    renderer.domElement = null;
+    // Renderer-ul WebGL este partajat (vezi getShared3DRenderer) și NU se distruge
+    // aici — se detașează doar canvas-ul din DOM, ca la următoarea deschidere să
+    // fie refolosit același context, în loc să se creeze unul nou. Astfel numărul
+    // de contexte WebGL active rămâne mereu 1, indiferent de câte ori deschizi/
+    // închizi fereastra, eliminând complet epuizarea contextelor WebGL.
+    if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
     backdrop.remove();
   }
 
@@ -6409,8 +6477,7 @@ document.getElementById('btn-pdf').onclick = () => {
   doc.save('whiteboard.pdf');
 };
 
-async function saveSession() {
-
+async function buildSessionData() {
   const pagesData = await Promise.all(pages.map(async (page) => {
     const imagesData = await Promise.all(page.images.map(async (imgData) => {
       let dataUrl = imgData.dataUrl;
@@ -6433,14 +6500,14 @@ async function saveSession() {
         dataUrl: dataUrl
       };
     }));
-    
+
     return {
       strokes: page.strokes,
       images: imagesData
     };
   }));
 
-  const sessionData = {
+  return {
     version: 2,
     savedAt: new Date().toISOString(),
     currentPageIdx,
@@ -6452,7 +6519,10 @@ async function saveSession() {
     rulingOpacity: rulingOpacity,
     imageIdCounter: imageIdCounter
   };
+}
 
+async function saveSession() {
+  const sessionData = await buildSessionData();
   const json = JSON.stringify(sessionData);
   const blob = new Blob([json], { type: 'application/json' });
   const a = document.createElement('a');
@@ -6464,98 +6534,169 @@ async function saveSession() {
   showToast('✓ Sesiunea a fost salvată!');
 }
 
+async function restoreSessionData(data, opts) {
+  opts = opts || {};
+  if (!data.version || !Array.isArray(data.pages)) throw new Error('Format invalid');
+
+  const newPages = await Promise.all(data.pages.map((pd) => {
+    return new Promise((resolve) => {
+      const page = {
+        strokes: pd.strokes || [],
+        images: []
+      };
+
+      const loadImages = pd.images ? pd.images.map((imgData) => {
+        return new Promise((res) => {
+          if (imgData.dataUrl) {
+            const img = new Image();
+            img.onload = () => {
+              page.images.push({
+                id: imgData.id,
+                img: img,
+                x: imgData.x || 40,
+                y: imgData.y || 40,
+                w: imgData.w || 200,
+                h: imgData.h || 150,
+                locked: !!imgData.locked,
+                dataUrl: imgData.dataUrl
+              });
+              res();
+            };
+            img.onerror = () => res();
+            img.src = imgData.dataUrl;
+          } else {
+            res();
+          }
+        });
+      }) : [];
+
+      Promise.all(loadImages).then(() => resolve(page));
+    });
+  }));
+
+  pages = newPages;
+  currentPageIdx = Math.min(data.currentPageIdx ?? 0, pages.length - 1);
+  if (data.imageIdCounter) imageIdCounter = data.imageIdCounter;
+
+  if (data.bgColor) {
+    bgColor = data.bgColor;
+    document.querySelectorAll('.bg-color-btn').forEach(b => b.classList.remove('active-bg'));
+    const btnMap = {
+      '#ffffff': 'bg-white',
+      '#000000': 'bg-black',
+      '#808080': 'bg-gray',
+      '#d3d3d3': 'bg-lightgray',
+      '#f5f5dc': 'bg-beige',
+      '#add8e6': 'bg-blue',
+      '#90ee90': 'bg-green'
+    };
+    if (btnMap[bgColor]) {
+      document.getElementById(btnMap[bgColor]).classList.add('active-bg');
+    }
+  }
+
+  boardRuling = data.boardRuling || 'none';
+  document.querySelectorAll('.ruling-btn').forEach(b => b.classList.remove('active'));
+  const rulingBtnMap = { none: 'ruling-none', grid: 'ruling-grid', dictando: 'ruling-dictando', music: 'ruling-music' };
+  const activeRulingBtn = document.getElementById(rulingBtnMap[boardRuling]);
+  if (activeRulingBtn) activeRulingBtn.classList.add('active');
+  rulingSize = data.rulingSize || 28;
+  document.getElementById('ruling-size-val').textContent = rulingSize;
+  rulingColor = data.rulingColor || '#ffffff';
+  rulingOpacity = (data.rulingOpacity != null) ? data.rulingOpacity : 0.5;
+  document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
+  syncRulingColorPicker();
+
+  selectedStrokes.clear();
+  selectedImages.clear();
+  updateImageSelection();
+  hideSelectionInfo();
+
+  drawBg();
+  redrawStrokes();
+  renderImages();
+  updateStatus();
+  if (!opts.silent) showToast(trMsg(`✓ Sesiunea a fost restaurată! (${pages.length} pagini, ${imageIdCounter} imagini)`));
+}
+
 function loadSession(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
       const data = JSON.parse(e.target.result);
-      if (!data.version || !Array.isArray(data.pages)) throw new Error('Format invalid');
-
-      const newPages = await Promise.all(data.pages.map((pd) => {
-        return new Promise((resolve) => {
-          const page = {
-            strokes: pd.strokes || [],
-            images: []
-          };
-          
-          const loadImages = pd.images ? pd.images.map((imgData) => {
-            return new Promise((res) => {
-              if (imgData.dataUrl) {
-                const img = new Image();
-                img.onload = () => {
-                  page.images.push({
-                    id: imgData.id,
-                    img: img,
-                    x: imgData.x || 40,
-                    y: imgData.y || 40,
-                    w: imgData.w || 200,
-                    h: imgData.h || 150,
-                    locked: !!imgData.locked,
-                    dataUrl: imgData.dataUrl
-                  });
-                  res();
-                };
-                img.onerror = () => res();
-                img.src = imgData.dataUrl;
-              } else {
-                res();
-              }
-            });
-          }) : [];
-          
-          Promise.all(loadImages).then(() => resolve(page));
-        });
-      }));
-
-      pages = newPages;
-      currentPageIdx = Math.min(data.currentPageIdx ?? 0, pages.length - 1);
-      if (data.imageIdCounter) imageIdCounter = data.imageIdCounter;
-      
-      if (data.bgColor) {
-        bgColor = data.bgColor;
-        document.querySelectorAll('.bg-color-btn').forEach(b => b.classList.remove('active-bg'));
-        const btnMap = {
-          '#ffffff': 'bg-white',
-          '#000000': 'bg-black',
-          '#808080': 'bg-gray',
-          '#d3d3d3': 'bg-lightgray',
-          '#f5f5dc': 'bg-beige',
-          '#add8e6': 'bg-blue',
-          '#90ee90': 'bg-green'
-        };
-        if (btnMap[bgColor]) {
-          document.getElementById(btnMap[bgColor]).classList.add('active-bg');
-        }
-      }
-
-      boardRuling = data.boardRuling || 'none';
-      document.querySelectorAll('.ruling-btn').forEach(b => b.classList.remove('active'));
-      const rulingBtnMap = { none: 'ruling-none', grid: 'ruling-grid', dictando: 'ruling-dictando', music: 'ruling-music' };
-      const activeRulingBtn = document.getElementById(rulingBtnMap[boardRuling]);
-      if (activeRulingBtn) activeRulingBtn.classList.add('active');
-      rulingSize = data.rulingSize || 28;
-      document.getElementById('ruling-size-val').textContent = rulingSize;
-      rulingColor = data.rulingColor || '#ffffff';
-      rulingOpacity = (data.rulingOpacity != null) ? data.rulingOpacity : 0.5;
-      document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
-      syncRulingColorPicker();
-      
-      selectedStrokes.clear();
-      selectedImages.clear();
-      updateImageSelection();
-      hideSelectionInfo();
-      
-      drawBg();
-      redrawStrokes();
-      renderImages();
-      updateStatus();
-      showToast(`✓ Sesiunea a fost restaurată! (${pages.length} pagini, ${imageIdCounter} imagini)`);
+      await restoreSessionData(data);
     } catch(err) {
-      showToast('⚠ Fișier invalid sau corupt.', 4000);
+      showToast(trMsg('⚠ Fișier invalid sau corupt.'), 4000);
     }
   };
   reader.readAsText(file);
+}
+
+// ====================================================================
+// AUTOSALVARE — salvează periodic sesiunea curentă în localStorage,
+// ca lucrul să nu se piardă la o închidere accidentală a tab-ului/
+// browserului sau la o cădere neașteptată (ex: crash de tab).
+// ====================================================================
+const AUTOSAVE_KEY = 'wb-autosave-v1';
+const AUTOSAVE_TIME_KEY = 'wb-autosave-time-v1';
+let autosaveInFlight = false;
+
+async function doAutosave() {
+  if (autosaveInFlight) return;
+  autosaveInFlight = true;
+  try {
+    const data = await buildSessionData();
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(AUTOSAVE_TIME_KEY, String(Date.now()));
+  } catch (e) {
+    // localStorage poate fi plin (imagini mari) sau indisponibil — nu deranjăm
+    // utilizatorul cu un toast la fiecare eșec, doar notăm în consolă.
+    console.warn('Autosalvare eșuată:', e);
+  } finally {
+    autosaveInFlight = false;
+  }
+}
+
+let autosaveIntervalId = setInterval(doAutosave, 20000); // la fiecare 20s
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') doAutosave();
+});
+window.addEventListener('pagehide', () => { doAutosave(); });
+window.addEventListener('beforeunload', () => { doAutosave(); });
+
+async function checkAutosaveOnStartup() {
+  let raw;
+  try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return; }
+  if (!raw) return;
+  let data;
+  try { data = JSON.parse(raw); } catch (e) { return; }
+  if (!data || !Array.isArray(data.pages) || data.pages.length === 0) return;
+  // Nu propunem restaurarea dacă sesiunea salvată automat e goală (o singură
+  // pagină, fără linii/imagini) — nu are rost să deranjăm utilizatorul.
+  const hasContent = data.pages.some(p => (p.strokes && p.strokes.length) || (p.images && p.images.length));
+  if (!hasContent) return;
+
+  let whenStr = '';
+  try {
+    const t = parseInt(localStorage.getItem(AUTOSAVE_TIME_KEY) || '0', 10);
+    if (t) whenStr = new Date(t).toLocaleString(LANG === 'en' ? 'en-GB' : 'ro-RO');
+  } catch (e) {}
+
+  const msgRo = whenStr
+    ? `S-a găsit o sesiune salvată automat din ${whenStr}. O restaurăm?`
+    : 'S-a găsit o sesiune salvată automat. O restaurăm?';
+  const msgEn = whenStr
+    ? `An auto-saved session from ${whenStr} was found. Restore it?`
+    : 'An auto-saved session was found. Restore it?';
+
+  const ok = await customConfirm(LANG === 'en' ? msgEn : msgRo);
+  if (ok) {
+    try {
+      await restoreSessionData(data, { silent: true });
+      showToast(LANG === 'en' ? '✓ Session restored!' : '✓ Sesiunea a fost restaurată!');
+    } catch (e) {}
+  }
 }
 
 document.getElementById('btn-save-session').onclick = saveSession;
@@ -7671,3 +7812,15 @@ setTimeout(initCanvas, 100);
 const langSelectEl = document.getElementById('lang-select');
 if (langSelectEl) langSelectEl.addEventListener('change', (e) => setLanguage(e.target.value));
 setLanguage(LANG);
+
+setTimeout(checkAutosaveOnStartup, 600);
+
+// Înregistrează Service Worker-ul pentru suport offline (funcționează doar
+// pe http(s), nu și dacă fișierul e deschis direct de pe disc cu file://).
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((e) => {
+      console.warn('Service worker nu a putut fi înregistrat:', e);
+    });
+  });
+}
