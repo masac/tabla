@@ -243,6 +243,7 @@ function applyStaticUI() {
   if (langSelect) langSelect.value = LANG;
 
   if (typeof buildSolidsMenu === 'function') buildSolidsMenu();
+  if (typeof viewer3D !== 'undefined' && viewer3D) viewer3D.refreshLanguage();
 
   const helpBtnEl = document.getElementById('btn-help');
   const licenseBtnEl = document.getElementById('btn-license');
@@ -5221,11 +5222,11 @@ function netCreateSliderPanel(label) {
     '</div>' +
     '<input id="net-slider-input" type="range" min="0" max="100" value="0" step="1" style="width:100%; accent-color:#4da3ff;">' +
     '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; opacity:0.7;">' +
-    '<span>◀ Asamblat</span><span>Desfășurat ▶</span>' +
+    (LANG === 'en' ? '<span>◀ Assembled</span><span>Unfolded ▶</span>' : '<span>◀ Asamblat</span><span>Desfășurat ▶</span>') +
     '</div>' +
     '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">' +
-    '<button id="net-slider-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:6px; padding:7px 12px; font-size:12px;">✕ Renunță</button>' +
-    '<button id="net-slider-done" style="background:#4da3ff; color:#fff; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:600;">✓ Gata</button>' +
+    `<button id="net-slider-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:6px; padding:7px 12px; font-size:12px;">✕ ${LANG === 'en' ? 'Cancel' : 'Renunță'}</button>` +
+    `<button id="net-slider-done" style="background:#4da3ff; color:#fff; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:600;">✓ ${LANG === 'en' ? 'Done' : 'Gata'}</button>` +
     '</div>';
   document.body.appendChild(wrap);
   return {
@@ -5916,22 +5917,33 @@ function getShared3DRenderer() {
   return sharedViewer3DRenderer;
 }
 
-function open3DViewer() {
-  if (typeof THREE === 'undefined') { showToast('Modulul 3D nu s-a putut încărca'); return; }
-  if (document.getElementById('viewer3d-backdrop')) return; // deja deschis — evită dublarea contextelor WebGL
+// ====================================================================
+// VIEWER 3D INTERACTIV — construit O SINGURĂ DATĂ (canvas, scenă, cameră,
+// OrbitControls, toți listenerii) și refolosit la fiecare deschidere.
+// Anterior, fiecare deschidere crea un OrbitControls nou legat de același
+// canvas și detașa complet canvas-ul din DOM la închidere — pe unele
+// GPU-uri/browsere mobile, detașarea repetată a unui canvas WebGL din DOM
+// poate duce la pierderea silențioasă a contextului, iar listenerii vechi
+// de la OrbitControls (nu sunt mereu eliminați 100% la dispose()) se
+// acumulează pe același canvas de-a lungul sesiunii. Acum nu se mai
+// distruge NIMIC după prima deschidere — fereastra doar se ascunde
+// (display:none) și se arată din nou, exact ca și cum ai reporni browserul,
+// dar fără costul real al unui restart.
+let viewer3D = null;
 
+function build3DViewer() {
   const backdrop = document.createElement('div');
   backdrop.id = 'viewer3d-backdrop';
-  backdrop.style.cssText = 'position:fixed; inset:0; background:rgba(10,10,10,0.96); z-index:500; display:flex; flex-direction:column;';
+  backdrop.style.cssText = 'position:fixed; inset:0; background:rgba(10,10,10,0.96); z-index:500; display:none; flex-direction:column;';
 
   const topBar = document.createElement('div');
   topBar.style.cssText = 'flex:0 0 auto; padding:10px 12px; display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; background:#161616; border-bottom:1px solid #333;';
   Object.keys(NET_SHAPES).concat(['sfera']).forEach(key => {
-    const label = (SOLID_SHAPES[key] && shapeLabel(SOLID_SHAPES[key])) || key;
+    const spec = SOLID_SHAPES[key];
     const icon = buildShapeIconSVG(key, 22);
     const btn = document.createElement('button');
     btn.innerHTML = `<span style="display:inline-flex; align-items:center; justify-content:center;">${icon}</span>`;
-    btn.title = label;
+    btn.title = spec ? shapeLabel(spec) : key;
     btn.dataset.shapeKey = key;
     btn.style.cssText = 'flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; width:42px; height:42px; padding:0; cursor:pointer;';
     topBar.appendChild(btn);
@@ -5947,45 +5959,47 @@ function open3DViewer() {
   hint.style.cssText = 'position:absolute; top:10px; left:50%; transform:translateX(-50%); color:#bbb; font-size:12px; background:rgba(0,0,0,0.5); padding:5px 12px; border-radius:6px; pointer-events:none;';
   viewerArea.appendChild(hint);
 
-  // ---- panoul cu sliderul de desfășurare în plan (ascuns pt sferă, care nu are desfășurare) ----
   const foldBar = document.createElement('div');
   foldBar.style.cssText = 'flex:0 0 auto; padding:8px 16px 4px; background:#161616; border-top:1px solid #333;';
   foldBar.innerHTML =
     '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; color:#bbb; margin-bottom:2px;">' +
-    '<span>◀ Asamblat</span><span id="viewer3d-fold-pct">0%</span><span>Desfășurat ▶</span>' +
+    '<span id="viewer3d-fold-assembled-label"></span><span id="viewer3d-fold-pct">0%</span><span id="viewer3d-fold-unfolded-label"></span>' +
     '</div>' +
     '<div style="display:flex; align-items:center; gap:10px;">' +
-    '<button id="viewer3d-fold-play" title="Redă animația de desfășurare" style="flex:0 0 auto; width:30px; height:30px; border-radius:50%; border:none; background:#4da3ff; color:#fff; font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">▶</button>' +
+    '<button id="viewer3d-fold-play" style="flex:0 0 auto; width:30px; height:30px; border-radius:50%; border:none; background:#4da3ff; color:#fff; font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">▶</button>' +
     '<input id="viewer3d-fold-slider" type="range" min="0" max="100" value="0" step="1" style="flex:1 1 auto; width:100%; accent-color:#4da3ff;">' +
     '</div>';
   backdrop.appendChild(foldBar);
   const foldSlider = foldBar.querySelector('#viewer3d-fold-slider');
   const foldPct = foldBar.querySelector('#viewer3d-fold-pct');
   const foldPlayBtn = foldBar.querySelector('#viewer3d-fold-play');
+  const foldAssembledLabel = foldBar.querySelector('#viewer3d-fold-assembled-label');
+  const foldUnfoldedLabel = foldBar.querySelector('#viewer3d-fold-unfolded-label');
 
-  // ---- panoul cu sliderul de viteză a rotației automate (merge indiferent dacă
-  //      forma e asamblată, pe jumătate desfăcută sau complet plată) ----
   const rotateBar = document.createElement('div');
   rotateBar.style.cssText = 'flex:0 0 auto; padding:8px 16px; background:#161616; border-top:1px solid #333;';
   rotateBar.innerHTML =
     '<div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; color:#bbb; margin-bottom:2px;">' +
-    '<span>⟲ Rotație automată</span><span id="viewer3d-rotate-val">Oprită</span>' +
+    '<span id="viewer3d-rotate-label"></span><span id="viewer3d-rotate-val"></span>' +
     '</div>' +
     '<input id="viewer3d-rotate-slider" type="range" min="-10" max="10" value="0" step="1" style="width:100%; accent-color:#4da3ff;">';
   backdrop.appendChild(rotateBar);
   const rotateSlider = rotateBar.querySelector('#viewer3d-rotate-slider');
   const rotateVal = rotateBar.querySelector('#viewer3d-rotate-val');
+  const rotateLabel = rotateBar.querySelector('#viewer3d-rotate-label');
 
   const bottomBar = document.createElement('div');
   bottomBar.style.cssText = 'flex:0 0 auto; padding:12px; display:flex; justify-content:center; gap:12px; background:#161616; border-top:1px solid #333;';
   bottomBar.innerHTML =
-    '<button id="viewer3d-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:8px; padding:10px 22px; font-size:14px;">✕ Renunță</button>' +
-    '<button id="viewer3d-ok" style="background:#4da3ff; color:#fff; border:none; border-radius:8px; padding:10px 26px; font-size:14px; font-weight:600;">✓ Inserează pe tablă</button>';
+    '<button id="viewer3d-cancel" style="background:#3a3a3a; color:#fff; border:none; border-radius:8px; padding:10px 22px; font-size:14px;"></button>' +
+    '<button id="viewer3d-ok" style="background:#4da3ff; color:#fff; border:none; border-radius:8px; padding:10px 26px; font-size:14px; font-weight:600;"></button>';
   backdrop.appendChild(bottomBar);
+  const cancelBtn = bottomBar.querySelector('#viewer3d-cancel');
+  const okBtn = bottomBar.querySelector('#viewer3d-ok');
 
   document.body.appendChild(backdrop);
 
-  // ---- scena Three.js ----
+  // ---- scena Three.js — creată o singură dată ----
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 1, 6000);
   const renderer = getShared3DRenderer();
@@ -6006,11 +6020,15 @@ function open3DViewer() {
   controls.autoRotate = false;
   controls.autoRotateSpeed = 0;
 
+  function rotateLabelText(v) {
+    return v === 0 ? (LANG === 'en' ? 'Stopped' : 'Oprită') : (v > 0 ? `→ ${v}` : `← ${Math.abs(v)}`);
+  }
+
   rotateSlider.addEventListener('input', () => {
     const v = parseInt(rotateSlider.value, 10);
     controls.autoRotateSpeed = v * 3; // OrbitControls: implicit 2 ≈ 30s/tură; scalăm pt control mai vizibil
     controls.autoRotate = v !== 0;
-    rotateVal.textContent = v === 0 ? 'Oprită' : (v > 0 ? `→ ${v}` : `← ${Math.abs(v)}`);
+    rotateVal.textContent = rotateLabelText(v);
   });
 
   let currentGroup = null;
@@ -6029,8 +6047,6 @@ function open3DViewer() {
     foldSlider.value = '0';
     foldPct.textContent = '0%';
 
-    // distanța camerei se calculează pt cel mai mare caz (starea complet desfăcută e
-    // de obicei mult mai întinsă decât cea asamblată) — ca toată plaja sliderului să încapă
     let maxSize = 0;
     if (currentUpdateAt) {
       currentUpdateAt(0);
@@ -6068,9 +6084,8 @@ function open3DViewer() {
     applyFold(parseInt(foldSlider.value, 10));
   });
 
-  // ---- animație PLAY: desfășoară automat corpul, apoi îl reasamblează, în buclă ----
   let foldPlayRafId = null;
-  let foldPlayDir = 1; // 1 = spre desfășurat, -1 = spre asamblat
+  let foldPlayDir = 1;
   const FOLD_PLAY_PCT_PER_FRAME = 0.8;
   function stopFoldPlay() {
     if (foldPlayRafId !== null) {
@@ -6104,42 +6119,29 @@ function open3DViewer() {
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }
-  resize();
   window.addEventListener('resize', resize);
 
-  let rafId;
+  let rafId = null;
   function animate() {
     controls.update();
     renderer.render(scene, camera);
     rafId = requestAnimationFrame(animate);
   }
-  animate();
 
   topBar.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-shape-key]');
     if (btn) loadShape(btn.dataset.shapeKey);
   });
 
-  loadShape('cub');
-
-  function cleanup() {
+  function hide() {
     stopFoldPlay();
-    cancelAnimationFrame(rafId);
-    window.removeEventListener('resize', resize);
-    controls.dispose();
-    if (currentGroup) disposeThreeGroup(currentGroup);
-    // Renderer-ul WebGL este partajat (vezi getShared3DRenderer) și NU se distruge
-    // aici — se detașează doar canvas-ul din DOM, ca la următoarea deschidere să
-    // fie refolosit același context, în loc să se creeze unul nou. Astfel numărul
-    // de contexte WebGL active rămâne mereu 1, indiferent de câte ori deschizi/
-    // închizi fereastra, eliminând complet epuizarea contextelor WebGL.
-    if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
-    backdrop.remove();
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    backdrop.style.display = 'none';
   }
 
-  document.getElementById('viewer3d-cancel').addEventListener('click', cleanup);
+  cancelBtn.addEventListener('click', hide);
 
-  document.getElementById('viewer3d-ok').addEventListener('click', () => {
+  okBtn.addEventListener('click', () => {
     renderer.render(scene, camera);
     const dataUrl = captureTrimmedSnapshot(renderer.domElement, 24);
     const img = new Image();
@@ -6161,11 +6163,44 @@ function open3DViewer() {
       selectedImages.add(id);
       updateImageSelection();
       updateStatus();
-      showToast('✓ Corp 3D inserat pe tablă');
+      showToast(LANG === 'en' ? '✓ 3D solid inserted on the board' : '✓ Corp 3D inserat pe tablă');
     };
     img.src = dataUrl;
-    cleanup();
+    hide();
   });
+
+  function refreshLanguage() {
+    hint.textContent = LANG === 'en' ? 'Drag to rotate • Scroll to zoom' : 'Trage pentru a roti • Derulează pentru zoom';
+    [...topBar.children].forEach(b => {
+      const spec = SOLID_SHAPES[b.dataset.shapeKey];
+      if (spec) b.title = shapeLabel(spec);
+    });
+    foldAssembledLabel.textContent = LANG === 'en' ? '◀ Assembled' : '◀ Asamblat';
+    foldUnfoldedLabel.textContent = LANG === 'en' ? 'Unfolded ▶' : 'Desfășurat ▶';
+    foldPlayBtn.title = LANG === 'en' ? 'Play unfolding animation' : 'Redă animația de desfășurare';
+    rotateLabel.textContent = LANG === 'en' ? '⟲ Auto-rotation' : '⟲ Rotație automată';
+    rotateVal.textContent = rotateLabelText(parseInt(rotateSlider.value, 10));
+    cancelBtn.textContent = LANG === 'en' ? '✕ Cancel' : '✕ Renunță';
+    okBtn.textContent = LANG === 'en' ? '✓ Insert on the board' : '✓ Inserează pe tablă';
+  }
+  refreshLanguage();
+
+  return {
+    show() {
+      refreshLanguage();
+      backdrop.style.display = 'flex';
+      resize();
+      loadShape('cub');
+      if (rafId === null) animate();
+    },
+    refreshLanguage
+  };
+}
+
+function open3DViewer() {
+  if (typeof THREE === 'undefined') { showToast(trMsg('Modulul 3D nu s-a putut încărca')); return; }
+  if (!viewer3D) viewer3D = build3DViewer();
+  viewer3D.show();
 }
 
 document.getElementById('btn-3d').addEventListener('click', () => open3DViewer());
