@@ -16,12 +16,13 @@
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-touch-callout: none; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     html, body { overflow: hidden; overscroll-behavior: none; touch-action: none; }
     #app { display: flex; flex-direction: column; height: 100vh; background: #ffffff; overflow: hidden; }
-    #toolbar { display: flex; align-items: center; gap: 4px; row-gap: 6px; padding: 6px 8px; background: #f5f5f9; border-bottom: 0.5px solid #c8c8cd; flex-wrap: wrap; user-select: none; max-height: 34vh; overflow-y: auto; }
+    #toolbar { display: flex; align-items: center; gap: clamp(2px, 0.3vw, 4px); row-gap: 6px; padding: 6px 8px; background: #f5f5f9; border-top: 0.5px solid #c8c8cd; flex-wrap: wrap; user-select: none; max-height: 34vh; overflow-y: auto; }
     .tool-group { display: flex; align-items: center; gap: 3px; row-gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
     .sep { width: 0.5px; height: 20px; background: #d0d0d5; margin: 0 2px; flex-shrink: 0; }
-    button.tool { background: transparent; border: 0.5px solid #b8b8bd; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #444; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: background 0.1s; white-space: nowrap; min-width: 38px; min-height: 38px; justify-content: center; touch-action: manipulation; }
+    button.tool { background: transparent; border: 0.5px solid #b8b8bd; border-radius: 7px; padding: clamp(3px, 0.4vw, 6px) clamp(4px, 0.55vw, 8px); font-size: clamp(10px, 0.85vw, 12px); color: #444; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: background 0.1s; white-space: nowrap; min-width: clamp(22px, 2.1vw, 30px); min-height: clamp(22px, 2.1vw, 30px); justify-content: center; touch-action: manipulation; }
     button.tool:hover { background: #e2e2e8; }
     button.tool.active { background: #d0e0f5; color: #0055cc; border-color: #a0c0e8; }
     button.tool:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -32,7 +33,7 @@
     input[type=color] { width: 34px; height: 34px; border-radius: 8px; border: 0.5px solid #b8b8bd; cursor: pointer; padding: 2px; background: transparent; flex-shrink: 0; }
     input[type=range] { width: 60px; cursor: pointer; accent-color: #0055cc; }
     label { font-size: 11px; color: #666; flex-shrink: 0; }
-    .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #ccc; cursor: pointer; padding: 0; flex-shrink: 0; transition: border-color 0.15s, transform 0.1s; touch-action: manipulation; }
+    .color-btn { width: clamp(16px, 1.6vw, 24px); height: clamp(16px, 1.6vw, 24px); border-radius: 50%; border: 2px solid #ccc; cursor: pointer; padding: 0; flex-shrink: 0; transition: border-color 0.15s, transform 0.1s; touch-action: manipulation; }
     .color-btn:hover { transform: scale(1.15); border-color: #888; }
     .color-btn.active-color { border-color: #222; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #222; }
     #workspace { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: stretch; background-color: #f8f8fc; touch-action: none; }
@@ -55,6 +56,7 @@
     button.pdf-ctl { background: rgba(255,255,255,0.1); border: none; border-radius: 6px; color: #fff; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; touch-action: manipulation; }
     button.pdf-ctl:hover { background: rgba(255,255,255,0.22); }
     button.pdf-ctl:active { background: rgba(255,255,255,0.35); }
+    button.pdf-ctl.active { background: #4da3ff; color: #fff; }
     .pdf-pane.active-pane { outline: 2px solid #0088ff; outline-offset: -2px; }
     #bg-canvas, #draw-canvas, #overlay-canvas, #selection-canvas { 
       position: absolute; 
@@ -373,8 +375,8 @@
 
     
     .bg-color-btn {
-      width: 20px;
-      height: 20px;
+      width: clamp(12px, 1.1vw, 16px);
+      height: clamp(12px, 1.1vw, 16px);
       border-radius: 4px;
       border: 2px solid #ccc;
       cursor: pointer;
@@ -419,12 +421,12 @@
     #lang-select {
       background: transparent;
       border: 0.5px solid #b8b8bd;
-      border-radius: 8px;
-      padding: 8px 6px;
-      font-size: 13px;
+      border-radius: 7px;
+      padding: clamp(3px, 0.4vw, 6px) clamp(3px, 0.4vw, 5px);
+      font-size: clamp(10px, 0.85vw, 12px);
       color: #444;
       cursor: pointer;
-      min-height: 38px;
+      min-height: clamp(22px, 2.1vw, 30px);
       flex-shrink: 0;
     }
     #lang-select:hover { background: #e2e2e8; }
@@ -432,113 +434,6 @@
 </head>
 <body>
 <div id="app">
-  <div id="toolbar">
-    <div class="tool-group">
-      <button class="tool active" id="btn-pen"><i class="ti ti-pencil"></i></button>
-      <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
-      <button class="tool" id="btn-dashed" title="Linie întreruptă">
-        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block">
-          <line x1="1" y1="8" x2="4.2" y2="8" stroke="currentColor" stroke-width="2"/>
-          <line x1="6.4" y1="8" x2="9.6" y2="8" stroke="currentColor" stroke-width="2"/>
-          <line x1="11.8" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2"/>
-        </svg>
-      </button>
-      <button class="tool" id="btn-arrow"><i class="ti ti-arrow-right"></i></button>
-      <button class="tool" id="btn-circle" title="Cerc (trage din centru)"><i class="ti ti-circle"></i></button>
-      <button class="tool shape-tool" id="btn-rect" title="Dreptunghi"><i class="ti ti-rectangle"></i></button>
-      <button class="tool shape-tool" id="btn-polygon" title="Poligon"><i class="ti ti-polygon"></i></button>
-      <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
-      <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
-      <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
-      <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
-      <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
-      <button class="tool" id="btn-3d" title="Corp 3D interactiv (rotește liber, apoi inserează)"><i class="ti ti-rotate-3d"></i></button>
-      <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
-        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
-      </button>
-      <button class="tool select-tool" id="btn-select"><i class="ti ti-select"></i></button>
-      <button class="tool" id="btn-multiselect" title="Selecție multiplă (pentru ecran tactil, fără tastă Shift)"><i class="ti ti-stack-2"></i></button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="tool math-tool" id="btn-ruler" title="Riglă"><i class="ti ti-ruler"></i></button>
-      <button class="tool math-tool" id="btn-setsquare" title="Echer">
-        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><polygon points="1,15 15,15 1,1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="tool math-tool" id="btn-protractor" title="Raportor"><i class="ti ti-angle"></i></button>
-      <button class="tool math-tool" id="btn-compass" title="Compas"><i class="ti ti-circle"></i></button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group color-group">
-      <input type="color" id="color-pick" value="#ffffff" title="Culoare">
-      <button class="color-btn" id="color-red" style="background:#ff0000" title="Roșu"></button>
-      <button class="color-btn" id="color-green" style="background:#2ecc71" title="Verde deschis"></button>
-      <button class="color-btn" id="color-blue" style="background:#3498db" title="Albastru"></button>
-      <button class="color-btn" id="color-purple" style="background:#9b59b6" title="Violet"></button>
-      <button class="color-btn color-yellow" id="color-yellow" style="background:#f1c40f" title="Galben"></button>
-      <button class="color-btn" id="color-black" style="background:#000000" title="Negru"></button>
-      <button class="color-btn active-color" id="color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
-      <label class="compact-label" id="gros-label">Gros.</label>
-      <button class="tool" id="size-minus" style="padding:4px 5px; font-weight:700;">−</button>
-      <span id="size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">3</span>
-      <button class="tool" id="size-plus" style="padding:4px 5px; font-weight:700;">+</button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="tool" id="btn-upload"><i class="ti ti-photo-up"></i></button>
-      <input type="file" id="file-input" accept="image/*" style="display:none">
-      <button class="tool" id="btn-upload-multi" style="color:#006600; border-color:#006600;"><i class="ti ti-photos"></i> +</button>
-      <input type="file" id="file-input-multi" accept="image/*" multiple style="display:none">
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="tool" id="btn-load-pdf" title="Încarcă o fișă de lucru/test în format PDF" style="color:#8e44ad; border-color:#8e44ad;"><i class="ti ti-file-type-pdf"></i> Fișă PDF</button>
-      <button class="tool" id="btn-toggle-pdf-mode" title="Comută între tabla normală și fișa PDF" disabled><i class="ti ti-columns"></i></button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="tool" id="btn-undo"><i class="ti ti-arrow-back-up"></i></button>
-      <button class="tool" id="btn-redo"><i class="ti ti-arrow-forward-up"></i></button>
-      <button class="tool" id="btn-clear"><i class="ti ti-trash"></i></button>
-      <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
-      <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
-      <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
-      <input type="file" id="session-file-input" accept=".wbs" style="display:none">
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="bg-color-btn" id="bg-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
-      <button class="bg-color-btn active-bg" id="bg-black" style="background:#000000" title="Negru"></button>
-      <button class="bg-color-btn" id="bg-gray" style="background:#808080" title="Gri"></button>
-      <button class="bg-color-btn" id="bg-lightgray" style="background:#d3d3d3" title="Gri deschis"></button>
-      <button class="bg-color-btn" id="bg-beige" style="background:#f5f5dc" title="Bej"></button>
-      <button class="bg-color-btn" id="bg-blue" style="background:#add8e6" title="Albastru deschis"></button>
-      <button class="bg-color-btn" id="bg-green" style="background:#90ee90" title="Verde deschis"></button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group">
-      <button class="tool ruling-btn active" id="ruling-none" title="Fără liniatură"><i class="ti ti-square-off"></i></button>
-      <button class="tool ruling-btn" id="ruling-grid" title="Caroiaj (ca în caietul de matematică)"><i class="ti ti-grid-dots"></i></button>
-      <button class="tool ruling-btn" id="ruling-dictando" title="Liniatură dictando (ca în caietul de dictando)"><i class="ti ti-align-justified"></i></button>
-      <button class="tool ruling-btn" id="ruling-music" title="Portativ (ca în caietul de muzică)"><i class="ti ti-music"></i></button>
-      <button class="tool" id="ruling-size-minus" title="Micșorează liniatura" style="padding:4px 5px; font-weight:700;">−</button>
-      <span id="ruling-size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">28</span>
-      <button class="tool" id="ruling-size-plus" title="Mărește liniatura" style="padding:4px 5px; font-weight:700;">+</button>
-      <input type="color" id="ruling-color-pick" value="#ffffff" title="Culoare liniatură">
-      <button class="tool" id="ruling-opacity-minus" title="Scade opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">−</button>
-      <span id="ruling-opacity-val" style="font-size:12px; min-width:30px; text-align:center; display:inline-block;">50%</span>
-      <button class="tool" id="ruling-opacity-plus" title="Crește opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">+</button>
-    </div>
-    <div class="sep"></div>
-    <div class="tool-group" style="margin-left: auto;">
-      <select id="lang-select" title="Limbă / Language">
-        <option value="ro">🇷🇴 Română</option>
-        <option value="en">🇬🇧 English</option>
-      </select>
-      <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i> Ajutor</button>
-      <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i> Licență</button>
-    </div>
-  </div>
 
   <button id="btn-fullscreen" title="Ecran complet (F11)"><i class="ti ti-maximize"></i></button>
 
@@ -559,6 +454,9 @@
         <button class="pdf-ctl" data-act="zoomin" title="Mărește"><i class="ti ti-zoom-in"></i></button>
         <button class="pdf-ctl" data-act="center" title="Centrează (păstrează zoom-ul)"><i class="ti ti-viewfinder"></i></button>
         <button class="pdf-ctl" data-act="reset" title="Resetează poziția/zoom"><i class="ti ti-refresh"></i></button>
+        <span class="pdf-ctl-sep"></span>
+        <button class="pdf-ctl" id="pdf-panmode-btn" data-act="panmode" title="Plimbă fișa cu degetul (dezactivează desenul temporar)"><i class="ti ti-hand-stop"></i></button>
+        <button class="pdf-ctl" id="pdf-clear-ink-btn" title="Șterge doar ce ai scris pe fișa PDF"><i class="ti ti-eraser"></i></button>
         <span class="pdf-ctl-sep"></span>
         <button class="pdf-ctl" data-act="up" title="Mută sus"><i class="ti ti-arrow-up"></i></button>
         <button class="pdf-ctl" data-act="down" title="Mută jos"><i class="ti ti-arrow-down"></i></button>
@@ -634,6 +532,115 @@
       </div>
       <span id="status-strokes">0 stroke-uri</span>
       <span id="status-selection" style="margin-left:12px;color:#e67e00;display:none;"></span>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <div class="tool-group">
+      <button class="tool active" id="btn-pen"><i class="ti ti-pencil"></i></button>
+      <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
+      <button class="tool" id="btn-dashed" title="Linie întreruptă">
+        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block">
+          <line x1="1" y1="8" x2="4.2" y2="8" stroke="currentColor" stroke-width="2"/>
+          <line x1="6.4" y1="8" x2="9.6" y2="8" stroke="currentColor" stroke-width="2"/>
+          <line x1="11.8" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </button>
+      <button class="tool" id="btn-arrow"><i class="ti ti-arrow-right"></i></button>
+      <button class="tool" id="btn-circle" title="Cerc (trage din centru)"><i class="ti ti-circle"></i></button>
+      <button class="tool shape-tool" id="btn-rect" title="Dreptunghi"><i class="ti ti-rectangle"></i></button>
+      <button class="tool shape-tool" id="btn-polygon" title="Poligon"><i class="ti ti-polygon"></i></button>
+      <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
+      <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
+      <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
+      <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
+      <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
+      <button class="tool" id="btn-3d" title="Corp 3D interactiv (rotește liber, apoi inserează)"><i class="ti ti-rotate-3d"></i></button>
+      <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
+        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
+      </button>
+      <button class="tool select-tool" id="btn-select"><i class="ti ti-select"></i></button>
+      <button class="tool" id="btn-multiselect" title="Selecție multiplă (pentru ecran tactil, fără tastă Shift)"><i class="ti ti-stack-2"></i></button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool math-tool" id="btn-ruler" title="Riglă"><i class="ti ti-ruler"></i></button>
+      <button class="tool math-tool" id="btn-setsquare" title="Echer">
+        <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><polygon points="1,15 15,15 1,1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="tool math-tool" id="btn-protractor" title="Raportor"><i class="ti ti-angle"></i></button>
+      <button class="tool math-tool" id="btn-compass" title="Compas"><i class="ti ti-circle"></i></button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group color-group">
+      <input type="color" id="color-pick" value="#ffffff" title="Culoare">
+      <button class="color-btn" id="color-red" style="background:#ff0000" title="Roșu"></button>
+      <button class="color-btn" id="color-green" style="background:#2ecc71" title="Verde deschis"></button>
+      <button class="color-btn" id="color-blue" style="background:#3498db" title="Albastru"></button>
+      <button class="color-btn" id="color-purple" style="background:#9b59b6" title="Violet"></button>
+      <button class="color-btn color-yellow" id="color-yellow" style="background:#f1c40f" title="Galben"></button>
+      <button class="color-btn" id="color-black" style="background:#000000" title="Negru"></button>
+      <button class="color-btn active-color" id="color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
+      <label class="compact-label" id="gros-label">Gros.</label>
+      <button class="tool" id="size-minus" style="padding:4px 5px; font-weight:700;">−</button>
+      <span id="size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">1</span>
+      <button class="tool" id="size-plus" style="padding:4px 5px; font-weight:700;">+</button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool" id="btn-upload"><i class="ti ti-photo-up"></i></button>
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+      <button class="tool" id="btn-upload-multi" style="color:#006600; border-color:#006600;"><i class="ti ti-photos"></i> +</button>
+      <input type="file" id="file-input-multi" accept="image/*" multiple style="display:none">
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool" id="btn-load-pdf" title="Încarcă o fișă de lucru/test în format PDF" style="color:#8e44ad; border-color:#8e44ad;"><i class="ti ti-file-type-pdf"></i> Fișă PDF</button>
+      <button class="tool" id="btn-toggle-pdf-mode" title="Comută între tabla normală și fișa PDF" disabled><i class="ti ti-columns"></i></button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool" id="btn-undo"><i class="ti ti-arrow-back-up"></i></button>
+      <button class="tool" id="btn-redo"><i class="ti ti-arrow-forward-up"></i></button>
+      <button class="tool" id="btn-clear"><i class="ti ti-trash"></i></button>
+      <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
+      <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
+      <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
+      <input type="file" id="session-file-input" accept=".wbs" style="display:none">
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="bg-color-btn" id="bg-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
+      <button class="bg-color-btn active-bg" id="bg-black" style="background:#000000" title="Negru"></button>
+      <button class="bg-color-btn" id="bg-gray" style="background:#808080" title="Gri"></button>
+      <button class="bg-color-btn" id="bg-lightgray" style="background:#d3d3d3" title="Gri deschis"></button>
+      <button class="bg-color-btn" id="bg-beige" style="background:#f5f5dc" title="Bej"></button>
+      <button class="bg-color-btn" id="bg-blue" style="background:#add8e6" title="Albastru deschis"></button>
+      <button class="bg-color-btn" id="bg-green" style="background:#90ee90" title="Verde deschis"></button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool ruling-btn active" id="ruling-none" title="Fără liniatură"><i class="ti ti-square-off"></i></button>
+      <button class="tool ruling-btn" id="ruling-grid" title="Caroiaj (ca în caietul de matematică)"><i class="ti ti-grid-dots"></i></button>
+      <button class="tool ruling-btn" id="ruling-dictando" title="Liniatură dictando (ca în caietul de dictando)"><i class="ti ti-align-justified"></i></button>
+      <button class="tool ruling-btn" id="ruling-music" title="Portativ (ca în caietul de muzică)"><i class="ti ti-music"></i></button>
+      <button class="tool ruling-btn" id="ruling-tip1" title="Liniatură Tip 1 (pentru învățarea literelor, clasele primare)"><i class="ti ti-writing"></i></button>
+      <button class="tool" id="ruling-size-minus" title="Micșorează liniatura" style="padding:4px 5px; font-weight:700;">−</button>
+      <span id="ruling-size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">28</span>
+      <button class="tool" id="ruling-size-plus" title="Mărește liniatura" style="padding:4px 5px; font-weight:700;">+</button>
+      <input type="color" id="ruling-color-pick" value="#ffffff" title="Culoare liniatură">
+      <button class="tool" id="ruling-opacity-minus" title="Scade opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">−</button>
+      <span id="ruling-opacity-val" style="font-size:12px; min-width:30px; text-align:center; display:inline-block;">50%</span>
+      <button class="tool" id="ruling-opacity-plus" title="Crește opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">+</button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group" style="margin-left: auto;">
+      <select id="lang-select" title="Limbă / Language">
+        <option value="ro">🇷🇴 Română</option>
+        <option value="en">🇬🇧 English</option>
+      </select>
+      <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i> Ajutor</button>
+      <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i> Licență</button>
     </div>
   </div>
 </div>

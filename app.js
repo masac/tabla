@@ -9,6 +9,34 @@ let LANG = (function () {
   return 'ro';
 })();
 
+// Poziția barei de instrumente (sus/jos) — implicit jos, ca elevii mai mici
+// să ajungă mai ușor la butoane. Alegerea se salvează și rămâne setată.
+function getToolbarPosition() {
+  try {
+    const saved = localStorage.getItem('wb-toolbar-pos');
+    if (saved === 'top' || saved === 'bottom') return saved;
+  } catch (e) {}
+  return 'bottom';
+}
+function applyToolbarPosition(pos) {
+  const app = document.getElementById('app');
+  const toolbar = document.getElementById('toolbar');
+  if (!app || !toolbar) return;
+  if (pos === 'top') {
+    app.insertBefore(toolbar, app.firstChild);
+    toolbar.style.borderTop = 'none';
+    toolbar.style.borderBottom = '0.5px solid #c8c8cd';
+  } else {
+    app.appendChild(toolbar);
+    toolbar.style.borderBottom = 'none';
+    toolbar.style.borderTop = '0.5px solid #c8c8cd';
+  }
+}
+function setToolbarPosition(pos) {
+  try { localStorage.setItem('wb-toolbar-pos', pos); } catch (e) {}
+  applyToolbarPosition(pos);
+}
+
 // Traduceri pentru atribute statice (title / placeholder / aria-label),
 // indexate după textul românesc exact (implicit).
 const UI_TEXT = {
@@ -44,6 +72,7 @@ const UI_TEXT = {
   'Caroiaj (ca în caietul de matematică)': 'Grid (like a math notebook)',
   'Liniatură dictando (ca în caietul de dictando)': 'Ruled lines (like a writing notebook)',
   'Portativ (ca în caietul de muzică)': 'Staff lines (like a music notebook)',
+  'Liniatură Tip 1 (pentru învățarea literelor, clasele primare)': 'Type 1 ruling (for learning letters, primary grades)',
   'Micșorează liniatura': 'Decrease ruling size',
   'Mărește liniatura': 'Increase ruling size',
   'Culoare liniatură': 'Ruling color',
@@ -76,6 +105,8 @@ const UI_TEXT = {
   'Turcoaz': 'Turquoise',
   'Trage pentru a redimensiona': 'Drag to resize',
   'Șterge pagina curentă': 'Delete current page',
+  'Plimbă fișa cu degetul (dezactivează desenul temporar)': 'Pan the sheet with your finger (temporarily disables drawing)',
+  'Șterge doar ce ai scris pe fișa PDF': 'Clear only what you wrote on the PDF sheet',
   'Închide': 'Close',
   'ex: x^2 - 3x + 2': 'e.g. x^2 - 3x + 2',
   'Scrie text...': 'Type text...',
@@ -292,7 +323,7 @@ let boardRedoStack = [];
 
 let DPR = Math.min(window.devicePixelRatio || 1, 2);
 let tool = 'pen', color = '#ffffff';
-let lastPenSize = 3, lastEraserSize = 25;
+let lastPenSize = 1, lastEraserSize = 25;
 
 let drawing = false;
 let currentStroke = [];
@@ -366,7 +397,8 @@ function makePdfPane() {
     strokes: [], images: [],
     undoStack: [], redoStack: [],
     pageNum: 1, zoom: 1, panX: 0, panY: 0,
-    canvasW: 0, canvasH: 0
+    canvasW: 0, canvasH: 0,
+    panMode: false // când e activ, un singur deget plimbă fișa (nu mai desenează)
   };
 }
 let pdfPanes = { top: makePdfPane() };
@@ -545,8 +577,14 @@ document.getElementById('btn-toggle-pdf-mode').addEventListener('click', () => {
 (function() {
   const name = 'top';
   const els = getPaneEls(name);
-  els.draw.addEventListener('pointerdown', function(e) { activatePane(name); handlePointerDown(e); });
-  els.draw.addEventListener('pointermove', handlePointerMove);
+  els.draw.addEventListener('pointerdown', function(e) {
+    if (pdfPanes[name].panMode && e.pointerType === 'touch') return; // în mod plimbare, degetul nu mai desenează
+    activatePane(name); handlePointerDown(e);
+  });
+  els.draw.addEventListener('pointermove', function(e) {
+    if (pdfPanes[name].panMode && e.pointerType === 'touch') return;
+    handlePointerMove(e);
+  });
   els.draw.addEventListener('pointerup', handlePointerUp);
   els.draw.addEventListener('pointercancel', handlePointerUp);
   els.draw.addEventListener('pointerleave', handlePointerLeave);
@@ -577,6 +615,13 @@ document.querySelectorAll('.pdf-pane-controls .pdf-ctl').forEach(function(btn) {
     else if (act === 'reset') { pane.panX = 0; pane.panY = 0; pane.zoom = 1; }
     else if (act === 'pageprev') { if (pane.pageNum > 1) pane.pageNum--; }
     else if (act === 'pagenext') { if (pane.pageNum < pdfTotalPages) pane.pageNum++; }
+    else if (act === 'panmode') {
+      pane.panMode = !pane.panMode;
+      btn.classList.toggle('active', pane.panMode);
+      showToast(pane.panMode
+        ? (LANG === 'en' ? '✋ Finger-pan mode on — one finger scrolls, drawing is off' : '✋ Mod plimbare cu degetul activ — desenul e oprit temporar')
+        : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
+    }
     renderPdfPane(name);
   });
 });
@@ -587,11 +632,19 @@ function attachPanePanZoom(name) {
   const root = els.root;
   let pts = new Map();
   let lastDist = null, lastMid = null;
+  let singleFingerPan = false;
 
   root.addEventListener('pointerdown', function(e) {
     if (e.pointerType !== 'touch') return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 2) {
+    const pane = pdfPanes[name];
+    if (pts.size === 1 && pane && pane.panMode) {
+      // Mod plimbare cu un deget activat explicit din bara de control —
+      // un singur deget mișcă fișa în loc să deseneze.
+      singleFingerPan = true;
+      lastMid = { x: e.clientX, y: e.clientY };
+    } else if (pts.size === 2) {
+      singleFingerPan = false;
       activatePane(name);
       lastDist = null; lastMid = null;
       // Anulează orice linie începută cu primul deget, ca gestul cu 2 degete
@@ -608,11 +661,21 @@ function attachPanePanZoom(name) {
   root.addEventListener('pointermove', function(e) {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pane = pdfPanes[name];
+
+    if (singleFingerPan && pts.size === 1 && pane) {
+      const cur = { x: e.clientX, y: e.clientY };
+      pane.panX += (cur.x - lastMid.x);
+      pane.panY += (cur.y - lastMid.y);
+      lastMid = cur;
+      renderPdfPane(name);
+      return;
+    }
+
     if (pts.size === 2) {
       const [a, b] = Array.from(pts.values());
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const pane = pdfPanes[name];
       if (lastDist != null) {
         const scaleDelta = dist / lastDist;
         pane.zoom = Math.max(0.2, Math.min(10, pane.zoom * scaleDelta));
@@ -624,7 +687,11 @@ function attachPanePanZoom(name) {
     }
   }, { passive: true });
 
-  function clearPt(e) { pts.delete(e.pointerId); if (pts.size < 2) { lastDist = null; lastMid = null; } }
+  function clearPt(e) {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) { lastDist = null; lastMid = null; }
+    if (pts.size === 0) singleFingerPan = false;
+  }
   root.addEventListener('pointerup', clearPt, { passive: true });
   root.addEventListener('pointercancel', clearPt, { passive: true });
   root.addEventListener('pointerleave', clearPt, { passive: true });
@@ -649,9 +716,11 @@ attachPanePanZoom('top');
   divider.addEventListener('pointerdown', function(e) {
     dragging = true;
     divider.setPointerCapture(e.pointerId);
+    e.preventDefault();
   });
   divider.addEventListener('pointermove', function(e) {
     if (!dragging) return;
+    e.preventDefault();
     const rect = container.getBoundingClientRect();
     const dividerH = divider.getBoundingClientRect().height;
     let topH = e.clientY - rect.top;
@@ -665,9 +734,10 @@ attachPanePanZoom('top');
       requestAnimationFrame(applyResize);
     }
   });
-  function endDrag() {
+  function endDrag(e) {
     if (!dragging) return;
     dragging = false;
+    if (e && e.preventDefault) e.preventDefault();
     initPaneDrawCanvas('top');
     renderPdfPane('top');
     initCanvas();
@@ -1169,6 +1239,45 @@ function drawBoardRuling() {
         cx.moveTo(0, y); cx.lineTo(w, y);
       }
       cx.stroke();
+    }
+  } else if (boardRuling === 'tip1') {
+    // Liniatura "Tip 1", folosită la clasele primare pentru învățarea literelor:
+    // benzi de scriere delimitate de 2 linii orizontale continue, cu o linie
+    // punctată exact la mijloc (ghidează înălțimea literelor mici, tip "a", "e"),
+    // plus linii oblice de ghidaj pentru înclinarea scrisului.
+    const bandHeight = rulingSize * 1.7;
+    const bandGap = rulingSize * 1.1;
+    const period = bandHeight + bandGap;
+
+    // liniile oblice de ghidaj (înclinare ~65° de la orizontală)
+    const diagStep = rulingSize * 1.3;
+    const dx = h / Math.tan(65 * Math.PI / 180);
+    cx.save();
+    cx.globalAlpha = 0.5;
+    cx.lineWidth = 0.75;
+    cx.beginPath();
+    for (let x = -dx; x <= w + dx; x += diagStep) {
+      cx.moveTo(x, h);
+      cx.lineTo(x + dx, 0);
+    }
+    cx.stroke();
+    cx.restore();
+
+    // benzile de scriere: linie plină sus, linie punctată la mijloc, linie plină jos
+    cx.lineWidth = 1;
+    for (let top = rulingSize; top + bandHeight <= h + 1; top += period) {
+      cx.beginPath();
+      cx.moveTo(0, top + 0.5); cx.lineTo(w, top + 0.5);
+      cx.moveTo(0, top + bandHeight + 0.5); cx.lineTo(w, top + bandHeight + 0.5);
+      cx.stroke();
+
+      cx.save();
+      cx.setLineDash([4, 4]);
+      cx.beginPath();
+      const midY = top + bandHeight / 2 + 0.5;
+      cx.moveTo(0, midY); cx.lineTo(w, midY);
+      cx.stroke();
+      cx.restore();
     }
   }
   cx.restore();
@@ -5908,13 +6017,37 @@ function captureTrimmedSnapshot(sourceCanvas, padding) {
 //      deschidere a viewer-ului 3D, ca să nu se mai epuizeze niciodată
 //      contextele WebGL disponibile (limitate pe multe GPU-uri mobile) ----
 let sharedViewer3DRenderer = null;
+let shared3DContextLost = false;
 function getShared3DRenderer() {
   if (!sharedViewer3DRenderer) {
     sharedViewer3DRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     sharedViewer3DRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     sharedViewer3DRenderer.domElement.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
+    // Unele browsere (mai ales Chromium-based cu protecții suplimentare, cum e Brave,
+    // sau pe Linux cu drivere GPU instabile) pot pierde contextul WebGL în fundal, fără
+    // nicio eroare vizibilă — canvas-ul rămâne pur și simplu negru/gol. e.preventDefault()
+    // e obligatoriu aici: fără el, browserul nu încearcă niciodată să restaureze contextul.
+    sharedViewer3DRenderer.domElement.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      shared3DContextLost = true;
+      console.warn('[3D] Context WebGL pierdut — se va reconstrui automat la următoarea deschidere.');
+    });
   }
   return sharedViewer3DRenderer;
+}
+
+// Verifică dacă renderer-ul partajat are contextul WebGL mort (pierdut de browser/GPU,
+// nu de codul aplicației). Dacă da, la următoarea deschidere reconstruim tot de la zero
+// în loc să lăsăm utilizatorul cu un ecran negru care se repară doar la restart de browser.
+function isShared3DContextDead() {
+  if (!sharedViewer3DRenderer) return false;
+  if (shared3DContextLost) return true;
+  try {
+    const gl = sharedViewer3DRenderer.getContext();
+    return !!(gl && gl.isContextLost && gl.isContextLost());
+  } catch (e) {
+    return true;
+  }
 }
 
 // ====================================================================
@@ -6123,6 +6256,17 @@ function build3DViewer() {
 
   let rafId = null;
   function animate() {
+    if (shared3DContextLost) {
+      // Contextul s-a pierdut chiar în timp ce fereastra era deschisă — nu mai are
+      // rost să continuăm bucla de randare (ar desena pe un context mort, degeaba).
+      // Închidem fereastra și anunțăm — la următoarea deschidere, open3DViewer()
+      // va detecta contextul mort și va reconstrui totul automat.
+      hide();
+      showToast(LANG === 'en'
+        ? '⚠ Graphics context was lost by the browser — reopen the 3D window to continue'
+        : '⚠ Contextul grafic a fost pierdut de browser — redeschide fereastra 3D pentru a continua', 4500);
+      return;
+    }
     controls.update();
     renderer.render(scene, camera);
     rafId = requestAnimationFrame(animate);
@@ -6199,6 +6343,17 @@ function build3DViewer() {
 
 function open3DViewer() {
   if (typeof THREE === 'undefined') { showToast(trMsg('Modulul 3D nu s-a putut încărca')); return; }
+  if (viewer3D && isShared3DContextDead()) {
+    // Contextul WebGL a fost pierdut de browser (nu din vina codului aplicației —
+    // vezi getShared3DRenderer). Aruncăm complet fereastra veche și renderer-ul mort,
+    // și reconstruim totul de la zero, ca utilizatorul să nu mai fie nevoit să
+    // închidă și să redeschidă browserul.
+    const oldBackdrop = document.getElementById('viewer3d-backdrop');
+    if (oldBackdrop) oldBackdrop.remove();
+    viewer3D = null;
+    sharedViewer3DRenderer = null;
+    shared3DContextLost = false;
+  }
   if (!viewer3D) viewer3D = build3DViewer();
   viewer3D.show();
 }
@@ -6259,6 +6414,7 @@ document.getElementById('ruling-none').onclick = () => setBoardRuling('none', 'r
 document.getElementById('ruling-grid').onclick = () => setBoardRuling('grid', 'ruling-grid');
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
+document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
 document.getElementById('ruling-size-minus').onclick = () => {
   rulingSize = Math.max(10, rulingSize - 4);
   document.getElementById('ruling-size-val').textContent = rulingSize;
@@ -6471,7 +6627,11 @@ document.getElementById('btn-redo').onclick = () => {
 };
 
 document.getElementById('btn-clear').onclick = async () => {
-  if (await customConfirm('Ștergi complet pagina?')) {
+  const onPdfPane = pdfModeActive && activeSurface === 'top';
+  const msg = onPdfPane
+    ? (LANG === 'en' ? 'Clear everything you wrote on the PDF sheet? The loaded file itself stays untouched.' : 'Ștergi tot ce ai scris pe fișa PDF? Fișa încărcată rămâne neatinsă.')
+    : (LANG === 'en' ? 'Clear the whole board page?' : 'Ștergi complet pagina tablei?');
+  if (await customConfirm(msg)) {
     const p = getCurrentPage();
     p.strokes = []; p.images = [];
     undoStack = undoStack.filter(a => a.page !== p);
@@ -6481,8 +6641,38 @@ document.getElementById('btn-clear').onclick = async () => {
     updateImageSelection();
     hideSelectionInfo();
     drawBg(); redrawStrokes(); renderImages(); updateStatus();
+    if (onPdfPane) renderPdfPane('top'); // reafișează fișa PDF (neatinsă) sub cerneala ștearsă
   }
 };
+
+// Buton dedicat, direct în bara ferestrei PDF: șterge DOAR ce s-a scris peste
+// fișa PDF (adnotările), indiferent care suprafață e activă în acel moment —
+// fișa PDF încărcată (pdfDoc) NU este niciodată afectată de acest buton.
+document.getElementById('pdf-clear-ink-btn').addEventListener('click', async () => {
+  const msg = LANG === 'en'
+    ? 'Clear everything written on the PDF sheet? The loaded file itself stays untouched.'
+    : 'Ștergi tot ce ai scris pe fișa PDF? Fișa încărcată rămâne neatinsă.';
+  if (await customConfirm(msg)) {
+    const pane = pdfPanes.top;
+    pane.strokes = []; pane.images = [];
+    if (activeSurface === 'top') {
+      undoStack = undoStack.filter(a => a.page !== pane);
+      redoStack = redoStack.filter(a => a.page !== pane);
+      selectedStrokes.clear();
+      selectedImages.clear();
+      updateImageSelection();
+      hideSelectionInfo();
+      redrawStrokes(); renderImages();
+    } else {
+      pane.undoStack = pane.undoStack.filter(a => a.page !== pane);
+      pane.redoStack = pane.redoStack.filter(a => a.page !== pane);
+    }
+    initPaneDrawCanvas('top');
+    renderPdfPane('top');
+    updateStatus();
+    showToast(LANG === 'en' ? '✓ PDF annotations cleared' : '✓ Adnotările de pe fișa PDF au fost șterse');
+  }
+});
 
 document.getElementById('btn-pdf').onclick = () => {
   const { jsPDF } = window.jspdf;
@@ -6632,7 +6822,7 @@ async function restoreSessionData(data, opts) {
 
   boardRuling = data.boardRuling || 'none';
   document.querySelectorAll('.ruling-btn').forEach(b => b.classList.remove('active'));
-  const rulingBtnMap = { none: 'ruling-none', grid: 'ruling-grid', dictando: 'ruling-dictando', music: 'ruling-music' };
+  const rulingBtnMap = { none: 'ruling-none', grid: 'ruling-grid', dictando: 'ruling-dictando', music: 'ruling-music', tip1: 'ruling-tip1' };
   const activeRulingBtn = document.getElementById(rulingBtnMap[boardRuling]);
   if (activeRulingBtn) activeRulingBtn.classList.add('active');
   rulingSize = data.rulingSize || 28;
@@ -7615,6 +7805,17 @@ function snapToGuides(p) {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
+<h4>Setări</h4>
+<p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+  <span>Poziția barei de instrumente:</span>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="toolbar-pos" id="toolbar-pos-top" value="top"> Sus
+  </label>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="toolbar-pos" id="toolbar-pos-bottom" value="bottom"> Jos (implicit)
+  </label>
+</p>
+
 <h4>Desen</h4>
 <ul>
   <li><b>Creion</b> — desen liber cu mâna.</li>
@@ -7699,6 +7900,17 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
+<h4>Settings</h4>
+<p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+  <span>Toolbar position:</span>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="toolbar-pos" id="toolbar-pos-top" value="top"> Top
+  </label>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="toolbar-pos" id="toolbar-pos-bottom" value="bottom"> Bottom (default)
+  </label>
+</p>
+
 <h4>Drawing</h4>
 <ul>
   <li><b>Pencil</b> — free-hand drawing.</li>
@@ -7790,6 +8002,14 @@ function openInfoModal(title, bodyHtml) {
   titleEl.textContent = title;
   bodyEl.innerHTML = bodyHtml;
   backdrop.classList.add('show');
+  const toolbarPosTop = document.getElementById('toolbar-pos-top');
+  const toolbarPosBottom = document.getElementById('toolbar-pos-bottom');
+  if (toolbarPosTop && toolbarPosBottom) {
+    const current = getToolbarPosition();
+    (current === 'top' ? toolbarPosTop : toolbarPosBottom).checked = true;
+    toolbarPosTop.addEventListener('change', () => { if (toolbarPosTop.checked) setToolbarPosition('top'); });
+    toolbarPosBottom.addEventListener('change', () => { if (toolbarPosBottom.checked) setToolbarPosition('bottom'); });
+  }
   const hiddenLinesToggle = document.getElementById('toggle-hidden-lines');
   if (hiddenLinesToggle) {
     // Bifat = "arată toate muchiile continue" → SOLID_SHOW_HIDDEN_LINES = false.
@@ -7847,6 +8067,7 @@ setTimeout(initCanvas, 100);
 const langSelectEl = document.getElementById('lang-select');
 if (langSelectEl) langSelectEl.addEventListener('change', (e) => setLanguage(e.target.value));
 setLanguage(LANG);
+applyToolbarPosition(getToolbarPosition());
 
 setTimeout(checkAutosaveOnStartup, 600);
 
