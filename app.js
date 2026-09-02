@@ -106,6 +106,8 @@ const UI_TEXT = {
   'Trage pentru a redimensiona': 'Drag to resize',
   'Șterge pagina curentă': 'Delete current page',
   'Plimbă fișa cu degetul (dezactivează desenul temporar)': 'Pan the sheet with your finger (temporarily disables drawing)',
+  'Plimbă tabla cu degetul (suprafață infinită)': 'Pan the board with your finger (infinite surface)',
+  'Revino la poziția inițială a tablei': 'Return to the board\'s starting position',
   'Șterge doar ce ai scris pe fișa PDF': 'Clear only what you wrote on the PDF sheet',
   'Închide': 'Close',
   'ex: x^2 - 3x + 2': 'e.g. x^2 - 3x + 2',
@@ -307,11 +309,53 @@ const boardDrawC = document.getElementById('draw-canvas');
 const boardOverlayC = document.getElementById('overlay-canvas');
 const boardSelC = document.getElementById('selection-canvas');
 const imagesContainer = document.getElementById('images-container');
+const imagesContainerFront = document.getElementById('images-container-front');
 const mathInfo = document.getElementById('math-info');
 const selectionInfo = document.getElementById('selection-info');
 
 let bgC = boardBgC, drawC = boardDrawC, overlayC = boardOverlayC, selC = boardSelC;
 let bgCtx = bgC.getContext('2d');
+// Panoramare infinită a tablei (nu a ferestrei PDF, care are propriul sistem de
+// pan/zoom). Coordonatele tuturor stroke-urilor/imaginilor rămân neschimbate
+// ("coordonate lume") — doar transformarea canvas-ului se deplasează, ca și cum
+// ai muta o cameră peste o suprafață infinită.
+let boardPanX = 0, boardPanY = 0;
+let boardPanMode = false;
+
+// Golește complet un canvas, indiferent de transformarea curentă (scale DPR +
+// pan) activă pe contextul lui — clearRect ține cont de transform, deci pentru
+// a curăța garantat tot dreptunghiul vizibil trebuie resetat temporar la
+// identitate cât timp se șterge.
+function clearCanvas(cx, canvas) {
+  cx.save();
+  cx.setTransform(1, 0, 0, 1, 0, 0);
+  cx.clearRect(0, 0, canvas.width, canvas.height);
+  cx.restore();
+}
+
+// Imaginile sunt elemente DOM poziționate în pixeli (coordonate "lume", ca și
+// stroke-urile) — pentru ca ele să urmeze panoramarea tablei, aplicăm un
+// transform CSS pe containerele lor, în loc să recalculăm poziția fiecărei
+// imagini în parte.
+function applyImagesPanTransform() {
+  const t = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px)` : 'none';
+  if (typeof imagesContainer !== 'undefined' && imagesContainer) imagesContainer.style.transform = t;
+  if (typeof imagesContainerFront !== 'undefined' && imagesContainerFront) imagesContainerFront.style.transform = t;
+}
+
+// Deplasează panoramarea tablei cu (dx, dy) — folosit la tragerea cu un deget
+// când modul "Deget" (panoramare) e activ. Suprafața e nemărginită: nu există
+// nicio clemă/limită pe boardPanX/boardPanY, deci tabla se poate întinde oricât
+// de departe în orice direcție.
+function panBoardBy(dx, dy) {
+  boardPanX += dx;
+  boardPanY += dy;
+  applyCanvasPanTransform();
+  applyImagesPanTransform();
+  drawBg();
+  redrawStrokes();
+  drawSelectionHighlights();
+}
 let ctx = drawC.getContext('2d');
 let overlayCtx = overlayC.getContext('2d');
 let selCtx = selC.getContext('2d');
@@ -463,6 +507,8 @@ function activatePane(name) {
     selCtx = selC.getContext('2d');
     undoStack = pdfPanes[name].undoStack; redoStack = pdfPanes[name].redoStack;
   }
+  applyCanvasPanTransform();
+  applyImagesPanTransform();
   const container = (name === 'board') ? wrap : getPaneEls(name).root;
   if (mathInfo.parentElement !== container) container.appendChild(mathInfo);
   if (selectionInfo.parentElement !== container) container.appendChild(selectionInfo);
@@ -652,7 +698,7 @@ function attachPanePanZoom(name) {
       if (drawing) {
         drawing = false;
         currentStroke = [];
-        overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+        clearCanvas(overlayCtx, overlayC);
         redrawStrokes();
       }
     }
@@ -803,6 +849,7 @@ function getImageAt(page, x, y) {
 
 function renderImages() {
   imagesContainer.innerHTML = '';
+  imagesContainerFront.innerHTML = '';
   const page = getCurrentPage();
   if (!page) return;
 
@@ -877,9 +924,16 @@ let resizeOrigW = 0, resizeOrigH = 0;
 let imageDragStartPositions = new Map();
 
 function updateImageSelection() {
-  document.querySelectorAll('.image-item').forEach(el => {
+  document.querySelectorAll('#images-container .image-item, #images-container-front .image-item').forEach(el => {
     const id = parseInt(el.dataset.imageId);
-    el.classList.toggle('selected', selectedImages.has(id));
+    const isSelected = selectedImages.has(id);
+    el.classList.toggle('selected', isSelected);
+    // Doar imaginea (imaginile) selectată(e) curent trec deasupra liniilor
+    // desenate, ca butoanele de blocare/ștergere/redimensionare să rămână
+    // accesibile la atingere. Imaginile neselectate stau sub linii, ca
+    // scrisul de peste ele să rămână mereu vizibil (nu se mai "pierde").
+    const targetContainer = isSelected ? imagesContainerFront : imagesContainer;
+    if (el.parentNode !== targetContainer) targetContainer.appendChild(el);
   });
 }
 
@@ -1154,6 +1208,14 @@ function hideAngleReadout(duration = 4000) {
   angleReadoutTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
 
+function applyCanvasPanTransform() {
+  const px = (activeSurface === 'board') ? boardPanX : 0;
+  const py = (activeSurface === 'board') ? boardPanY : 0;
+  [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => {
+    cx.setTransform(DPR, 0, 0, DPR, px * DPR, py * DPR);
+  });
+}
+
 function initCanvas() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -1161,7 +1223,8 @@ function initCanvas() {
     c.width = w * DPR; c.height = h * DPR;
     c.style.width = w + 'px'; c.style.height = h + 'px';
   });
-  [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => { cx.resetTransform(); cx.scale(DPR, DPR); });
+  applyCanvasPanTransform();
+  applyImagesPanTransform();
   drawBg(); 
   redrawStrokes(); 
   updateStatus(); 
@@ -1170,9 +1233,12 @@ function initCanvas() {
 }
 
 function drawBg() {
-  bgCtx.clearRect(0, 0, bgC.width, bgC.height);
+  clearCanvas(bgCtx, bgC);
+  bgCtx.save();
+  bgCtx.setTransform(1, 0, 0, 1, 0, 0); // umple tot ecranul vizibil, indiferent de panoramare
   bgCtx.fillStyle = bgColor;
   bgCtx.fillRect(0, 0, bgC.width, bgC.height);
+  bgCtx.restore();
   drawBoardRuling();
 }
 
@@ -1210,6 +1276,13 @@ function drawBoardRuling() {
   const w = bgC.width / DPR, h = bgC.height / DPR;
   const cx = bgCtx;
   const scale = rulingSize / 28;
+  const panX = (activeSurface === 'board') ? boardPanX : 0;
+  const panY = (activeSurface === 'board') ? boardPanY : 0;
+  // Domeniul, în coordonate "lume", efectiv vizibil pe ecran acum — liniatura
+  // trebuie desenată aici, nu de la 0, ca să acopere ecranul indiferent cât
+  // de departe s-a panoramat tabla (efect de suprafață infinită).
+  const x0 = -panX, x1 = w - panX;
+  const y0 = -panY, y1 = h - panY;
   cx.save();
   cx.strokeStyle = getRulingColor();
 
@@ -1217,26 +1290,28 @@ function drawBoardRuling() {
     const step = rulingSize;
     cx.lineWidth = 1;
     cx.beginPath();
-    for (let x = 0; x <= w; x += step) { cx.moveTo(x + 0.5, 0); cx.lineTo(x + 0.5, h); }
-    for (let y = 0; y <= h; y += step) { cx.moveTo(0, y + 0.5); cx.lineTo(w, y + 0.5); }
+    for (let x = Math.floor(x0 / step) * step; x <= x1; x += step) { cx.moveTo(x + 0.5, y0); cx.lineTo(x + 0.5, y1); }
+    for (let y = Math.floor(y0 / step) * step; y <= y1; y += step) { cx.moveTo(x0, y + 0.5); cx.lineTo(x1, y + 0.5); }
     cx.stroke();
   } else if (boardRuling === 'dictando') {
     // linii orizontale simple, egal distanțate, exact ca în caietul de dictando din imagine.
     const step = rulingSize;
     cx.lineWidth = 1;
     cx.beginPath();
-    for (let y = step; y <= h; y += step) { cx.moveTo(0, y + 0.5); cx.lineTo(w, y + 0.5); }
+    for (let y = Math.floor(y0 / step) * step; y <= y1; y += step) { cx.moveTo(x0, y + 0.5); cx.lineTo(x1, y + 0.5); }
     cx.stroke();
   } else if (boardRuling === 'music') {
     const lineGap = 9 * scale, staffGap = 56 * scale;
     const staffHeight = lineGap * 4;
     const period = staffHeight + staffGap;
     cx.lineWidth = 1.2;
-    for (let top = 40 * scale; top < h; top += period) {
+    const baseTop = 40 * scale;
+    const startTop = baseTop + Math.floor((y0 - baseTop) / period) * period;
+    for (let top = startTop; top < y1; top += period) {
       cx.beginPath();
       for (let i = 0; i < 5; i++) {
         const y = top + i * lineGap + 0.5;
-        cx.moveTo(0, y); cx.lineTo(w, y);
+        cx.moveTo(x0, y); cx.lineTo(x1, y);
       }
       cx.stroke();
     }
@@ -1251,31 +1326,33 @@ function drawBoardRuling() {
 
     // liniile oblice de ghidaj (înclinare ~65° de la orizontală)
     const diagStep = rulingSize * 1.3;
-    const dx = h / Math.tan(65 * Math.PI / 180);
+    const dxSlant = h / Math.tan(65 * Math.PI / 180);
     cx.save();
     cx.globalAlpha = 0.5;
     cx.lineWidth = 0.75;
     cx.beginPath();
-    for (let x = -dx; x <= w + dx; x += diagStep) {
-      cx.moveTo(x, h);
-      cx.lineTo(x + dx, 0);
+    const diagStart = Math.floor((x0 - dxSlant) / diagStep) * diagStep;
+    for (let x = diagStart; x <= x1 + dxSlant; x += diagStep) {
+      cx.moveTo(x, y1);
+      cx.lineTo(x + dxSlant, y0);
     }
     cx.stroke();
     cx.restore();
 
     // benzile de scriere: linie plină sus, linie punctată la mijloc, linie plină jos
     cx.lineWidth = 1;
-    for (let top = rulingSize; top + bandHeight <= h + 1; top += period) {
+    const startTop = rulingSize + Math.floor((y0 - rulingSize) / period) * period;
+    for (let top = startTop; top + bandHeight <= y1 + 1; top += period) {
       cx.beginPath();
-      cx.moveTo(0, top + 0.5); cx.lineTo(w, top + 0.5);
-      cx.moveTo(0, top + bandHeight + 0.5); cx.lineTo(w, top + bandHeight + 0.5);
+      cx.moveTo(x0, top + 0.5); cx.lineTo(x1, top + 0.5);
+      cx.moveTo(x0, top + bandHeight + 0.5); cx.lineTo(x1, top + bandHeight + 0.5);
       cx.stroke();
 
       cx.save();
       cx.setLineDash([4, 4]);
       cx.beginPath();
       const midY = top + bandHeight / 2 + 0.5;
-      cx.moveTo(0, midY); cx.lineTo(w, midY);
+      cx.moveTo(x0, midY); cx.lineTo(x1, midY);
       cx.stroke();
       cx.restore();
     }
@@ -1531,9 +1608,9 @@ function drawStrokeOn(c, stroke) {
   if (stroke.type === 'arrow') {
     c.save();
     c.strokeStyle = stroke.color;
-    c.fillStyle = stroke.color;
     c.lineWidth = stroke.size || 2;
     c.lineCap = 'round';
+    c.lineJoin = 'round';
     const p1 = stroke.points[0];
     const p2 = stroke.points[1];
     const dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -1547,11 +1624,10 @@ function drawStrokeOn(c, stroke) {
     c.lineTo(p2.x, p2.y);
     c.stroke();
     c.beginPath();
-    c.moveTo(p2.x, p2.y);
-    c.lineTo(p2.x - headLen * Math.cos(angle - headAngle), p2.y - headLen * Math.sin(angle - headAngle));
+    c.moveTo(p2.x - headLen * Math.cos(angle - headAngle), p2.y - headLen * Math.sin(angle - headAngle));
+    c.lineTo(p2.x, p2.y);
     c.lineTo(p2.x - headLen * Math.cos(angle + headAngle), p2.y - headLen * Math.sin(angle + headAngle));
-    c.closePath();
-    c.fill();
+    c.stroke();
     c.restore();
     return;
   }
@@ -1603,7 +1679,7 @@ function drawStrokeOn(c, stroke) {
 }
 
 function redrawStrokes(limit) {
-  ctx.clearRect(0, 0, drawC.width, drawC.height);
+  clearCanvas(ctx, drawC);
   const page = getCurrentPage();
   if (!page) return;
   const n = limit !== undefined ? limit : page.strokes.length;
@@ -1650,7 +1726,9 @@ function updateStatus() {
 
 const pos = e => {
   const r = drawC.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
+  let x = e.clientX - r.left, y = e.clientY - r.top;
+  if (activeSurface === 'board') { x -= boardPanX; y -= boardPanY; }
+  return { x, y };
 };
 
 function snapPointToAngle(start, end) {
@@ -1940,7 +2018,7 @@ function strokeIntersectsLasso(stroke, poly) {
 }
 
 function drawSelectionHighlights() {
-  selCtx.clearRect(0, 0, selC.width, selC.height);
+  clearCanvas(selCtx, selC);
   if (selectedStrokes.size === 0) return;
   
   const page = getCurrentPage();
@@ -2380,7 +2458,7 @@ function handlePointerDown(e) {
       drawing = true;
       currentStroke = [p];
       showToast(`🟨 Poligon: punctul 1 (${Math.round(p.x)}, ${Math.round(p.y)}) - click pentru următorul punct`);
-      ctx.clearRect(0, 0, drawC.width, drawC.height);
+      clearCanvas(ctx, drawC);
       redrawStrokes();
       ctx.save();
       ctx.fillStyle = color;
@@ -2398,7 +2476,7 @@ function handlePointerDown(e) {
       if (Math.hypot(p.x - last.x, p.y - last.y) > 5) {
         currentStroke.push(p);
         showToast(`🟨 Poligon: punctul ${currentStroke.length} (${Math.round(p.x)}, ${Math.round(p.y)}) - dublu-click pentru finalizare`);
-        ctx.clearRect(0, 0, drawC.width, drawC.height);
+        clearCanvas(ctx, drawC);
         redrawStrokes();
         ctx.save();
         ctx.strokeStyle = color;
@@ -2526,7 +2604,7 @@ function handlePointerMove(e) {
     drawSelectionHighlights();
     updateImageSelection();
 
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     overlayCtx.save();
     overlayCtx.strokeStyle = '#0055cc';
     overlayCtx.fillStyle = 'rgba(0,85,204,0.08)';
@@ -2552,7 +2630,7 @@ function handlePointerMove(e) {
     const dx = (e.clientX - dragStartMouseX);
     const dy = (e.clientY - dragStartMouseY);
     
-    ctx.clearRect(0, 0, drawC.width, drawC.height);
+    clearCanvas(ctx, drawC);
     redrawStrokes();
     
     for (const si of selectedStrokes) {
@@ -2613,7 +2691,7 @@ function handlePointerMove(e) {
   }
   
   if (isMathDrawing) {
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     const size = lastPenSize;
     
     if (tool === 'ruler' && mathStartPoint) {
@@ -2638,7 +2716,7 @@ function handlePointerMove(e) {
   }
   
   if (tool === 'protractor' && protractorPhase === 2 && mathStartPoint && mathEndPoint) {
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     const size = lastPenSize;
     let ray2 = p;
     if (e.shiftKey) {
@@ -2672,7 +2750,7 @@ function handlePointerMove(e) {
   }
   
   if (tool === 'rect' && drawing) {
-    ctx.clearRect(0, 0, drawC.width, drawC.height);
+    clearCanvas(ctx, drawC);
     redrawStrokes();
     const start = currentStroke[0];
     let w = p.x - start.x;
@@ -2695,7 +2773,7 @@ function handlePointerMove(e) {
   if (!drawing) return;
   const size = tool === 'erase' ? lastEraserSize : lastPenSize;
   if (tool === 'circle') {
-    ctx.clearRect(0, 0, drawC.width, drawC.height);
+    clearCanvas(ctx, drawC);
     redrawStrokes();
     const cx = currentStroke[0].x, cy = currentStroke[0].y;
     const radius = Math.sqrt((p.x - cx)**2 + (p.y - cy)**2);
@@ -2704,7 +2782,7 @@ function handlePointerMove(e) {
     ctx.strokeStyle = color; ctx.lineWidth = size;
     ctx.stroke();
   } else if (tool === 'line' || tool === 'arrow' || tool === 'dashed') {
-    ctx.clearRect(0, 0, drawC.width, drawC.height);
+    clearCanvas(ctx, drawC);
     redrawStrokes();
     const endPoint = e.shiftKey ? snapPointToAngle(currentStroke[0], p) : snapToGuides(p);
     ctx.beginPath();
@@ -2721,18 +2799,17 @@ function handlePointerMove(e) {
         const angle = Math.atan2(dy, dx);
         const headLen = Math.min(20, len * 0.4);
         const headAngle = 0.45;
-        ctx.fillStyle = color;
+        ctx.lineJoin = 'round';
         ctx.beginPath();
-        ctx.moveTo(endPoint.x, endPoint.y);
-        ctx.lineTo(endPoint.x - headLen * Math.cos(angle - headAngle), endPoint.y - headLen * Math.sin(angle - headAngle));
+        ctx.moveTo(endPoint.x - headLen * Math.cos(angle - headAngle), endPoint.y - headLen * Math.sin(angle - headAngle));
+        ctx.lineTo(endPoint.x, endPoint.y);
         ctx.lineTo(endPoint.x - headLen * Math.cos(angle + headAngle), endPoint.y - headLen * Math.sin(angle + headAngle));
-        ctx.closePath();
-        ctx.fill();
+        ctx.stroke();
       }
     }
   } else {
     currentStroke.push(tool === 'pen' ? snapToGuides(p) : p);
-    ctx.clearRect(0, 0, drawC.width, drawC.height);
+    clearCanvas(ctx, drawC);
     redrawStrokes();
     drawStrokeOn(ctx, {points: currentStroke, color, size, erase: tool==='erase'});
   }
@@ -2783,7 +2860,7 @@ function handlePointerUp(e) {
     isSelecting = false;
     const p = pos(e);
     const dragDist = Math.hypot(p.x - selectionStartX, p.y - selectionStartY);
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     lassoPoints = [];
 
     if (dragDist < 3) {
@@ -2843,7 +2920,7 @@ function handlePointerUp(e) {
     const page = getCurrentPage();
     const size = tool === 'erase' ? lastEraserSize : lastPenSize;
     
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     
     if (tool === 'ruler' && mathStartPoint) {
       let ep = p;
@@ -2879,7 +2956,7 @@ function handlePointerUp(e) {
     const page = getCurrentPage();
     const size = lastPenSize;
     
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     
     const ray1 = mathEndPoint;
     let ray2 = p;
@@ -3025,11 +3102,41 @@ function handleDblClick(e) {
 
 }
 
-boardDrawC.addEventListener('pointerdown', function(e) { activatePane('board'); handlePointerDown(e); });
-boardDrawC.addEventListener('pointermove', handlePointerMove);
-boardDrawC.addEventListener('pointerup', handlePointerUp);
-boardDrawC.addEventListener('pointercancel', handlePointerUp);
-boardDrawC.addEventListener('pointerleave', handlePointerLeave);
+let boardPanDragId = null, boardPanLastX = 0, boardPanLastY = 0;
+boardDrawC.addEventListener('pointerdown', function(e) {
+  activatePane('board');
+  if (boardPanMode) {
+    boardPanDragId = e.pointerId;
+    boardPanLastX = e.clientX; boardPanLastY = e.clientY;
+    boardDrawC.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  handlePointerDown(e);
+});
+boardDrawC.addEventListener('pointermove', function(e) {
+  if (boardPanMode && boardPanDragId === e.pointerId) {
+    const dx = e.clientX - boardPanLastX, dy = e.clientY - boardPanLastY;
+    boardPanLastX = e.clientX; boardPanLastY = e.clientY;
+    panBoardBy(dx, dy);
+    e.preventDefault();
+    return;
+  }
+  handlePointerMove(e);
+});
+function endBoardPanDrag(e) {
+  if (boardPanMode && boardPanDragId === e.pointerId) {
+    boardPanDragId = null;
+    return;
+  }
+  handlePointerUp(e);
+}
+boardDrawC.addEventListener('pointerup', endBoardPanDrag);
+boardDrawC.addEventListener('pointercancel', endBoardPanDrag);
+boardDrawC.addEventListener('pointerleave', function(e) {
+  if (boardPanMode && boardPanDragId === e.pointerId) return;
+  handlePointerLeave(e);
+});
 boardDrawC.addEventListener('dblclick', handleDblClick);
 
 document.addEventListener('keydown', e => {
@@ -3045,7 +3152,7 @@ document.addEventListener('keydown', e => {
       mathStartPoint = null;
       mathEndPoint = null;
     }
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     mathInfo.classList.remove('show');
   }
   
@@ -3081,7 +3188,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && isSelecting) {
     isSelecting = false;
     lassoPoints = [];
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
   }
   
   if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.metaKey) {
@@ -3123,7 +3230,7 @@ function setTool(t) {
   hideAngleReadout(0);
   dragStartPositions.clear();
   moveUndoSnapshots.clear();
-  overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+  clearCanvas(overlayCtx, overlayC);
   mathInfo.classList.remove('show');
   
   if (t !== 'select') {
@@ -3136,7 +3243,6 @@ function setTool(t) {
       }
   
   tool = t;
-  imagesContainer.classList.toggle('interactive', tool === 'select');
   const allTools = ['btn-pen','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select'];
   allTools.forEach(id => {
     const el = document.getElementById(id);
@@ -5160,7 +5266,7 @@ function makeNetRenderer(faces, forest, shiftPoint, strokeColor, lineSize) {
   const { parent, hinge, edgesIndexed } = forest;
   return function renderAt(t) {
     const transforms = netFaceTransforms(faces, parent, hinge, t);
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     overlayCtx.save();
     overlayCtx.lineJoin = 'round';
     overlayCtx.lineCap = 'round';
@@ -5198,7 +5304,7 @@ function makeCylinderRenderer(R, H, shiftPoint, strokeColor, lineSize) {
       const theta = (x / circumf - 0.5) * angleTotal;
       return { x: radiusB * Math.sin(theta), y, z: radiusB * (1 - Math.cos(theta)) };
     };
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     overlayCtx.save();
     overlayCtx.lineJoin = 'round';
     overlayCtx.lineCap = 'round';
@@ -5244,7 +5350,7 @@ function makeConeRenderer(R, G, shiftPoint, strokeColor, lineSize) {
   };
   return function renderAt(t) {
     const b = t, tilt = t * 0.55;
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     overlayCtx.save();
     overlayCtx.lineJoin = 'round';
     overlayCtx.lineCap = 'round';
@@ -5286,7 +5392,7 @@ function makeConeFrustumRenderer(R1, R2, Gf, shiftPoint, strokeColor, lineSize) 
   };
   return function renderAt(t) {
     const b = t, tilt = t * 0.55;
-    overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+    clearCanvas(overlayCtx, overlayC);
     overlayCtx.save();
     overlayCtx.lineJoin = 'round';
     overlayCtx.lineCap = 'round';
@@ -5568,7 +5674,7 @@ async function insertSolidNet(shapeKey) {
       console.warn('Eroare animație desfășurare:', e);
     }
   }
-  overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+  clearCanvas(overlayCtx, overlayC);
   if (!confirmed) { showToast('Desfășurare anulată'); return; }
 
   const stroke = {
@@ -5653,9 +5759,22 @@ function toggleSolidsMenu() {
     return;
   }
   const r = btnSolids.getBoundingClientRect();
-  solidsMenuEl.style.left = Math.round(r.left) + 'px';
-  solidsMenuEl.style.top = Math.round(r.bottom + 6) + 'px';
+  solidsMenuEl.style.visibility = 'hidden';
   solidsMenuEl.classList.add('show');
+  const menuH = solidsMenuEl.offsetHeight;
+  const menuW = solidsMenuEl.offsetWidth;
+  const spaceBelow = window.innerHeight - r.bottom;
+  const spaceAbove = r.top;
+  // Deschide deasupra butonului dacă nu e loc suficient dedesubt (cazul tipic
+  // când bara de instrumente e jos) — altfel, deschide dedesubt ca înainte.
+  let top = (spaceBelow >= menuH + 6 || spaceBelow >= spaceAbove)
+    ? r.bottom + 6
+    : r.top - menuH - 6;
+  top = Math.max(4, Math.min(top, window.innerHeight - menuH - 4));
+  let left = Math.max(4, Math.min(r.left, window.innerWidth - menuW - 4));
+  solidsMenuEl.style.left = Math.round(left) + 'px';
+  solidsMenuEl.style.top = Math.round(top) + 'px';
+  solidsMenuEl.style.visibility = '';
 }
 function closeSolidsMenu() {
   solidsMenuEl.classList.remove('show');
@@ -6384,6 +6503,20 @@ document.getElementById('btn-multiselect').onclick = () => {
   multiSelectMode = !multiSelectMode;
   document.getElementById('btn-multiselect').classList.toggle('active', multiSelectMode);
   showToast(multiSelectMode ? '✓ Selecție multiplă activă (fiecare atingere adaugă la selecție)' : 'Selecție multiplă dezactivată');
+};
+document.getElementById('btn-panmode').onclick = () => {
+  boardPanMode = !boardPanMode;
+  document.getElementById('btn-panmode').classList.toggle('active', boardPanMode);
+  showToast(boardPanMode
+    ? (LANG === 'en' ? '✋ Board pan mode on — one finger moves the board, drawing is off' : '✋ Mod plimbare tablă activ — desenul e oprit temporar')
+    : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
+};
+document.getElementById('btn-recenter-board').onclick = () => {
+  boardPanX = 0; boardPanY = 0;
+  applyCanvasPanTransform();
+  applyImagesPanTransform();
+  drawBg(); redrawStrokes(); drawSelectionHighlights();
+  showToast(LANG === 'en' ? '✓ Board recentered' : '✓ Tabla a revenit la poziția inițială');
 };
 document.getElementById('btn-compass').onclick = () => toggleGeoGuide('compass', 'btn-compass');
 document.getElementById('btn-prev-page').onclick = () => { prevPage(); };
@@ -7387,7 +7520,7 @@ function compassArcFromAccumulated(startAngle, accumulated) {
 function compassRenderLivePreview() {
   if (!compassDraw) return;
   const st = geoGuides.compass;
-  overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+  clearCanvas(overlayCtx, overlayC);
   const { angleDiff, displayStart, displayEnd } = compassArcFromAccumulated(compassDraw.startAngle, compassDraw.accumulated);
   overlayCtx.save();
   overlayCtx.strokeStyle = color;
@@ -7420,7 +7553,7 @@ function compassFinalizeDraw() {
   const size = lastPenSize;
   const { angleDiff, displayStart, displayEnd } = compassArcFromAccumulated(compassDraw.startAngle, compassDraw.accumulated);
 
-  overlayCtx.clearRect(0, 0, overlayC.width, overlayC.height);
+  clearCanvas(overlayCtx, overlayC);
   geoGroups.compass.arcLabel.textContent = '';
 
   if (angleDiff > 0.05) {
