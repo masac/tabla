@@ -546,6 +546,11 @@ function renderPdfPane(name) {
   if (!pdfDoc) return;
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
+  // Dacă o randare e deja în curs, nu pornim una nouă peste ea (PDF.js nu suportă
+  // randări suprapuse pe același canvas — rezultatul devenea neclar/corupt cât timp
+  // se panorama rapid). Marcăm doar că mai e nevoie de o randare, imediat ce se termină cea curentă.
+  if (pane._rendering) { pane._renderPending = true; return; }
+  pane._rendering = true;
   pdfDoc.getPage(pane.pageNum).then(function(page) {
     const viewport = page.getViewport({ scale: 1.0 });
     const rect = els.root.getBoundingClientRect();
@@ -561,17 +566,29 @@ function renderPdfPane(name) {
     els.bg.height = Math.round(scaledViewport.height);
     els.bg.style.width = scaledViewport.width + 'px';
     els.bg.style.height = scaledViewport.height + 'px';
-    // Centrare automată pe orizontală (și pe verticală, dacă încape) -
-    // pan-ul utilizatorului (panX/panY) se adaugă peste această poziție centrată,
-    // așa că zoom-ul crește uniform, din centru, nu din colțul stânga-sus.
-    const centerX = (rect.width - scaledViewport.width) / 2;
-    const centerY = Math.max(0, (rect.height - scaledViewport.height) / 2);
-    els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
+    updatePdfPanePosition(name);
     page.render({ canvasContext: els.bg.getContext('2d'), viewport: scaledViewport }).promise.then(function() {
       els.root.classList.add('has-doc');
       els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
-    }).catch(function(e) { console.error(e); });
-  }).catch(function(e) { console.error(e); });
+      pane._rendering = false;
+      if (pane._renderPending) { pane._renderPending = false; renderPdfPane(name); }
+    }).catch(function(e) { console.error(e); pane._rendering = false; });
+  }).catch(function(e) { console.error(e); pane._rendering = false; });
+}
+
+// Repoziționează fișa PDF deja randată (doar transform CSS, instant) — folosită
+// la panoramarea cu degetul, ca să nu se relanseze o randare PDF.js costisitoare
+// (și potențial suprapusă/neclară) la fiecare mișcare minimă a degetului.
+// Zoom-ul rămâne neschimbat la panoramare, deci bitmap-ul deja randat e valid,
+// trebuie doar mutat.
+function updatePdfPanePosition(name) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  const rect = els.root.getBoundingClientRect();
+  const w = els.bg.width, h = els.bg.height;
+  const centerX = (rect.width - w) / 2;
+  const centerY = Math.max(0, (rect.height - h) / 2);
+  els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
 }
 
 function setBoardMode(isPdf) {
@@ -644,32 +661,60 @@ function panePanStep(name) {
 }
 
 document.querySelectorAll('.pdf-pane-controls .pdf-ctl').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    const paneRoot = btn.closest('.pdf-pane');
-    const name = paneRoot.dataset.pane;
-    activatePane(name);
-    const pane = pdfPanes[name];
-    const act = btn.dataset.act;
-    const step = panePanStep(name);
-    if (act === 'up') pane.panY -= step;
-    else if (act === 'down') pane.panY += step;
-    else if (act === 'left') pane.panX -= step;
-    else if (act === 'right') pane.panX += step;
-    else if (act === 'zoomin') pane.zoom = Math.min(10, pane.zoom + 0.25);
-    else if (act === 'zoomout') pane.zoom = Math.max(0.2, pane.zoom - 0.25);
-    else if (act === 'center') { pane.panX = 0; pane.panY = 0; }
-    else if (act === 'reset') { pane.panX = 0; pane.panY = 0; pane.zoom = 1; }
-    else if (act === 'pageprev') { if (pane.pageNum > 1) pane.pageNum--; }
-    else if (act === 'pagenext') { if (pane.pageNum < pdfTotalPages) pane.pageNum++; }
-    else if (act === 'panmode') {
-      pane.panMode = !pane.panMode;
-      btn.classList.toggle('active', pane.panMode);
-      showToast(pane.panMode
-        ? (LANG === 'en' ? '✋ Finger-pan mode on — one finger scrolls, drawing is off' : '✋ Mod plimbare cu degetul activ — desenul e oprit temporar')
-        : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
-    }
-    renderPdfPane(name);
+  btn.addEventListener('click', function() { performPdfCtlAction(btn); });
+});
+
+function performPdfCtlAction(btn) {
+  const paneRoot = btn.closest('.pdf-pane');
+  const name = paneRoot.dataset.pane;
+  activatePane(name);
+  const pane = pdfPanes[name];
+  const act = btn.dataset.act;
+  const step = panePanStep(name);
+  let panOnly = false;
+  if (act === 'up') { pane.panY -= step; panOnly = true; }
+  else if (act === 'down') { pane.panY += step; panOnly = true; }
+  else if (act === 'left') { pane.panX -= step; panOnly = true; }
+  else if (act === 'right') { pane.panX += step; panOnly = true; }
+  else if (act === 'zoomin') pane.zoom = Math.min(10, pane.zoom + 0.25);
+  else if (act === 'zoomout') pane.zoom = Math.max(0.2, pane.zoom - 0.25);
+  else if (act === 'center') { pane.panX = 0; pane.panY = 0; panOnly = true; }
+  else if (act === 'reset') { pane.panX = 0; pane.panY = 0; pane.zoom = 1; }
+  else if (act === 'pageprev') { if (pane.pageNum > 1) pane.pageNum--; }
+  else if (act === 'pagenext') { if (pane.pageNum < pdfTotalPages) pane.pageNum++; }
+  else if (act === 'panmode') {
+    pane.panMode = !pane.panMode;
+    btn.classList.toggle('active', pane.panMode);
+    showToast(pane.panMode
+      ? (LANG === 'en' ? '✋ Finger-pan mode on — one finger scrolls, drawing is off' : '✋ Mod plimbare cu degetul activ — desenul e oprit temporar')
+      : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
+  }
+  // Deplasare pură (săgeți/centrare) — repoziționare CSS instant, fără o
+  // randare PDF.js nouă (zoom-ul nu se schimbă, deci bitmap-ul rămâne valid).
+  // Restul acțiunilor (zoom, pagină, reset) chiar au nevoie de o randare nouă.
+  if (panOnly) updatePdfPanePosition(name); else renderPdfPane(name);
+}
+
+// Repetare automată cât ții apăsat pe săgețile de deplasare (sus/jos/stânga/
+// dreapta) — un tap scurt face un singur pas (ca înainte), dar dacă ții
+// apăsat, după o scurtă întârziere începe să se repete automat, ca și cum
+// ai apăsa butonul de multe ori la rând.
+function attachHoldRepeat(el, callback) {
+  if (!el) return;
+  let delayId = null, intervalId = null;
+  function stop() {
+    clearTimeout(delayId); clearInterval(intervalId);
+    delayId = null; intervalId = null;
+  }
+  el.addEventListener('pointerdown', () => {
+    stop();
+    delayId = setTimeout(() => { intervalId = setInterval(callback, 90); }, 400);
   });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(evt => el.addEventListener(evt, stop));
+}
+['up', 'down', 'left', 'right'].forEach(act => {
+  const btn = document.querySelector('.pdf-ctl[data-act="' + act + '"]');
+  attachHoldRepeat(btn, () => performPdfCtlAction(btn));
 });
 
 // Panare cu degetul direct pe fișă (2 degete) și zoom cu pinch
@@ -714,7 +759,7 @@ function attachPanePanZoom(name) {
       pane.panX += (cur.x - lastMid.x);
       pane.panY += (cur.y - lastMid.y);
       lastMid = cur;
-      renderPdfPane(name);
+      updatePdfPanePosition(name);
       return;
     }
 
@@ -792,12 +837,16 @@ attachPanePanZoom('top');
   divider.addEventListener('pointercancel', endDrag);
 })();
 
+let resizeDebounceTimer = null;
 window.addEventListener('resize', function() {
-  if (pdfModeActive) {
-    initPaneDrawCanvas('top');
-    renderPdfPane('top');
-  }
-  initCanvas();
+  clearTimeout(resizeDebounceTimer);
+  resizeDebounceTimer = setTimeout(() => {
+    if (pdfModeActive) {
+      initPaneDrawCanvas('top');
+      renderPdfPane('top');
+    }
+    initCanvas();
+  }, 150);
 });
 
 function addImageToPage(page, img, x, y, w, h) {
@@ -7127,14 +7176,15 @@ btnFs.addEventListener('click', () => {
 
 document.addEventListener('fullscreenchange', () => {
   updateFsButton();
-  setTimeout(initCanvas, 80);
+  setTimeout(() => {
+    if (pdfModeActive) {
+      initPaneDrawCanvas('top');
+      renderPdfPane('top');
+    }
+    initCanvas();
+  }, 80);
 });
 
-let resizeDebounceTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeDebounceTimer);
-  resizeDebounceTimer = setTimeout(initCanvas, 150);
-});
 
 // ================================================================
 // INSTRUMENTE GEOMETRICE: RIGLĂ, ECHER, RAPORTOR, COMPAS
