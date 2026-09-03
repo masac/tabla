@@ -1095,7 +1095,7 @@ function deleteSelectedImages() {
 // EVENIMENTE PENTRU IMAGINI
 // ================================================================
 
-imagesContainer.addEventListener('pointerdown', (e) => {
+function handleImagePointerDown(e) {
   if (tool !== 'select') return;
   
   const target = e.target.closest('.image-item');
@@ -1138,9 +1138,20 @@ imagesContainer.addEventListener('pointerdown', (e) => {
         imageDragStartPositions.set(id, { x: img.x, y: img.y });
       }
     }
-    imagesContainer.setPointerCapture(e.pointerId);
+    // Capturăm pe containerul REAL pe care a avut loc evenimentul (poate fi
+    // fie #images-container, fie #images-container-front, în funcție de
+    // care dintre ele găzduiește imaginea în acest moment — vezi
+    // updateImageSelection, care mută imaginea selectată în containerul din
+    // față, deasupra liniilor desenate).
+    e.currentTarget.setPointerCapture(e.pointerId);
   }
-});
+}
+// Imaginile selectate trec într-un container separat, aflat deasupra liniilor
+// desenate (vezi updateImageSelection) — handler-ul de mutare/redimensionare
+// trebuie atașat pe AMBELE containere, altfel mutarea/redimensionarea nu mai
+// funcționează din momentul în care o imagine devine selectată.
+imagesContainer.addEventListener('pointerdown', handleImagePointerDown);
+imagesContainerFront.addEventListener('pointerdown', handleImagePointerDown);
 
 document.addEventListener('pointermove', (e) => {
   if (isImageResize && resizeImageId !== null) {
@@ -4103,8 +4114,10 @@ function showTextOverlay(cx, cy, editIndex = null) {
     txtBold = false;
     txtItalic = false;
     txtAlign = 'left';
-    txtColorOverride = null;
-    txtColorPicker.value = color;
+    // Implicit roșu pentru text nou — culoarea creionului (ex: alb) putea fi
+    // invizibilă pe un fundal alb, dând impresia că textul "dispare".
+    txtColorOverride = '#ff0000';
+    txtColorPicker.value = '#ff0000';
   }
   
   txtBoldBtn.classList.toggle('active-fmt', txtBold);
@@ -7957,7 +7970,10 @@ function toggleGeoGuide(name, btnId) {
     else if (name === 'setsquare') renderGeoSetsquare();
     else if (name === 'protractor') renderGeoProtractor();
     else if (name === 'compass') renderGeoCompass();
-    updateGeoTransform(name);
+    // Compasul își calculează poziția direct în coordonate absolute (nu prin
+    // transformarea de grup translate/rotate, ca celelalte 3 instrumente) —
+    // aplicarea transformării și peste el ar dubla offsetul, decentrându-l.
+    if (name !== 'compass') updateGeoTransform(name);
   }
   geoGroups[name].g.classList.toggle('visible', geoGuides[name].visible);
   document.getElementById(btnId).classList.toggle('active', geoGuides[name].visible);
