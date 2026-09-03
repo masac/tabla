@@ -562,12 +562,20 @@ function renderPdfPane(name) {
     const baseScale = Math.min(maxW / viewport.width, 4.0);
     const finalScale = Math.max(0.1, baseScale * pane.zoom);
     const scaledViewport = page.getViewport({ scale: finalScale });
-    els.bg.width = Math.round(scaledViewport.width);
-    els.bg.height = Math.round(scaledViewport.height);
-    els.bg.style.width = scaledViewport.width + 'px';
-    els.bg.style.height = scaledViewport.height + 'px';
-    updatePdfPanePosition(name);
-    page.render({ canvasContext: els.bg.getContext('2d'), viewport: scaledViewport }).promise.then(function() {
+    const newW = Math.round(scaledViewport.width);
+    const newH = Math.round(scaledViewport.height);
+    // Randăm mai întâi într-un canvas ascuns, ca să nu golim canvas-ul vizibil
+    // (redimensionarea unui <canvas> îl golește instant) înainte ca noua imagine
+    // să fie gata — altfel apărea un gol alb, vizibil mai ales la zoom rapid.
+    const off = document.createElement('canvas');
+    off.width = newW; off.height = newH;
+    page.render({ canvasContext: off.getContext('2d'), viewport: scaledViewport }).promise.then(function() {
+      els.bg.width = newW;
+      els.bg.height = newH;
+      els.bg.style.width = scaledViewport.width + 'px';
+      els.bg.style.height = scaledViewport.height + 'px';
+      els.bg.getContext('2d').drawImage(off, 0, 0);
+      updatePdfPanePosition(name);
       els.root.classList.add('has-doc');
       els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
       pane._rendering = false;
@@ -840,13 +848,7 @@ attachPanePanZoom('top');
 let resizeDebounceTimer = null;
 window.addEventListener('resize', function() {
   clearTimeout(resizeDebounceTimer);
-  resizeDebounceTimer = setTimeout(() => {
-    if (pdfModeActive) {
-      initPaneDrawCanvas('top');
-      renderPdfPane('top');
-    }
-    initCanvas();
-  }, 150);
+  resizeDebounceTimer = setTimeout(refreshCanvasesForViewport, 150);
 });
 
 function addImageToPage(page, img, x, y, w, h) {
@@ -7174,15 +7176,28 @@ btnFs.addEventListener('click', () => {
   }
 });
 
+function refreshCanvasesForViewport() {
+  if (pdfModeActive) {
+    initPaneDrawCanvas('top');
+    renderPdfPane('top');
+  }
+  initCanvas();
+}
+
 document.addEventListener('fullscreenchange', () => {
   updateFsButton();
-  setTimeout(() => {
-    if (pdfModeActive) {
-      initPaneDrawCanvas('top');
-      renderPdfPane('top');
-    }
-    initCanvas();
-  }, 80);
+  // Tranziția de fullscreen durează variabil (mai ales pe tablete, unde bara
+  // de sistem apare/dispare) — un singur setTimeout scurt nu era suficient pe
+  // toate dispozitivele: canvas-ul se redimensiona cu dimensiunile vechi,
+  // rămânând o bandă nedesenată (caroiajul nu ajungea până jos). Așteptăm
+  // efectiv finalizarea layout-ului (dublu requestAnimationFrame), apoi mai
+  // facem o verificare de siguranță ceva mai târziu.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      refreshCanvasesForViewport();
+      setTimeout(refreshCanvasesForViewport, 250);
+    });
+  });
 });
 
 
@@ -7224,7 +7239,7 @@ const geoGroups = {};
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
-    fill: 'rgba(255,255,255,0.55)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
+    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -7271,7 +7286,7 @@ function renderGeoRuler() {
 function buildGeoSetsquare() {
   const g = geoEl('g', { class: 'guide', id: 'guide-setsquare' });
   const body = geoEl('polygon', { class: 'guide-body',
-    fill: 'rgba(255,255,255,0.55)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
+    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -7322,7 +7337,7 @@ function buildGeoProtractor() {
   const g = geoEl('g', { class: 'guide', id: 'guide-protractor' });
 
   const body = geoEl('path', { class: 'guide-body', 'fill-rule': 'evenodd',
-    fill: 'rgba(255,255,255,0.55)', stroke: 'rgba(0,85,204,0.85)', 'stroke-width': 1.5 });
+    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.85)', 'stroke-width': 1.5 });
   g.appendChild(body);
 
   const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(0,85,204,0.28)', 'stroke-width': 0.8 });
@@ -7890,8 +7905,60 @@ function finalizeProtractorArc(skipUsageRecord) {
   updateStatus();
   }
 
+// Adaptează instrumentul geometric la ecranul curent (dimensiune + centrare),
+// ca la prima afișare să încapă complet, indiferent de mărimea ecranului
+// (telefon Android, tabletă sau tablă mare). Ține cont și de panoramarea
+// tablei, ca instrumentul să apară exact în zona vizibilă acum.
+function fitGeoGuideToViewport(name) {
+  const st = geoGuides[name];
+  const vw = wrap.clientWidth, vh = wrap.clientHeight;
+  const viewLeft = -boardPanX, viewTop = -boardPanY;
+  const margin = 24;
+  const availW = Math.max(160, vw - margin * 2);
+  const availH = Math.max(160, vh - margin * 2);
+
+  if (name === 'ruler') {
+    const designL = 700, designT = 50;
+    const scale = Math.min(1, availW / designL, availH / designT);
+    const L = Math.max(180, designL * scale);
+    const T = Math.max(24, designT * scale);
+    st.length = L; st.thickness = T; st.angle = 0;
+    st.x = viewLeft + vw / 2 - L / 2;
+    st.y = viewTop + vh / 2 - T / 2;
+  } else if (name === 'setsquare') {
+    const designS = 420;
+    const scale = Math.min(1, availW / designS, availH / designS);
+    const S = Math.max(150, designS * scale);
+    st.size = S; st.angle = 0;
+    st.x = viewLeft + vw / 2 - S / 2;
+    st.y = viewTop + vh / 2 + S / 2;
+  } else if (name === 'protractor') {
+    const designR = 260;
+    const scale = Math.min(1, availW / (designR * 2), availH / designR);
+    const R = Math.max(100, designR * scale);
+    st.radius = R; st.angle = 0;
+    st.x = viewLeft + vw / 2;
+    st.y = viewTop + vh / 2 + R / 2;
+  } else if (name === 'compass') {
+    const designR = 160;
+    const scale = Math.min(1, availW / (designR * 2), availH / (designR * 2));
+    const R = Math.max(70, designR * scale);
+    st.radius = R; st.angle = -Math.PI * 0.65;
+    st.x = viewLeft + vw / 2;
+    st.y = viewTop + vh / 2;
+  }
+}
+
 function toggleGeoGuide(name, btnId) {
   geoGuides[name].visible = !geoGuides[name].visible;
+  if (geoGuides[name].visible) {
+    fitGeoGuideToViewport(name);
+    if (name === 'ruler') renderGeoRuler();
+    else if (name === 'setsquare') renderGeoSetsquare();
+    else if (name === 'protractor') renderGeoProtractor();
+    else if (name === 'compass') renderGeoCompass();
+    updateGeoTransform(name);
+  }
   geoGroups[name].g.classList.toggle('visible', geoGuides[name].visible);
   document.getElementById(btnId).classList.toggle('active', geoGuides[name].visible);
   if (name === 'compass' && geoGuides.compass.visible) {
