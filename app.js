@@ -7390,7 +7390,7 @@ function buildGeoProtractor() {
   const arcRadiusHandle = geoEl('circle', { class: 'guide-handle', r: 6,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   arcRadiusHandle.setAttribute('cx', 0);
-  arcRadiusHandle.setAttribute('cy', -50);
+  arcRadiusHandle.setAttribute('cy', 50);
   g.appendChild(arcRadiusHandle);
 
   const arcBuildBox = geoEl('rect', { x: -138, y: -78, width: 18, height: 18, rx: 3,
@@ -7510,9 +7510,13 @@ function renderGeoProtractor() {
   arcLabel.setAttribute('y', -labelR * Math.sin(aRad / 2));
   arcLabel.textContent = Math.round(st.arcAngle) + '°';
 
-  const radiusHandleDist = Math.max(30, Math.min(R - 20, arcR));
+  // Mânerul portocaliu (rază arc) e poziționat fix în partea de JOS a
+  // raportorului (axa Y pozitivă), în afara semicercului superior (0°-180°)
+  // în care se mișcă mânerul verde (unghi). Astfel nu se mai suprapun
+  // niciodată, indiferent de unghiul curent.
+  const radiusHandleDist = Math.max(30, Math.min(R - 16, arcR));
   arcRadiusHandle.setAttribute('cx', 0);
-  arcRadiusHandle.setAttribute('cy', -radiusHandleDist);
+  arcRadiusHandle.setAttribute('cy', radiusHandleDist);
 }
 
 // ---------------- COMPAS ----------------
@@ -7820,9 +7824,11 @@ function geoDragMove(e) {
     renderGeoProtractor();
   } else if (geoActiveDrag.mode === 'protractorArcRadius') {
     const local = geoWorldToLocal(st, p.x, p.y);
+    // Mânerul e acum pe axa Y pozitivă (jos); folosim distanța absolută
+    // față de centru, calculată din poziția curentă a cursorului.
     const dist = Math.sqrt(local.x * local.x + local.y * local.y);
     const minR = 15;
-    const maxR = st.radius - 10;
+    const maxR = st.radius - 16;
     const newScale = Math.max(minR / st.radius, Math.min(maxR / st.radius, dist / st.radius));
     st.arcRadiusScale = newScale;
     renderGeoProtractor();
