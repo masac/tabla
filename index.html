@@ -556,6 +556,7 @@
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
       <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
+      <button class="tool" id="btn-figures" title="Figuri geometrice" style="position:relative;"></button>
       <button class="tool" id="btn-3d" title="Corp 3D interactiv (rotește liber, apoi inserează)"><i class="ti ti-rotate-3d"></i></button>
       <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
@@ -652,6 +653,7 @@
 <div id="angle-readout"></div>
 
 <div id="solids-menu"></div>
+<div id="figures-menu"></div>
 
 <div id="confirm-modal-backdrop">
   <div id="confirm-modal">
@@ -774,6 +776,18 @@
   font-family: system-ui, sans-serif;
 }
 #solids-menu.show { display: flex; flex-direction: column; gap: 6px; }
+#figures-menu {
+  display: none;
+  position: fixed;
+  z-index: 9998;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.28);
+  padding: 8px;
+  width: max-content;
+  font-family: system-ui, sans-serif;
+}
+#figures-menu.show { display: flex; flex-direction: column; gap: 6px; }
 .solids-menu-row { display: flex; gap: 6px; }
 .solids-menu-item {
   display: flex;

@@ -47,6 +47,7 @@ const UI_TEXT = {
   'Finalizează poligonul (utilă pe ecran tactil)': 'Finish the polygon (useful on touchscreens)',
   'Reprezintă grafic o funcție f(x)': 'Plot a function f(x)',
   'Corpuri geometrice': 'Geometric solids',
+  'Figuri geometrice': 'Geometric figures',
   'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
   'Mijlocul unui segment (click pe un segment)': 'Midpoint of a segment (click on a segment)',
   'Selecție multiplă (pentru ecran tactil, fără tastă Shift)': 'Multi-select (for touchscreens, no Shift key needed)',
@@ -371,6 +372,7 @@ let lastPenSize = 1, lastEraserSize = 25;
 
 let drawing = false;
 let currentStroke = [];
+let currentStrokeGuideName = null; // numele ghidajului (rigla/echer) pe care s-a prins punctul de start
 
 let multiSelectMode = false;
 let mathStartPoint = null;
@@ -2355,6 +2357,11 @@ function finalizePolygon() {
 
 function handlePointerDown(e) {
 
+  if (geoSegBuild) {
+    confirmGeoSegBuild();
+    return;
+  }
+
   if (tool === 'midpoint') {
     const p = pos(e);
     const page = getCurrentPage();
@@ -2591,6 +2598,7 @@ function handlePointerDown(e) {
     const isSnapTool = (tool === 'pen' || tool === 'line' || tool === 'dashed' || tool === 'arrow');
     lastSnapGuideName = null;
     currentStroke = [isSnapTool ? snapToGuides(startP) : startP];
+    currentStrokeGuideName = lastSnapGuideName;
         drawC.setPointerCapture(e.pointerId);
   }
 }
@@ -3116,13 +3124,25 @@ function handlePointerUp(e) {
   const size = tool === 'erase' ? lastEraserSize : lastPenSize;
   if (tool === 'line') {
     const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
-    pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false});
+    if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
+      startGeoSegBuild('line', currentStroke[0], endP, color, size, currentStrokeGuideName);
+    } else {
+      pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false});
+    }
   } else if (tool === 'dashed') {
     const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
-    pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false, dashed: true});
+    if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
+      startGeoSegBuild('dashed', currentStroke[0], endP, color, size, currentStrokeGuideName);
+    } else {
+      pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false, dashed: true});
+    }
   } else if (tool === 'arrow') {
     const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
-    pushStroke(page, {type: 'arrow', points: [currentStroke[0], endP], color, size, erase: false});
+    if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
+      startGeoSegBuild('arrow', currentStroke[0], endP, color, size, currentStrokeGuideName);
+    } else {
+      pushStroke(page, {type: 'arrow', points: [currentStroke[0], endP], color, size, erase: false});
+    }
   } else if (tool === 'circle') {
     const cx = currentStroke[0].x, cy = currentStroke[0].y;
     const endP = pos(e);
@@ -3208,6 +3228,10 @@ document.addEventListener('keydown', e => {
       currentStroke = [];
       redrawStrokes();
       showToast('❌ Poligon anulat');
+    }
+    if (geoSegBuild) {
+      cancelGeoSegBuild();
+      showToast('❌ Segment anulat');
     }
     if (protractorPhase > 0) {
       protractorPhase = 0;
@@ -5822,6 +5846,7 @@ function toggleSolidsMenu() {
     closeSolidsMenu();
     return;
   }
+  if (typeof closeFiguresMenu === 'function') closeFiguresMenu();
   const r = btnSolids.getBoundingClientRect();
   solidsMenuEl.style.visibility = 'hidden';
   solidsMenuEl.classList.add('show');
@@ -5847,6 +5872,167 @@ btnSolids.onclick = (e) => { e.stopPropagation(); toggleSolidsMenu(); };
 document.addEventListener('pointerdown', (e) => {
   if (solidsMenuEl.classList.contains('show') && !solidsMenuEl.contains(e.target) && e.target !== btnSolids && !btnSolids.contains(e.target)) {
     closeSolidsMenu();
+  }
+});
+
+// ====================================================================
+// FIGURI GEOMETRICE (2D) — poligoane predefinite (triunghiuri și
+// patrulatere uzuale), inserate centrat pe tablă exact ca la "Corpuri
+// geometrice", dar ca simple contururi plate (stroke de tip 'polygon'),
+// deci selectabile/mutabile/redimensionabile ca orice poligon desenat de
+// mână cu instrumentul Poligon.
+// ====================================================================
+const FIGURE_SHAPES = {
+  triunghiOarecare:       { label: 'Triunghi oarecare',       labelEn: 'Scalene triangle',
+    points: [{x:0,y:0},{x:150,y:15},{x:55,y:-120}] },
+  triunghiIsoscel:        { label: 'Triunghi isoscel',        labelEn: 'Isosceles triangle',
+    points: [{x:0,y:-110},{x:-80,y:60},{x:80,y:60}] },
+  triunghiEchilateral:    { label: 'Triunghi echilateral',    labelEn: 'Equilateral triangle',
+    points: [{x:0,y:-86.6},{x:-75,y:43.3},{x:75,y:43.3}] },
+  triunghiAscutitunghic:  { label: 'Triunghi ascuțitunghic',  labelEn: 'Acute triangle',
+    points: [{x:-70,y:60},{x:70,y:60},{x:10,y:-100}] },
+  triunghiDreptunghic:    { label: 'Triunghi dreptunghic',    labelEn: 'Right triangle',
+    points: [{x:-90,y:50},{x:70,y:50},{x:-90,y:-70}] },
+  triunghiObtuzunghic:    { label: 'Triunghi obtuzunghic',    labelEn: 'Obtuse triangle',
+    points: [{x:-90,y:40},{x:60,y:40},{x:-130,y:-80}] },
+  paralelogram:           { label: 'Paralelogram',            labelEn: 'Parallelogram',
+    points: [{x:-90,y:50},{x:50,y:50},{x:90,y:-50},{x:-50,y:-50}] },
+  dreptunghi:             { label: 'Dreptunghi',              labelEn: 'Rectangle',
+    points: [{x:-90,y:45},{x:90,y:45},{x:90,y:-45},{x:-90,y:-45}] },
+  patrat:                 { label: 'Pătrat',                  labelEn: 'Square',
+    points: [{x:-70,y:70},{x:70,y:70},{x:70,y:-70},{x:-70,y:-70}] },
+  romb:                   { label: 'Romb',                    labelEn: 'Rhombus',
+    points: [{x:0,y:-115},{x:45,y:0},{x:0,y:115},{x:-45,y:0}] },
+  trapezIsoscel:          { label: 'Trapez isoscel',          labelEn: 'Isosceles trapezoid',
+    points: [{x:-50,y:-60},{x:50,y:-60},{x:90,y:60},{x:-90,y:60}] },
+  trapezDreptunghic:      { label: 'Trapez dreptunghic',      labelEn: 'Right trapezoid',
+    points: [{x:-70,y:-60},{x:30,y:-60},{x:70,y:60},{x:-70,y:60}] }
+};
+function figureLabel(spec) { return (LANG === 'en' && spec.labelEn) ? spec.labelEn : spec.label; }
+
+// Randează o mică pictogramă SVG pentru o figură 2D, refolosind exact
+// aceleași puncte ca desenul real (același principiu ca buildShapeIconSVG
+// de la corpurile 3D, dar mult mai simplu — un singur poligon).
+function buildFigureIconSVG(shapeKey, size) {
+  const spec = FIGURE_SHAPES[shapeKey];
+  const pts = spec.points;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  pts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+  const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+  const pad = 3;
+  const scale = Math.min((size - 2 * pad) / w, (size - 2 * pad) / h);
+  const offX = pad - minX * scale + (size - 2 * pad - w * scale) / 2;
+  const offY = pad - minY * scale + (size - 2 * pad - h * scale) / 2;
+  const ptStr = pts.map(p => (p.x * scale + offX).toFixed(1) + ',' + (p.y * scale + offY).toFixed(1)).join(' ');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"><polygon points="${ptStr}"/></svg>`;
+}
+
+function insertFigureShape(shapeKey) {
+  const spec = FIGURE_SHAPES[shapeKey];
+  if (!spec) return;
+  const page = getCurrentPage();
+  if (!page) return;
+
+  const pts = spec.points;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  pts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  });
+
+  // Aceeași centrare ca la "Corpuri geometrice": pe orizontală exact la
+  // mijlocul tablei, pe verticală ușor mai sus de centru.
+  const rect = drawC.getBoundingClientRect();
+  const cx = rect.width / 2, cy = rect.height * 0.28;
+  const offX = cx - (minX + maxX) / 2, offY = cy - (minY + maxY) / 2;
+
+  const stroke = {
+    type: 'polygon',
+    points: pts.map(p => ({ x: p.x + offX, y: p.y + offY })),
+    color: color,
+    size: lastPenSize,
+    closed: true
+  };
+
+  pushStroke(page, stroke);
+  setTool('select');
+  selectedStrokes = new Set([page.strokes.length - 1]);
+  selectedImages.clear();
+  updateImageSelection();
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast(`✓ ${figureLabel(spec)} — selectată, trage pentru a muta sau scala`);
+}
+
+const figuresMenuEl = document.getElementById('figures-menu');
+const btnFigures = document.getElementById('btn-figures');
+btnFigures.innerHTML = buildFigureIconSVG('triunghiEchilateral', 20);
+
+// Gruparea pe rânduri în minifereastra "Figuri geometrice": rândul 1 =
+// triunghiuri după laturi, rândul 2 = triunghiuri după unghiuri, rândul 3
+// = patrulatere uzuale.
+const FIGURES_MENU_ROWS = [
+  ['triunghiOarecare', 'triunghiIsoscel', 'triunghiEchilateral'],
+  ['triunghiAscutitunghic', 'triunghiDreptunghic', 'triunghiObtuzunghic'],
+  ['paralelogram', 'dreptunghi', 'patrat', 'romb', 'trapezIsoscel', 'trapezDreptunghic']
+];
+
+function buildFiguresMenu() {
+  figuresMenuEl.innerHTML = FIGURES_MENU_ROWS.map(row => {
+    const items = row.map(key => {
+      const spec = FIGURE_SHAPES[key];
+      if (!spec) return '';
+      const icon = buildFigureIconSVG(key, 24);
+      return `<div class="solids-menu-item" data-figure="${key}" title="${figureLabel(spec)}">${icon}</div>`;
+    }).join('');
+    return `<div class="solids-menu-row">${items}</div>`;
+  }).join('');
+  figuresMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
+    item.onclick = () => {
+      insertFigureShape(item.dataset.figure);
+      closeFiguresMenu();
+    };
+  });
+}
+buildFiguresMenu();
+
+function toggleFiguresMenu() {
+  if (figuresMenuEl.classList.contains('show')) {
+    closeFiguresMenu();
+    return;
+  }
+  closeSolidsMenu();
+  const r = btnFigures.getBoundingClientRect();
+  figuresMenuEl.style.visibility = 'hidden';
+  figuresMenuEl.classList.add('show');
+  const menuH = figuresMenuEl.offsetHeight;
+  const menuW = figuresMenuEl.offsetWidth;
+  const spaceBelow = window.innerHeight - r.bottom;
+  const spaceAbove = r.top;
+  let top = (spaceBelow >= menuH + 6 || spaceBelow >= spaceAbove)
+    ? r.bottom + 6
+    : r.top - menuH - 6;
+  top = Math.max(4, Math.min(top, window.innerHeight - menuH - 4));
+  let left = Math.max(4, Math.min(r.left, window.innerWidth - menuW - 4));
+  figuresMenuEl.style.left = Math.round(left) + 'px';
+  figuresMenuEl.style.top = Math.round(top) + 'px';
+  figuresMenuEl.style.visibility = '';
+}
+function closeFiguresMenu() {
+  figuresMenuEl.classList.remove('show');
+}
+btnFigures.onclick = (e) => { e.stopPropagation(); toggleFiguresMenu(); };
+document.addEventListener('pointerdown', (e) => {
+  if (figuresMenuEl.classList.contains('show') && !figuresMenuEl.contains(e.target) && e.target !== btnFigures && !btnFigures.contains(e.target)) {
+    closeFiguresMenu();
   }
 });
 
@@ -7673,12 +7859,14 @@ Object.keys(geoGroups).forEach(name => {
   if (name === 'compass') return;
   const grp = geoGroups[name];
   grp.body.addEventListener('pointerdown', e => {
+    if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     const p = pos(e);
     geoActiveDrag = { name, mode: 'move', offX: p.x - geoGuides[name].x, offY: p.y - geoGuides[name].y };
     try { grp.body.setPointerCapture(e.pointerId); } catch (err) {}
   });
   grp.rotateHandle.addEventListener('pointerdown', e => {
+    if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     if (e.shiftKey) {
       geoActiveDrag = { name, mode: 'rotateSnap', lastAngle: geoGuides[name].angle };
@@ -7689,6 +7877,7 @@ Object.keys(geoGroups).forEach(name => {
   });
   if (grp.resizeHandle) {
     grp.resizeHandle.addEventListener('pointerdown', e => {
+      if (geoSegBuild) confirmGeoSegBuild();
       e.stopPropagation(); e.preventDefault();
       geoActiveDrag = { name, mode: 'resize' };
       try { grp.resizeHandle.setPointerCapture(e.pointerId); } catch (err) {}
@@ -7752,6 +7941,19 @@ function geoDragMove(e) {
   if (!geoActiveDrag) return;
   e.preventDefault();
   const p = pos(e);
+
+  if (geoActiveDrag.mode === 'segBuildP0' || geoActiveDrag.mode === 'segBuildP1') {
+    if (!geoSegBuild) { geoActiveDrag = null; return; }
+    // Proiectăm punctul degetului pe aceeași muchie a riglei/echerului —
+    // mișcare constrânsă la 1 dimensiune, foarte iertătoare la imprecizia
+    // tactilă (contează doar poziția de-a lungul muchiei, nu cea exactă).
+    const c = geoClosestOnSegment(p, geoSegBuild.edge[0], geoSegBuild.edge[1]);
+    if (geoActiveDrag.mode === 'segBuildP0') geoSegBuild.p0 = { x: c.x, y: c.y };
+    else geoSegBuild.p1 = { x: c.x, y: c.y };
+    renderGeoSegBuild();
+    return;
+  }
+
   const st = geoGuides[geoActiveDrag.name];
   
   if (geoActiveDrag.mode === 'move') {
@@ -8073,6 +8275,148 @@ function snapToGuides(p) {
 }
 
 // ================================================================
+// REGLAJ ȘI CONFIRMARE SEGMENT PE RIGLĂ / ECHER
+// ----------------------------------------------------------------
+// Pe ecran tactil (tablă inteligentă) nu există un cursor vizibil ca pe
+// laptop, deci tragerea dintr-o singură mișcare de-a lungul riglei e
+// imprecisă: degetul acoperă exact punctul unde se desenează.
+//
+// Soluție: când o linie/linie-întreruptă/săgeată e prinsă (snap) pe
+// marginea riglei sau a echerului la AMBELE capete, nu desenăm imediat.
+// În schimb apar două puncte mari, ușor de apucat cu degetul, pe care
+// utilizatorul le poate trage separat de-a lungul aceleiași muchii ca
+// să regleze precis lungimea — apoi confirmă cu ✓ (sau atingând oriunde
+// altundeva pe tablă) ca să deseneze definitiv segmentul, ori anulează
+// cu ✕ / Escape. Same idee ca la reglarea unghiului pe raportor.
+// ================================================================
+
+function isStraightEdgeGuide(name) {
+  return name === 'ruler' || name === 'setsquare';
+}
+
+function geoNearestEdgeSegment(name, p) {
+  const segs = getGeoSegments(name);
+  let best = null, bestD = Infinity;
+  segs.forEach(seg => {
+    const c = geoClosestOnSegment(p, seg[0], seg[1]);
+    if (c.d < bestD) { bestD = c.d; best = seg; }
+  });
+  return best;
+}
+
+let geoSegBuild = null;
+
+function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName) {
+  cancelGeoSegBuild();
+
+  const edge = geoNearestEdgeSegment(guideName, p0) || geoNearestEdgeSegment(guideName, p1);
+  if (!edge) return; // siguranță — dacă ghidajul a dispărut între timp, ieșim
+
+  const g = geoEl('g', { class: 'guide-segbuild' });
+
+  const preview = geoEl('line', { stroke: strokeColor, 'stroke-linecap': 'round', opacity: '0.9' });
+  if (kind === 'dashed') preview.setAttribute('stroke-dasharray', Math.max(4, strokeSize * 2.5) + ' ' + Math.max(3, strokeSize * 1.8));
+  g.appendChild(preview);
+
+  const h0 = geoEl('circle', { class: 'guide-handle', r: 13,
+    fill: '#2d9d4f', stroke: '#ffffff', 'stroke-width': 2.5 });
+  const h1 = geoEl('circle', { class: 'guide-handle', r: 13,
+    fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 2.5 });
+  g.appendChild(h0);
+  g.appendChild(h1);
+
+  const okBtn = geoEl('g', { class: 'guide-handle' });
+  okBtn.appendChild(geoEl('circle', { r: 16, fill: '#2d9d4f', stroke: '#ffffff', 'stroke-width': 2 }));
+  okBtn.appendChild(geoEl('path', { d: 'M -6 0 L -2 5 L 7 -6', stroke: '#ffffff', 'stroke-width': 2.6,
+    fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  g.appendChild(okBtn);
+
+  const cancelBtn = geoEl('g', { class: 'guide-handle' });
+  cancelBtn.appendChild(geoEl('circle', { r: 13, fill: '#c0392b', stroke: '#ffffff', 'stroke-width': 2 }));
+  cancelBtn.appendChild(geoEl('path', { d: 'M -5 -5 L 5 5 M 5 -5 L -5 5', stroke: '#ffffff', 'stroke-width': 2.4,
+    fill: 'none', 'stroke-linecap': 'round' }));
+  g.appendChild(cancelBtn);
+
+  const lenLabel = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    style: 'font-size:13px;font-weight:600;' });
+  g.appendChild(lenLabel);
+
+  guideSvg.appendChild(g);
+
+  geoSegBuild = { kind, guideName, edge, p0: { x: p0.x, y: p0.y }, p1: { x: p1.x, y: p1.y },
+    color: strokeColor, size: strokeSize, g, preview, h0, h1, okBtn, cancelBtn, lenLabel };
+
+  h0.addEventListener('pointerdown', ev => {
+    ev.stopPropagation(); ev.preventDefault();
+    geoActiveDrag = { name: null, mode: 'segBuildP0' };
+    try { h0.setPointerCapture(ev.pointerId); } catch (err) {}
+  });
+  h1.addEventListener('pointerdown', ev => {
+    ev.stopPropagation(); ev.preventDefault();
+    geoActiveDrag = { name: null, mode: 'segBuildP1' };
+    try { h1.setPointerCapture(ev.pointerId); } catch (err) {}
+  });
+  okBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  okBtn.addEventListener('click', ev => { ev.stopPropagation(); confirmGeoSegBuild(); });
+  cancelBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  cancelBtn.addEventListener('click', ev => { ev.stopPropagation(); cancelGeoSegBuild(); showToast('❌ Segment anulat'); });
+
+  renderGeoSegBuild();
+  showToast('↔️ Trage cele două puncte ca să reglezi, apoi atinge ✓ (sau oriunde pe tablă)');
+}
+
+function renderGeoSegBuild() {
+  if (!geoSegBuild) return;
+  const { p0, p1, preview, h0, h1, okBtn, cancelBtn, lenLabel, size } = geoSegBuild;
+
+  preview.setAttribute('x1', p0.x); preview.setAttribute('y1', p0.y);
+  preview.setAttribute('x2', p1.x); preview.setAttribute('y2', p1.y);
+  preview.setAttribute('stroke-width', Math.max(2, size));
+
+  h0.setAttribute('cx', p0.x); h0.setAttribute('cy', p0.y);
+  h1.setAttribute('cx', p1.x); h1.setAttribute('cy', p1.y);
+
+  const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1;
+  // Vector normal pe segment, orientat preferențial spre partea de sus a
+  // ecranului, ca butoanele să nu fie acoperite de mâna care ține rigla.
+  let nx = -dy / len, ny = dx / len;
+  if (ny > 0) { nx = -nx; ny = -ny; }
+  const offset = 38;
+  const bx = mx + nx * offset, by = my + ny * offset;
+  okBtn.setAttribute('transform', `translate(${bx - 24},${by})`);
+  cancelBtn.setAttribute('transform', `translate(${bx + 24},${by})`);
+  lenLabel.setAttribute('x', bx);
+  lenLabel.setAttribute('y', by - 24);
+  lenLabel.textContent = (len / PX_PER_CM).toFixed(1) + ' cm';
+}
+
+function confirmGeoSegBuild() {
+  if (!geoSegBuild) return;
+  const { kind, p0, p1, color: strokeColor, size } = geoSegBuild;
+  const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+  const page = getCurrentPage();
+  if (dist > 4 && page) {
+    if (kind === 'arrow') {
+      pushStroke(page, { type: 'arrow', points: [{ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }], color: strokeColor, size, erase: false });
+    } else {
+      pushStroke(page, { points: [{ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }], color: strokeColor, size, erase: false, dashed: kind === 'dashed' });
+    }
+    showToast('✓ Segment desenat (' + (dist / PX_PER_CM).toFixed(1) + ' cm)');
+  }
+  cancelGeoSegBuild();
+  redrawStrokes();
+  updateStatus();
+}
+
+function cancelGeoSegBuild() {
+  if (!geoSegBuild) return;
+  if (geoSegBuild.g && geoSegBuild.g.parentNode) geoSegBuild.g.parentNode.removeChild(geoSegBuild.g);
+  geoSegBuild = null;
+}
+
+// ================================================================
 // AJUTOR ȘI LICENȚĂ
 // ================================================================
 
@@ -8101,9 +8445,11 @@ const HELP_CONTENT_HTML = `
 <ul>
   <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
   <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
+  <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat.</li>
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
   <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
+  <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
 </ul>
 
 <h4>Rotirea corpurilor 3D</h4>
