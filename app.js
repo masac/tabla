@@ -137,6 +137,8 @@ const RO_EN_RULES = [
   [/^🟨 Poligon: punctul (\d+) \((-?\d+), (-?\d+)\) - dublu-click pentru finalizare$/, '🟨 Polygon: point $1 ($2, $3) - double-click to finish'],
   [/^✏️ Editare text - Enter pentru a salva$/, '✏️ Editing text - Enter to save'],
   [/^✓ Rotit \((-?\d+\.?\d*)°\)$/, '✓ Rotated ($1°)'],
+  [/^✓ Rotit$/, '✓ Rotated'],
+  [/^✓ Copiat$/, '✓ Copied'],
   [/^✓ Stroke scalat$/, '✓ Stroke scaled'],
   [/^✓ (\d+) stroke-uri mutate$/, '✓ $1 strokes moved'],
   [/^✓ Riglă: (-?\d+\.?\d*) cm$/, '✓ Ruler: $1 cm'],
@@ -191,6 +193,9 @@ const RO_EN_RULES = [
   [/^🔄 Rază: (-?\d+\.?\d*) cm  \|  Arc: ([\s\S]*)$/, '🔄 Radius: $1 cm  |  Arc: $2'],
   [/^⭕ Albastru = centru \(trage pentru a muta\)  \|  Pătrățel gri = trage liber pentru a roti \/ a mări-micșora raza, fără să deseneze  \|  Roșu = trage pentru a desena cercul\/arcul$/, '⭕ Blue = center (drag to move)  |  Gray square = drag freely to rotate / resize the radius, without drawing  |  Red = drag to draw the circle/arc'],
   [/^📐 Mânerul verde: trage-l de-a lungul raportorului pentru a seta unghiul  \|  Bifează căsuța pentru a construi arcul$/, '📐 Green handle: drag it along the protractor to set the angle  |  Check the box to build the arc'],
+  [/^❌ Segment anulat$/, '❌ Segment cancelled'],
+  [/^↔️ Trage cele două puncte ca să reglezi, apoi atinge ✓ \(sau oriunde pe tablă\)$/, '↔️ Drag the two points to adjust, then tap ✓ (or anywhere on the board)'],
+  [/^✓ Segment desenat \((-?\d+\.?\d*) cm\)$/, '✓ Segment drawn ($1 cm)'],
   // confirmări
   [/^Ștergi această imagine\?$/, 'Delete this image?'],
   [/^Aceasta este singura pagină\. Ștergerea îi va goli tot conținutul \(linii, imagini\)\. Continui\?$/, 'This is the only page. Deleting it will clear all its content (lines, images). Continue?'],
@@ -277,6 +282,7 @@ function applyStaticUI() {
   if (langSelect) langSelect.value = LANG;
 
   if (typeof buildSolidsMenu === 'function') buildSolidsMenu();
+  if (typeof buildFiguresMenu === 'function') buildFiguresMenu();
   if (typeof viewer3D !== 'undefined' && viewer3D) viewer3D.refreshLanguage();
 
   const helpBtnEl = document.getElementById('btn-help');
@@ -413,6 +419,14 @@ let rotateStartX = 0;
 let rotateStartRotationY = 0;
 let currentRotateHandle = null; // { x, y, strokeIdx }
 let currentDeleteHandle = null; // { x, y, strokeIdx } — X roșu, colțul din dreapta-sus al selecției
+let currentDuplicateHandle = null; // { x, y, strokeIdx } — buton de multiplicare, lângă colțul din dreapta-jos
+// Rotire pentru figuri geometrice 2D (poligoane) — rotație reală în plan,
+// diferită de rotireaSolid3D (care reconstruiește un wireframe 3D).
+let isRotatingPolygon = false;
+let rotatePolyIndex = -1;
+let rotatePolyOriginalStroke = null;
+let rotatePolyCenter = { x: 0, y: 0 };
+let rotatePolyStartX = 0;
 let dragStartMouseX = 0, dragStartMouseY = 0;
 let dragStartPositions = new Map();
 let moveUndoSnapshots = new Map();
@@ -2108,6 +2122,7 @@ function drawSelectionHighlights() {
   // Mâner de scalare — vizibil doar când e selectat un singur stroke
   currentResizeHandle = null;
   currentDeleteHandle = null;
+  currentDuplicateHandle = null;
   if (selectedStrokes.size === 1) {
     const idx = [...selectedStrokes][0];
     const stroke = page.strokes[idx];
@@ -2149,46 +2164,73 @@ function drawSelectionHighlights() {
       selCtx.lineTo(dx - xr, dy + xr);
       selCtx.stroke();
       selCtx.restore();
+
+      // Mâner de multiplicare (copiere) — colțul din dreapta-jos, ușor
+      // decalat față de mânerul de scalare (același colț), ca să nu se
+      // suprapună.
+      const cpx = hx + 27;
+      const cpy = hy + 27;
+      currentDuplicateHandle = { x: cpx, y: cpy, strokeIdx: idx };
+      selCtx.save();
+      selCtx.fillStyle = '#8e44ad';
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 2.5;
+      selCtx.beginPath();
+      selCtx.arc(cpx, cpy, 12, 0, Math.PI * 2);
+      selCtx.fill();
+      selCtx.stroke();
+      // pictogramă "copiere" — două pătrate suprapuse
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 1.6;
+      selCtx.lineJoin = 'round';
+      selCtx.strokeRect(cpx - 6, cpy - 3, 7, 7);
+      selCtx.strokeRect(cpx - 2, cpy - 7, 7, 7);
+      selCtx.restore();
     }
   }
 
-  // Mâner de rotire — doar pentru corpuri 3D poligonale/rotunde (nu și pentru sferă, care arată
-  // la fel din orice unghi), poziționat în colțul opus mânerului de scalare.
+  // Mâner de rotire — pentru corpuri 3D poligonale/rotunde (nu și pentru sferă, care arată
+  // la fel din orice unghi) ȘI pentru figuri geometrice 2D (poligoane), poziționat
+  // în colțul din stânga-sus, opus mânerului de scalare.
   currentRotateHandle = null;
   if (selectedStrokes.size === 1) {
     const idx = [...selectedStrokes][0];
     const stroke = page.strokes[idx];
+    let showRotate = false;
     if (stroke && stroke.type === 'solid3d') {
       const spec = SOLID_SHAPES[stroke.shape];
-      if (spec && !spec.noRotate) {
-        const bbox = getStrokeBoundingBox(stroke);
-        const rx = bbox.x - 2;
-        const ry = bbox.y - 2;
-        currentRotateHandle = { x: rx, y: ry, strokeIdx: idx };
-        selCtx.save();
-        selCtx.fillStyle = '#2d7dd2';
-        selCtx.strokeStyle = '#ffffff';
-        selCtx.lineWidth = 3;
-        selCtx.beginPath();
-        selCtx.arc(rx, ry, 13, 0, Math.PI * 2);
-        selCtx.fill();
-        selCtx.stroke();
-        // săgeată circulară simplă ca indiciu vizual de rotire
-        selCtx.strokeStyle = '#ffffff';
-        selCtx.lineWidth = 1.8;
-        selCtx.beginPath();
-        selCtx.arc(rx, ry, 6, -0.3 * Math.PI, 1.2 * Math.PI);
-        selCtx.stroke();
-        const ah = 1.2 * Math.PI;
-        const ahx = rx + 6 * Math.cos(ah), ahy = ry + 6 * Math.sin(ah);
-        selCtx.beginPath();
-        selCtx.moveTo(ahx, ahy);
-        selCtx.lineTo(ahx - 4, ahy - 2);
-        selCtx.moveTo(ahx, ahy);
-        selCtx.lineTo(ahx - 1, ahy + 4);
-        selCtx.stroke();
-        selCtx.restore();
-      }
+      showRotate = !!(spec && !spec.noRotate);
+    } else if (stroke && stroke.type === 'polygon') {
+      showRotate = true;
+    }
+    if (showRotate) {
+      const bbox = getStrokeBoundingBox(stroke);
+      const rx = bbox.x - 2;
+      const ry = bbox.y - 2;
+      currentRotateHandle = { x: rx, y: ry, strokeIdx: idx };
+      selCtx.save();
+      selCtx.fillStyle = '#2d7dd2';
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 3;
+      selCtx.beginPath();
+      selCtx.arc(rx, ry, 13, 0, Math.PI * 2);
+      selCtx.fill();
+      selCtx.stroke();
+      // săgeată circulară simplă ca indiciu vizual de rotire
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 1.8;
+      selCtx.beginPath();
+      selCtx.arc(rx, ry, 6, -0.3 * Math.PI, 1.2 * Math.PI);
+      selCtx.stroke();
+      const ah = 1.2 * Math.PI;
+      const ahx = rx + 6 * Math.cos(ah), ahy = ry + 6 * Math.sin(ah);
+      selCtx.beginPath();
+      selCtx.moveTo(ahx, ahy);
+      selCtx.lineTo(ahx - 4, ahy - 2);
+      selCtx.moveTo(ahx, ahy);
+      selCtx.lineTo(ahx - 1, ahy + 4);
+      selCtx.stroke();
+      selCtx.restore();
     }
   }
 }
@@ -2259,6 +2301,65 @@ function deleteSelectedStrokes() {
   redrawStrokes();
   updateStatus();
     showToast(`✓ ${sorted.length} stroke-uri șterse`);
+}
+
+// Translatează în loc geometria unui stroke cu (dx, dy) — aceeași logică
+// pe tip de stroke ca la mutarea selecției (handlePointerMove, mod
+// isDraggingSelected), dar aplicată direct pe valorile curente, nu pe un
+// snapshot de start. Folosită la duplicare, ca fiecare tip de stroke să
+// fie decalat corect.
+function offsetStrokeInPlace(s, dx, dy) {
+  if (s.type === 'polygon' && s.points) {
+    s.points.forEach(pt => { pt.x += dx; pt.y += dy; });
+  } else if (s.type === 'midpoint') {
+    s.x += dx; s.y += dy;
+    if (s.p1) { s.p1.x += dx; s.p1.y += dy; }
+    if (s.p2) { s.p2.x += dx; s.p2.y += dy; }
+  } else if (s.type === 'text') {
+    s.x += dx; s.y += dy;
+  } else if (s.type === 'rect') {
+    s.x += dx; s.y += dy;
+  } else if (s.type === 'circle' || s.type === 'arc') {
+    s.cx += dx; s.cy += dy;
+  } else if (s.type === 'angle') {
+    s.vertex.x += dx; s.vertex.y += dy;
+    s.ray1.x += dx; s.ray1.y += dy;
+    s.ray2.x += dx; s.ray2.y += dy;
+  } else if (s.type === 'solid3d' || s.type === 'solidNet') {
+    if (s.visible) s.visible = s.visible.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
+    if (s.hidden) s.hidden = s.hidden.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
+  } else if (s.type === 'function') {
+    if (s.segments) s.segments = s.segments.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
+    if (s.xAxis) s.xAxis = s.xAxis.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+    if (s.yAxis) s.yAxis = s.yAxis.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+    if (s.xTicks) s.xTicks = s.xTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    if (s.yTicks) s.yTicks = s.yTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    if (s.extremes) s.extremes = s.extremes.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
+  } else if (s.points) {
+    s.points.forEach(pt => { pt.x += dx; pt.y += dy; });
+  }
+}
+
+// Multiplică (copiază) stroke-ul selectat — clonă completă, ușor decalată,
+// inserată imediat deasupra originalului și selectată automat.
+function duplicateSelectedStroke(idx) {
+  const page = getCurrentPage();
+  if (!page) return;
+  const stroke = page.strokes[idx];
+  if (!stroke) return;
+
+  const clone = JSON.parse(JSON.stringify(stroke));
+  const offset = 24;
+  offsetStrokeInPlace(clone, offset, offset);
+
+  pushStroke(page, clone);
+  selectedStrokes = new Set([page.strokes.length - 1]);
+  selectedImages.clear();
+  updateImageSelection();
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast('✓ Copiat');
 }
 
 function snapshotStrokePosition(stroke) {
@@ -2400,7 +2501,18 @@ function handlePointerDown(e) {
       const rotHitRadius = e.pointerType === 'touch' ? 30 : 16;
       if (Math.sqrt(rhx * rhx + rhy * rhy) < rotHitRadius && page) {
         const stroke = page.strokes[currentRotateHandle.strokeIdx];
-        if (stroke) {
+        if (stroke && stroke.type === 'polygon') {
+          isRotatingPolygon = true;
+          rotatePolyIndex = currentRotateHandle.strokeIdx;
+          rotatePolyOriginalStroke = JSON.parse(JSON.stringify(stroke));
+          const bbox = getStrokeBoundingBox(stroke);
+          rotatePolyCenter = { x: bbox.x + bbox.w / 2, y: bbox.y + bbox.h / 2 };
+          rotatePolyStartX = p.x;
+          drawC.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          showToast('↻ Trage stânga/dreapta pentru a roti');
+          return;
+        } else if (stroke) {
           isRotatingSolid = true;
           rotateStrokeIndex = currentRotateHandle.strokeIdx;
           rotateOriginalStroke = JSON.parse(JSON.stringify(stroke));
@@ -2411,6 +2523,16 @@ function handlePointerDown(e) {
           showToast('↻ Trage stânga/dreapta pentru a roti');
           return;
         }
+      }
+    }
+
+    if (currentDuplicateHandle && selectedStrokes.has(currentDuplicateHandle.strokeIdx)) {
+      const cphx = p.x - currentDuplicateHandle.x, cphy = p.y - currentDuplicateHandle.y;
+      const cpHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      if (Math.sqrt(cphx * cphx + cphy * cphy) < cpHitRadius && page) {
+        e.preventDefault();
+        duplicateSelectedStroke(currentDuplicateHandle.strokeIdx);
+        return;
       }
     }
 
@@ -2610,6 +2732,27 @@ function handlePointerMove(e) {
   if (tool === 'pen' && !geoActiveDrag) {
     const gd = nearestGuideDist(p);
     drawC.style.cursor = (gd < GUIDE_SNAP_DIST) ? GEO_PEN_CURSOR : '';
+  }
+
+  if (tool === 'select' && isRotatingPolygon) {
+    const page = getCurrentPage();
+    if (page && rotatePolyOriginalStroke && rotatePolyOriginalStroke.points) {
+      const stroke = page.strokes[rotatePolyIndex];
+      if (stroke) {
+        const dx = p.x - rotatePolyStartX;
+        const angle = dx * 0.012;
+        const cx = rotatePolyCenter.x, cy = rotatePolyCenter.y;
+        const cosA = Math.cos(angle), sinA = Math.sin(angle);
+        stroke.points = rotatePolyOriginalStroke.points.map(pt => {
+          const ox = pt.x - cx, oy = pt.y - cy;
+          return { x: cx + ox * cosA - oy * sinA, y: cy + ox * sinA + oy * cosA };
+        });
+        showAngleReadout(angle, { persist: true });
+        redrawStrokes();
+        drawSelectionHighlights();
+      }
+    }
+    return;
   }
 
   if (tool === 'select' && isRotatingSolid) {
@@ -2886,6 +3029,25 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp(e) {
+
+  if (tool === 'select' && isRotatingPolygon) {
+    isRotatingPolygon = false;
+    const page = getCurrentPage();
+    const stroke = page ? page.strokes[rotatePolyIndex] : null;
+    if (page && stroke && rotatePolyOriginalStroke) {
+      const after = JSON.parse(JSON.stringify(stroke));
+      if (JSON.stringify(after) !== JSON.stringify(rotatePolyOriginalStroke)) {
+        undoStack.push({ type: 'resizeStroke', page, stroke, before: rotatePolyOriginalStroke, after });
+        redoStack = [];
+        showToast('✓ Rotit');
+      }
+    }
+    hideAngleReadout(5000);
+    rotatePolyOriginalStroke = null;
+    rotatePolyIndex = -1;
+    updateStatus();
+    return;
+  }
 
   if (tool === 'select' && isRotatingSolid) {
     isRotatingSolid = false;
@@ -3313,6 +3475,9 @@ function setTool(t) {
   isRotatingSolid = false;
   rotateOriginalStroke = null;
   rotateStrokeIndex = -1;
+  isRotatingPolygon = false;
+  rotatePolyOriginalStroke = null;
+  rotatePolyIndex = -1;
   hideAngleReadout(0);
   dragStartPositions.clear();
   moveUndoSnapshots.clear();
@@ -5969,7 +6134,7 @@ function insertFigureShape(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${figureLabel(spec)} — selectată, trage pentru a muta sau scala`);
+  showToast(`✓ ${figureLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
 }
 
 const figuresMenuEl = document.getElementById('figures-menu');
@@ -7576,7 +7741,7 @@ function buildGeoProtractor() {
   const arcRadiusHandle = geoEl('circle', { class: 'guide-handle', r: 6,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   arcRadiusHandle.setAttribute('cx', 0);
-  arcRadiusHandle.setAttribute('cy', 50);
+  arcRadiusHandle.setAttribute('cy', 25);
   g.appendChild(arcRadiusHandle);
 
   const arcBuildBox = geoEl('rect', { x: -138, y: -78, width: 18, height: 18, rx: 3,
@@ -7696,13 +7861,17 @@ function renderGeoProtractor() {
   arcLabel.setAttribute('y', -labelR * Math.sin(aRad / 2));
   arcLabel.textContent = Math.round(st.arcAngle) + '°';
 
-  // Mânerul portocaliu (rază arc) e poziționat fix în partea de JOS a
-  // raportorului (axa Y pozitivă), în afara semicercului superior (0°-180°)
-  // în care se mișcă mânerul verde (unghi). Astfel nu se mai suprapun
-  // niciodată, indiferent de unghiul curent.
-  const radiusHandleDist = Math.max(30, Math.min(R - 16, arcR));
-  arcRadiusHandle.setAttribute('cx', 0);
-  arcRadiusHandle.setAttribute('cy', radiusHandleDist);
+  // Mânerul portocaliu (rază arc) e poziționat exact pe verticală sub
+  // punctul de unde PORNEȘTE arcul (la 0°, pe linia de bază a raportorului
+  // — arcul e desenat mereu de la (arcR, 0) până la unghiul curent), la o
+  // distanță FIXĂ de 0,5 cm sub raportor. Rămâne pe partea dreaptă
+  // indiferent de unghi, deci nu mai variază nici pe verticală, nici
+  // "urmărind" mânerul verde — și nu mai iese din ecran pe telefoane.
+  const radiusMinR = 15;
+  const radiusMaxR = Math.max(radiusMinR + 1, R - 16);
+  const radiusHandleX = Math.max(radiusMinR, Math.min(radiusMaxR, arcR));
+  arcRadiusHandle.setAttribute('cx', radiusHandleX);
+  arcRadiusHandle.setAttribute('cy', PX_PER_CM / 2);
 }
 
 // ---------------- COMPAS ----------------
@@ -8026,13 +8195,13 @@ function geoDragMove(e) {
     renderGeoProtractor();
   } else if (geoActiveDrag.mode === 'protractorArcRadius') {
     const local = geoWorldToLocal(st, p.x, p.y);
-    // Mânerul e acum pe axa Y pozitivă (jos); folosim distanța absolută
-    // față de centru, calculată din poziția curentă a cursorului.
-    const dist = Math.sqrt(local.x * local.x + local.y * local.y);
+    // Cursor orizontal: mânerul stă mereu sub punctul de start al arcului
+    // (0°, pe partea dreaptă), deci poziția pe X reprezintă direct raza,
+    // indiferent de unghiul curent — iertător și la imprecizia pe verticală.
     const minR = 15;
-    const maxR = st.radius - 16;
-    const newScale = Math.max(minR / st.radius, Math.min(maxR / st.radius, dist / st.radius));
-    st.arcRadiusScale = newScale;
+    const maxR = Math.max(minR + 1, st.radius - 16);
+    const r = Math.max(minR, Math.min(maxR, local.x));
+    st.arcRadiusScale = r / st.radius;
     renderGeoProtractor();
   }
 }
@@ -8445,7 +8614,7 @@ const HELP_CONTENT_HTML = `
 <ul>
   <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
   <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
-  <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat.</li>
+  <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat; are și buton de rotire (colțul stânga-sus, albastru) și de multiplicare (colțul dreapta-jos, mov).</li>
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
   <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
@@ -8542,9 +8711,11 @@ const HELP_CONTENT_HTML_EN = `
 <ul>
   <li><b>f(x)</b> — plot a function graph.</li>
   <li><b>Geometric solids</b> — insert a predefined 3D solid (cube, prism, pyramid, frustum, etc.).</li>
+  <li><b>Geometric figures</b> — insert a predefined 2D outline (triangles, parallelogram, rectangle, square, rhombus, trapezoids), centered on the board and ready to move/resize; it also has a rotate button (top-left corner, blue) and a duplicate button (bottom-right corner, purple).</li>
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
   <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
   <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
+  <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
 </ul>
 
 <h4>Rotating 3D solids</h4>
