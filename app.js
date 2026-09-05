@@ -673,6 +673,7 @@ function activatePdfPaneDefaultPan() {
   pane.panMode = true;
   const btn = document.getElementById('pdf-panmode-btn');
   if (btn) btn.classList.add('active');
+  updatePanePanCursor('top');
   showPdfPaneControlsTemporarily();
   showToast('✋ Plimbare cu degetul activă pe fișa PDF  |  Bara de control dispare în 10s — atinge bara de separare ca să reapară');
 }
@@ -711,11 +712,11 @@ document.getElementById('btn-toggle-pdf-mode').addEventListener('click', () => {
   const name = 'top';
   const els = getPaneEls(name);
   els.draw.addEventListener('pointerdown', function(e) {
-    if (pdfPanes[name].panMode && e.pointerType === 'touch') return; // în mod plimbare, degetul nu mai desenează
+    if (pdfPanes[name].panMode && (e.pointerType === 'touch' || e.pointerType === 'mouse')) return; // în mod plimbare, degetul/mouse-ul nu mai desenează
     activatePane(name); handlePointerDown(e);
   });
   els.draw.addEventListener('pointermove', function(e) {
-    if (pdfPanes[name].panMode && e.pointerType === 'touch') return;
+    if (pdfPanes[name].panMode && (e.pointerType === 'touch' || e.pointerType === 'mouse')) return;
     handlePointerMove(e);
   });
   els.draw.addEventListener('pointerup', handlePointerUp);
@@ -733,6 +734,15 @@ function panePanStep(name) {
 document.querySelectorAll('.pdf-pane-controls .pdf-ctl').forEach(function(btn) {
   btn.addEventListener('click', function() { performPdfCtlAction(btn); });
 });
+
+// Cursor "mânuță" pe canvas-ul de desen al ferestrei PDF, cât timp modul
+// plimbare e activ — utilizatorii de laptop (mouse) au acum nevoie de acest
+// indiciu vizual, din moment ce tot ei pot plimba fișa trăgând cu mouse-ul.
+function updatePanePanCursor(name) {
+  const els = getPaneEls(name);
+  const pane = pdfPanes[name];
+  if (els.draw) els.draw.style.cursor = (pane && pane.panMode) ? 'grab' : '';
+}
 
 function performPdfCtlAction(btn) {
   const paneRoot = btn.closest('.pdf-pane');
@@ -756,6 +766,7 @@ function performPdfCtlAction(btn) {
   else if (act === 'panmode') {
     pane.panMode = !pane.panMode;
     btn.classList.toggle('active', pane.panMode);
+    updatePanePanCursor(name);
     showToast(pane.panMode
       ? (LANG === 'en' ? '✋ Finger-pan mode on — one finger scrolls, drawing is off' : '✋ Mod plimbare cu degetul activ — desenul e oprit temporar')
       : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
@@ -788,7 +799,10 @@ function attachHoldRepeat(el, callback) {
   attachHoldRepeat(btn, () => performPdfCtlAction(btn));
 });
 
-// Panare cu degetul direct pe fișă (2 degete) și zoom cu pinch
+// Panare cu degetul direct pe fișă (2 degete) și zoom cu pinch — plus,
+// pentru laptop: panare cu mouse-ul (click stânga + trage, cât timp modul
+// plimbare e activ) și zoom cu Ctrl+rotița (sau pinch de trackpad, pe care
+// browserele îl raportează tot ca 'wheel' cu ctrlKey=true).
 function attachPanePanZoom(name) {
   const els = getPaneEls(name);
   const root = els.root;
@@ -797,9 +811,18 @@ function attachPanePanZoom(name) {
   let singleFingerPan = false;
 
   root.addEventListener('pointerdown', function(e) {
+    const pane = pdfPanes[name];
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+      if (e.pointerType === 'mouse' && e.button !== 0) return; // doar click stânga
+      if (pane && pane.panMode) {
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        singleFingerPan = true;
+        lastMid = { x: e.clientX, y: e.clientY };
+      }
+      return;
+    }
     if (e.pointerType !== 'touch') return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const pane = pdfPanes[name];
     if (pts.size === 1 && pane && pane.panMode) {
       // Mod plimbare cu un deget activat explicit din bara de control —
       // un singur deget mișcă fișa în loc să deseneze.
@@ -857,8 +880,42 @@ function attachPanePanZoom(name) {
   root.addEventListener('pointerup', clearPt, { passive: true });
   root.addEventListener('pointercancel', clearPt, { passive: true });
   root.addEventListener('pointerleave', clearPt, { passive: true });
+
+  // Zoom cu Ctrl+rotița mouse-ului (sau pinch de trackpad), centrat exact
+  // pe poziția cursorului — ca punctul de sub cursor să rămână pe loc.
+  root.addEventListener('wheel', function(e) {
+    if (!e.ctrlKey || !pdfDoc) return;
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    zoomPaneAtPoint(name, factor, e.clientX, e.clientY);
+  }, { passive: false });
 }
 attachPanePanZoom('top');
+
+// Aplică un factor de zoom pe fișa PDF, păstrând fix punctul de sub cursor
+// (clientX, clientY) — folosită la Ctrl+rotița mouse-ului / pinch trackpad.
+function zoomPaneAtPoint(name, factor, clientX, clientY) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  if (!pane || !els.bg.width) return;
+  const rect = els.root.getBoundingClientRect();
+  const localX = clientX - rect.left, localY = clientY - rect.top;
+  const w0 = els.bg.width, h0 = els.bg.height;
+  const centerX0 = (rect.width - w0) / 2;
+  const centerY0 = Math.max(0, (rect.height - h0) / 2);
+  const bitmapX = localX - centerX0 - pane.panX;
+  const bitmapY = localY - centerY0 - pane.panY;
+  const z0 = pane.zoom;
+  const z1 = Math.max(0.2, Math.min(10, z0 * factor));
+  const ratio = z1 / z0;
+  const w1 = w0 * ratio, h1 = h0 * ratio;
+  const centerX1 = (rect.width - w1) / 2;
+  const centerY1 = Math.max(0, (rect.height - h1) / 2);
+  pane.zoom = z1;
+  pane.panX = localX - centerX1 - bitmapX * ratio;
+  pane.panY = localY - centerY1 - bitmapY * ratio;
+  renderPdfPane(name);
+}
 
 // ===== Divizor redimensionabil între fereastra PDF și tabla neagră =====
 (function setupPaneDivider() {
@@ -7761,6 +7818,18 @@ function geoClear(node) { while (node.firstChild) node.removeChild(node.firstChi
 const geoGroups = {};
 
 // ---------------- RIGLĂ ----------------
+// Buton mic în formă de creion, folosit pe riglă și pe echer pentru a porni
+// un segment de precizie (cu capetele inițial la diviziunile 0 și 3 cm).
+function geoBuildPencilButton() {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 13, fill: '#2d7dd2', stroke: '#ffffff', 'stroke-width': 2 }));
+  g.appendChild(geoEl('path', {
+    d: 'M -5 6 L 3 -6 L 6 -4 L -2 8 Z M -6 8 L -5 6 L -3 8.5 Z',
+    fill: '#ffffff'
+  }));
+  return g;
+}
+
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
@@ -7774,14 +7843,18 @@ function buildGeoRuler() {
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
+  const pencilBtn = geoBuildPencilButton();
+  g.appendChild(pencilBtn);
   guideSvg.appendChild(g);
-  geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle };
+  geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn };
+  pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
   renderGeoRuler();
 }
 
 function renderGeoRuler() {
   const st = geoGuides.ruler;
-  const { body, ticks, rotateHandle, resizeHandle } = geoGroups.ruler;
+  const { body, ticks, rotateHandle, resizeHandle, pencilBtn } = geoGroups.ruler;
   const L = st.length, T = st.thickness;
   body.setAttribute('x', 0); body.setAttribute('y', 0);
   body.setAttribute('width', L); body.setAttribute('height', T);
@@ -7805,6 +7878,9 @@ function renderGeoRuler() {
   rotateHandle.setAttribute('cy', T / 2);
   resizeHandle.setAttribute('x', L - 8);
   resizeHandle.setAttribute('y', T / 2 - 8);
+  // Butonul-creion (pornește un segment de precizie 0→3cm) — sub mijlocul
+  // riglei, ca să nu se suprapună cu mânerele de rotire/redimensionare.
+  pencilBtn.setAttribute('transform', `translate(${L / 2},${T + 16})`);
 }
 
 // ---------------- ECHER ----------------
@@ -7821,14 +7897,18 @@ function buildGeoSetsquare() {
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
+  const pencilBtn = geoBuildPencilButton();
+  g.appendChild(pencilBtn);
   guideSvg.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandle };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn };
+  pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startSetsquarePencilSeg(); });
   renderGeoSetsquare();
 }
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandle } = geoGroups.setsquare;
+  const { body, ticks, rotateHandle, resizeHandle, pencilBtn } = geoGroups.setsquare;
   const S = st.size;
   body.setAttribute('points', `0,0 ${S},0 0,${-S}`);
 
@@ -7855,6 +7935,10 @@ function renderGeoSetsquare() {
   rotateHandle.setAttribute('cy', -24);
   resizeHandle.setAttribute('x', S - 8);
   resizeHandle.setAttribute('y', -8);
+  // Butonul-creion — în interiorul triunghiului; un click pornește un
+  // segment de precizie pe muchia curentă din ciclul celor 3 (bază,
+  // catetă verticală, ipotenuză), trecând la următoarea la fiecare click.
+  pencilBtn.setAttribute('transform', `translate(${S * 0.3},${-S * 0.3})`);
 }
 
 // ---------------- RAPORTOR ----------------
@@ -8274,10 +8358,11 @@ function geoDragMove(e) {
 
   if (geoActiveDrag.mode === 'segBuildP0' || geoActiveDrag.mode === 'segBuildP1') {
     if (!geoSegBuild) { geoActiveDrag = null; return; }
-    // Proiectăm punctul degetului pe aceeași muchie a riglei/echerului —
-    // mișcare constrânsă la 1 dimensiune, foarte iertătoare la imprecizia
-    // tactilă (contează doar poziția de-a lungul muchiei, nu cea exactă).
-    const c = geoClosestOnSegment(p, geoSegBuild.edge[0], geoSegBuild.edge[1]);
+    // Proiectăm punctul degetului pe aceeași axă a riglei/echerului —
+    // mișcare constrânsă la 1 dimensiune (foarte iertătoare la imprecizia
+    // tactilă), dar NECLAMPATĂ: punctul poate ieși dincolo de capetele
+    // fizice ale muchiei, inclusiv sub diviziunea 0 (valori negative).
+    const c = geoProjectOnAxis(p, geoSegBuild.axis.zero, geoSegBuild.axis.dir);
     if (geoActiveDrag.mode === 'segBuildP0') geoSegBuild.p0 = { x: c.x, y: c.y };
     else geoSegBuild.p1 = { x: c.x, y: c.y };
     renderGeoSegBuild();
@@ -8580,6 +8665,21 @@ function geoClosestOnSegment(p, a, b) {
   return { x: cx, y: cy, d: Math.hypot(p.x - cx, p.y - cy) };
 }
 
+// La fel ca geoClosestOnSegment, dar NECLAMPAT — punctul poate ieși dincolo
+// de capetele fizice ale muchiei (inclusiv sub diviziunea 0), rămânând
+// mereu pe dreapta suport. `dirUnit` e vector unitar de-a lungul axei.
+function geoProjectOnAxis(p, zero, dirUnit) {
+  const t = (p.x - zero.x) * dirUnit.x + (p.y - zero.y) * dirUnit.y;
+  return { x: zero.x + dirUnit.x * t, y: zero.y + dirUnit.y * t, t };
+}
+
+// Formatează o valoare în cm compact: întreg fără zecimale ("0", "3", "-2"),
+// altfel cu o zecimală ("1.5").
+function formatCmValue(v) {
+  const r = Math.round(v * 10) / 10;
+  return (Math.abs(r - Math.round(r)) < 0.05) ? String(Math.round(r)) : r.toFixed(1);
+}
+
 function nearestGuideDist(p) {
   let bestD = Infinity;
   Object.keys(geoGuides).forEach(name => {
@@ -8636,11 +8736,65 @@ function geoNearestEdgeSegment(name, p) {
 
 let geoSegBuild = null;
 
-function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName) {
+// Ciclează cele 3 muchii ale echerului (bază, catetă verticală, ipotenuză)
+// la fiecare apăsare a creionului.
+let geoSetsquarePencilEdge = 0;
+
+// Tipul de linie desenată de creion urmează unealta curentă selectată:
+// "Linie întreruptă" -> linie întreruptă, altfel -> linie continuă.
+function geoPencilSegKind() {
+  return (tool === 'dashed') ? 'dashed' : 'line';
+}
+
+function startRulerPencilSeg() {
+  confirmGeoSegBuild();
+  const st = geoGuides.ruler;
+  const zeroLocal = { x: 0, y: 0 };
+  const zero = geoLocalToWorld(st, zeroLocal.x, zeroLocal.y);
+  const far = geoLocalToWorld(st, st.length, 0);
+  const three = geoLocalToWorld(st, 3 * PX_PER_CM, 0);
+  const dx = far.x - zero.x, dy = far.y - zero.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const axis = { zero, dir: { x: dx / len, y: dy / len } };
+  startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'ruler', axis);
+}
+
+function startSetsquarePencilSeg() {
+  confirmGeoSegBuild();
+  const st = geoGuides.setsquare;
+  const S = st.size;
+  // Cele 3 muchii, în coordonate locale: [zero, capătul îndepărtat]
+  const edgesLocal = [
+    [{ x: 0, y: 0 }, { x: S, y: 0 }],   // bază orizontală
+    [{ x: 0, y: 0 }, { x: 0, y: -S }],  // catetă verticală
+    [{ x: S, y: 0 }, { x: 0, y: -S }]   // ipotenuză
+  ];
+  const e = edgesLocal[geoSetsquarePencilEdge];
+  geoSetsquarePencilEdge = (geoSetsquarePencilEdge + 1) % 3;
+
+  const zero = geoLocalToWorld(st, e[0].x, e[0].y);
+  const far = geoLocalToWorld(st, e[1].x, e[1].y);
+  const dx = far.x - zero.x, dy = far.y - zero.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const dirUnit = { x: dx / len, y: dy / len };
+  const three = { x: zero.x + dirUnit.x * 3 * PX_PER_CM, y: zero.y + dirUnit.y * 3 * PX_PER_CM };
+  const axis = { zero, dir: dirUnit };
+  startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'setsquare', axis);
+}
+
+function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axisOverride) {
   cancelGeoSegBuild();
 
-  const edge = geoNearestEdgeSegment(guideName, p0) || geoNearestEdgeSegment(guideName, p1);
-  if (!edge) return; // siguranță — dacă ghidajul a dispărut între timp, ieșim
+  let axis = axisOverride;
+  if (!axis) {
+    const edge = geoNearestEdgeSegment(guideName, p0) || geoNearestEdgeSegment(guideName, p1);
+    if (!edge) return; // siguranță — dacă ghidajul a dispărut între timp, ieșim
+    const dx = edge[1].x - edge[0].x, dy = edge[1].y - edge[0].y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Primul capăt al muchiei auto-detectate corespunde diviziunii 0 (așa
+    // sunt construite segmentele riglei/echerului în getGeoSegments).
+    axis = { zero: { x: edge[0].x, y: edge[0].y }, dir: { x: dx / len, y: dy / len } };
+  }
 
   const g = geoEl('g', { class: 'guide-segbuild' });
 
@@ -8667,14 +8821,23 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName) {
     fill: 'none', 'stroke-linecap': 'round' }));
   g.appendChild(cancelBtn);
 
+  // Etichete mici, câte una lângă fiecare punct, cu valoarea lui curentă în
+  // cm față de diviziunea 0 a ghidajului (poate fi și negativă).
+  const label0 = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    style: 'font-size:11px;font-weight:600;' });
+  g.appendChild(label0);
+  const label1 = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    style: 'font-size:11px;font-weight:600;' });
+  g.appendChild(label1);
+  // Eticheta cu distanța totală dintre cele două puncte (lungimea segmentului).
   const lenLabel = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
-    style: 'font-size:13px;font-weight:600;' });
+    style: 'font-size:12px;font-weight:700;' });
   g.appendChild(lenLabel);
 
   guideSvg.appendChild(g);
 
-  geoSegBuild = { kind, guideName, edge, p0: { x: p0.x, y: p0.y }, p1: { x: p1.x, y: p1.y },
-    color: strokeColor, size: strokeSize, g, preview, h0, h1, okBtn, cancelBtn, lenLabel };
+  geoSegBuild = { kind, guideName, axis, p0: { x: p0.x, y: p0.y }, p1: { x: p1.x, y: p1.y },
+    color: strokeColor, size: strokeSize, g, preview, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel };
 
   h0.addEventListener('pointerdown', ev => {
     ev.stopPropagation(); ev.preventDefault();
@@ -8697,7 +8860,7 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName) {
 
 function renderGeoSegBuild() {
   if (!geoSegBuild) return;
-  const { p0, p1, preview, h0, h1, okBtn, cancelBtn, lenLabel, size } = geoSegBuild;
+  const { p0, p1, preview, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel, size, axis } = geoSegBuild;
 
   preview.setAttribute('x1', p0.x); preview.setAttribute('y1', p0.y);
   preview.setAttribute('x2', p1.x); preview.setAttribute('y2', p1.y);
@@ -8706,13 +8869,29 @@ function renderGeoSegBuild() {
   h0.setAttribute('cx', p0.x); h0.setAttribute('cy', p0.y);
   h1.setAttribute('cx', p1.x); h1.setAttribute('cy', p1.y);
 
-  const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
   const dx = p1.x - p0.x, dy = p1.y - p0.y;
   const len = Math.hypot(dx, dy) || 1;
   // Vector normal pe segment, orientat preferențial spre partea de sus a
-  // ecranului, ca butoanele să nu fie acoperite de mâna care ține rigla.
+  // ecranului, ca etichetele/butoanele să nu fie acoperite de mâna care
+  // ține rigla.
   let nx = -dy / len, ny = dx / len;
   if (ny > 0) { nx = -nx; ny = -ny; }
+
+  // Valoarea (în cm) a fiecărui punct față de diviziunea 0 a ghidajului —
+  // poate fi și negativă, dacă punctul e tras dincolo de 0.
+  if (axis) {
+    const v0 = ((p0.x - axis.zero.x) * axis.dir.x + (p0.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
+    const v1 = ((p1.x - axis.zero.x) * axis.dir.x + (p1.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
+    const labelOffset = 20;
+    label0.setAttribute('x', p0.x + nx * labelOffset);
+    label0.setAttribute('y', p0.y + ny * labelOffset);
+    label0.textContent = formatCmValue(v0);
+    label1.setAttribute('x', p1.x + nx * labelOffset);
+    label1.setAttribute('y', p1.y + ny * labelOffset);
+    label1.textContent = formatCmValue(v1);
+  }
+
+  const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
   const offset = 38;
   const bx = mx + nx * offset, by = my + ny * offset;
   okBtn.setAttribute('transform', `translate(${bx - 24},${by})`);
@@ -8781,6 +8960,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
   <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
+  <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent afișat lângă fiecare punct (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). La echer, fiecare apăsare a creionului trece la următoarea dintre cele 3 muchii. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
 </ul>
 
 <h4>Rotirea corpurilor 3D</h4>
@@ -8809,7 +8989,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe laptop, cât timp modul plimbare e activ, poți plimba fișa și cu mouse-ul (click stânga + trage), iar Ctrl+rotița mouse-ului (sau pinch pe trackpad) mărește/micșorează fișa, centrat pe poziția cursorului. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -8879,6 +9059,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
   <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
+  <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number shown next to each point (it can go below 0, negative, if you drag a point past the 0 mark). On the set square, each tap of the pencil moves to the next of the 3 edges. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
 </ul>
 
 <h4>Rotating 3D solids</h4>
@@ -8907,7 +9088,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On the black board below, the pencil always stays the default tool.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On a laptop, while pan mode is on you can also pan the sheet with the mouse (left-click + drag), and Ctrl+scroll (or a trackpad pinch) zooms in/out centered on the cursor. On the black board below, the pencil always stays the default tool.</li>
 </ul>
 
 <h4>File and history</h4>
