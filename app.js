@@ -48,6 +48,7 @@ const UI_TEXT = {
   'Reprezintă grafic o funcție f(x)': 'Plot a function f(x)',
   'Corpuri geometrice': 'Geometric solids',
   'Figuri geometrice': 'Geometric figures',
+  'Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă': 'Vertical space — drag up/down to insert or remove space on the board',
   'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
   'Mijlocul unui segment (click pe un segment)': 'Midpoint of a segment (click on a segment)',
   'Selecție multiplă (pentru ecran tactil, fără tastă Shift)': 'Multi-select (for touchscreens, no Shift key needed)',
@@ -92,7 +93,7 @@ const UI_TEXT = {
   'Mută jos': 'Move down',
   'Mută stânga': 'Move left',
   'Mută dreapta': 'Move right',
-  'Trage pentru a redimensiona ferestrele': 'Drag to resize panels',
+  'Trage pentru a redimensiona ferestrele • atinge pentru a arăta bara de control a fișei PDF': 'Drag to resize panels • tap to show the PDF control bar',
   'Dimensiune font': 'Font size',
   'Aliniere stânga': 'Align left',
   'Centrat': 'Center',
@@ -139,6 +140,12 @@ const RO_EN_RULES = [
   [/^✓ Rotit \((-?\d+\.?\d*)°\)$/, '✓ Rotated ($1°)'],
   [/^✓ Rotit$/, '✓ Rotated'],
   [/^✓ Copiat$/, '✓ Copied'],
+  [/^✓ Spațiu vertical aplicat$/, '✓ Vertical space applied'],
+  [/^↕️ Trage în sus\/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu$/, '↕️ Drag up/down: everything below the starting point moves with you, inserting or removing space'],
+  [/^↕️ 0 cm$/, '↕️ 0 cm'],
+  [/^↓ \+(-?\d+\.?\d*) cm$/, '↓ +$1 cm'],
+  [/^↑ (-?\d+\.?\d*) cm$/, '↑ $1 cm'],
+  [/^✋ Plimbare cu degetul activă pe fișa PDF  \|  Bara de control dispare în 10s — atinge bara de separare ca să reapară$/, '✋ Finger pan active on the PDF sheet  |  The control bar hides in 10s — tap the divider bar to bring it back'],
   [/^✓ Stroke scalat$/, '✓ Stroke scaled'],
   [/^✓ (\d+) stroke-uri mutate$/, '✓ $1 strokes moved'],
   [/^✓ Riglă: (-?\d+\.?\d*) cm$/, '✓ Ruler: $1 cm'],
@@ -427,6 +434,13 @@ let rotatePolyIndex = -1;
 let rotatePolyOriginalStroke = null;
 let rotatePolyCenter = { x: 0, y: 0 };
 let rotatePolyStartX = 0;
+// Spațiu vertical (ca în Xournal++) — la tragere, tot ce se află sub
+// punctul de start (pe verticală) se deplasează cu aceeași cantitate,
+// inserând sau eliminând spațiu pe tablă.
+let isVSpaceDragging = false;
+let vspaceStartY = 0;
+let vspaceAffectedStrokes = []; // [{ stroke, before }] — before = snapshotStrokePosition(stroke)
+let vspaceAffectedImages = [];  // [{ img, before: {x,y} }]
 let dragStartMouseX = 0, dragStartMouseY = 0;
 let dragStartPositions = new Map();
 let moveUndoSnapshots = new Map();
@@ -621,7 +635,8 @@ function setBoardMode(isPdf) {
   document.getElementById('pdf-pane-divider').style.display = isPdf ? '' : 'none';
   if (isPdf) {
     // Tabla de jos devine o tablă neagră, pe care rămân disponibile
-    // toate uneltele, inclusiv rigla/echerul/raportorul/compasul.
+    // toate uneltele, inclusiv rigla/echerul/raportorul/compasul — aici
+    // creionul rămâne mereu unealta implicită, neschimbată.
     setBackgroundColor('#000000', 'bg-black');
 
     initPaneDrawCanvas('top');
@@ -630,6 +645,36 @@ function setBoardMode(isPdf) {
   activatePane('board');
   initCanvas();
   document.getElementById('btn-toggle-pdf-mode').classList.toggle('active', isPdf);
+}
+
+// ===== Panorama implicită + auto-ascunderea barei de control pe fereastra PDF =====
+// Doar în fereastra PDF (nu pe tabla neagră de jos): la încărcarea fișei,
+// activăm implicit modul de plimbare cu degetul (fișa e de obicei prea
+// mare pentru ecran), iar bara ei de control (săgeți/zoom/pagini) dispare
+// după 10 secunde de inactivitate, ca fișa să se vadă pe o suprafață mai
+// mare. Bara reapare doar la atingerea barei de separare PDF/tablă.
+let pdfPaneControlsHideTimer = null;
+function schedulePdfPaneControlsAutoHide() {
+  clearTimeout(pdfPaneControlsHideTimer);
+  if (!pdfModeActive) return;
+  pdfPaneControlsHideTimer = setTimeout(() => {
+    const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
+    if (bar) bar.classList.add('pdf-pane-controls-hidden');
+  }, 10000);
+}
+function showPdfPaneControlsTemporarily() {
+  const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
+  if (bar) bar.classList.remove('pdf-pane-controls-hidden');
+  schedulePdfPaneControlsAutoHide();
+}
+function activatePdfPaneDefaultPan() {
+  const pane = pdfPanes.top;
+  if (!pane) return;
+  pane.panMode = true;
+  const btn = document.getElementById('pdf-panmode-btn');
+  if (btn) btn.classList.add('active');
+  showPdfPaneControlsTemporarily();
+  showToast('✋ Plimbare cu degetul activă pe fișa PDF  |  Bara de control dispare în 10s — atinge bara de separare ca să reapară');
 }
 
 // ===== Încărcare fișă PDF =====
@@ -648,6 +693,7 @@ pdfFileInput.addEventListener('change', function(e) {
       document.getElementById('btn-toggle-pdf-mode').disabled = false;
       showToast('✓ Fișă PDF încărcată (' + pdfTotalPages + ' pagini)');
       setBoardMode(true);
+      activatePdfPaneDefaultPan();
     }).catch(function(err) {
       alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
     });
@@ -692,6 +738,7 @@ function performPdfCtlAction(btn) {
   const paneRoot = btn.closest('.pdf-pane');
   const name = paneRoot.dataset.pane;
   activatePane(name);
+  if (name === 'top') schedulePdfPaneControlsAutoHide();
   const pane = pdfPanes[name];
   const act = btn.dataset.act;
   const step = panePanStep(name);
@@ -832,6 +879,7 @@ attachPanePanZoom('top');
     dragging = true;
     divider.setPointerCapture(e.pointerId);
     e.preventDefault();
+    showPdfPaneControlsTemporarily();
   });
   divider.addEventListener('pointermove', function(e) {
     if (!dragging) return;
@@ -2428,6 +2476,43 @@ function restoreStrokePosition(stroke, snap) {
   }
 }
 
+// La fel ca restoreStrokePosition, dar translatează snapshot-ul cu (dx, dy)
+// în loc să-l restaureze identic — folosită pentru tragerea live a
+// instrumentului "Spațiu vertical" (fiecare mișcare pleacă mereu de la
+// poziția inițială + delta curent, nu se acumulează, ca să nu apară drift).
+function applyStrokePositionOffset(stroke, snap, dx, dy) {
+  if (!stroke || !snap) return;
+  if (stroke.type === 'midpoint') {
+    stroke.x = snap.x + dx; stroke.y = snap.y + dy;
+    if (snap.p1) stroke.p1 = { x: snap.p1.x + dx, y: snap.p1.y + dy };
+    if (snap.p2) stroke.p2 = { x: snap.p2.x + dx, y: snap.p2.y + dy };
+  } else if (stroke.type === 'text') {
+    stroke.x = snap.x + dx; stroke.y = snap.y + dy;
+  } else if (stroke.type === 'rect') {
+    stroke.x = snap.x + dx; stroke.y = snap.y + dy;
+  } else if (stroke.type === 'polygon' && snap.points) {
+    stroke.points = snap.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+  } else if (stroke.type === 'circle' || stroke.type === 'arc') {
+    stroke.cx = snap.cx + dx; stroke.cy = snap.cy + dy;
+  } else if (stroke.type === 'angle' && snap.vertex) {
+    stroke.vertex = { x: snap.vertex.x + dx, y: snap.vertex.y + dy };
+    stroke.ray1 = { x: snap.ray1.x + dx, y: snap.ray1.y + dy };
+    stroke.ray2 = { x: snap.ray2.x + dx, y: snap.ray2.y + dy };
+  } else if ((stroke.type === 'solid3d' || stroke.type === 'solidNet') && snap.visible) {
+    stroke.visible = snap.visible.map(seg => seg.map(p => ({ x: p.x + dx, y: p.y + dy })));
+    stroke.hidden = (snap.hidden || []).map(seg => seg.map(p => ({ x: p.x + dx, y: p.y + dy })));
+  } else if (stroke.type === 'function' && snap.segments) {
+    stroke.segments = snap.segments.map(seg => seg.map(p => ({ x: p.x + dx, y: p.y + dy })));
+    stroke.xAxis = (snap.xAxis || []).map(p => ({ x: p.x + dx, y: p.y + dy }));
+    stroke.yAxis = (snap.yAxis || []).map(p => ({ x: p.x + dx, y: p.y + dy }));
+    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
+  } else if (stroke.points && snap.points) {
+    stroke.points = snap.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+  }
+}
+
 function samePosition(a, b) {
   if (!a || !b) return a === b;
   return JSON.stringify(a) === JSON.stringify(b);
@@ -2460,6 +2545,36 @@ function handlePointerDown(e) {
 
   if (geoSegBuild) {
     confirmGeoSegBuild();
+    return;
+  }
+
+  if (tool === 'vspace') {
+    const p = pos(e);
+    vspaceStartY = p.y;
+    const page = getCurrentPage();
+    vspaceAffectedStrokes = [];
+    vspaceAffectedImages = [];
+    if (page) {
+      // Doar ce se află sub punctul de atingere se deplasează (ca în
+      // Xournal++) — folosim mijlocul fiecărui element, nu vârful de sus,
+      // ca includerea să fie iertătoare indiferent dacă atingi direct pe
+      // un desen sau într-un spațiu gol de deasupra lui.
+      page.strokes.forEach(s => {
+        const bbox = getStrokeBoundingBox(s);
+        if (bbox && (bbox.y + bbox.h / 2) >= vspaceStartY) {
+          vspaceAffectedStrokes.push({ stroke: s, before: snapshotStrokePosition(s) });
+        }
+      });
+      page.images.forEach(img => {
+        if ((img.y + (img.h || 0) / 2) >= vspaceStartY) {
+          vspaceAffectedImages.push({ img, before: { x: img.x, y: img.y } });
+        }
+      });
+    }
+    isVSpaceDragging = true;
+    drawC.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    showMathInfo('↕️ 0 cm');
     return;
   }
 
@@ -2728,6 +2843,16 @@ function handlePointerDown(e) {
 function handlePointerMove(e) {
   
   const p = pos(e);
+
+  if (tool === 'vspace' && isVSpaceDragging) {
+    const dy = p.y - vspaceStartY;
+    vspaceAffectedStrokes.forEach(item => applyStrokePositionOffset(item.stroke, item.before, 0, dy));
+    vspaceAffectedImages.forEach(item => { item.img.x = item.before.x; item.img.y = item.before.y + dy; });
+    redrawStrokes();
+    renderImages();
+    showMathInfo((dy >= 0 ? '↓ +' : '↑ ') + (dy / PX_PER_CM).toFixed(1) + ' cm');
+    return;
+  }
   
   if (tool === 'pen' && !geoActiveDrag) {
     const gd = nearestGuideDist(p);
@@ -3029,6 +3154,36 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp(e) {
+
+  if (tool === 'vspace' && isVSpaceDragging) {
+    isVSpaceDragging = false;
+    const page = getCurrentPage();
+    if (page) {
+      const strokeItems = [];
+      for (const item of vspaceAffectedStrokes) {
+        const after = snapshotStrokePosition(item.stroke);
+        if (!samePosition(item.before, after)) {
+          strokeItems.push({ stroke: item.stroke, before: item.before, after });
+        }
+      }
+      const imageItems = [];
+      for (const item of vspaceAffectedImages) {
+        if (item.img.x !== item.before.x || item.img.y !== item.before.y) {
+          imageItems.push({ img: item.img, before: item.before, after: { x: item.img.x, y: item.img.y } });
+        }
+      }
+      if (strokeItems.length > 0) undoStack.push({ type: 'move', page, items: strokeItems });
+      if (imageItems.length > 0) undoStack.push({ type: 'imageMove', page, items: imageItems });
+      if (strokeItems.length > 0 || imageItems.length > 0) {
+        redoStack = [];
+        showToast('✓ Spațiu vertical aplicat');
+      }
+    }
+    vspaceAffectedStrokes = [];
+    vspaceAffectedImages = [];
+    updateStatus();
+    return;
+  }
 
   if (tool === 'select' && isRotatingPolygon) {
     isRotatingPolygon = false;
@@ -3454,7 +3609,7 @@ function isMathTool() {
 // ================================================================
 
 function setTool(t) {
-  drawC.style.cursor = '';
+  drawC.style.cursor = (t === 'vspace') ? 'ns-resize' : '';
   if (tool === 'polygon' && drawing && currentStroke && currentStroke.length >= 3) {
     finalizePolygon();
   } else if (tool === 'polygon' && drawing) {
@@ -3478,6 +3633,9 @@ function setTool(t) {
   isRotatingPolygon = false;
   rotatePolyOriginalStroke = null;
   rotatePolyIndex = -1;
+  isVSpaceDragging = false;
+  vspaceAffectedStrokes = [];
+  vspaceAffectedImages = [];
   hideAngleReadout(0);
   dragStartPositions.clear();
   moveUndoSnapshots.clear();
@@ -3494,7 +3652,7 @@ function setTool(t) {
       }
   
   tool = t;
-  const allTools = ['btn-pen','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select'];
+  const allTools = ['btn-pen','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select','btn-vspace'];
   allTools.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -3515,6 +3673,8 @@ function setTool(t) {
     showMathInfo('🟨 Clickuri pentru puncte, dublu-click sau Enter pentru finalizare | Esc pentru anulare');
   } else if (t === 'rect') {
     showMathInfo('▭ Trage pentru a desena un dreptunghi/patrat  |  Shift = pătrat');
+  } else if (t === 'vspace') {
+    showMathInfo('↕️ Trage în sus/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu');
   }
 }
 
@@ -6913,6 +7073,7 @@ document.getElementById('btn-erase').onclick = () => setTool('erase');
 document.getElementById('btn-text').onclick = () => setTool('text');
 document.getElementById('btn-function').onclick = () => openFunctionModal();
 document.getElementById('btn-midpoint').onclick = () => setTool('midpoint');
+document.getElementById('btn-vspace').onclick = () => setTool('vspace');
 document.getElementById('btn-select').onclick = () => setTool('select');
 document.getElementById('btn-multiselect').onclick = () => {
   multiSelectMode = !multiSelectMode;
@@ -8617,6 +8778,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat; are și buton de rotire (colțul stânga-sus, albastru) și de multiplicare (colțul dreapta-jos, mov).</li>
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
+  <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
   <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
 </ul>
@@ -8647,7 +8809,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -8714,6 +8876,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Geometric figures</b> — insert a predefined 2D outline (triangles, parallelogram, rectangle, square, rhombus, trapezoids), centered on the board and ready to move/resize; it also has a rotate button (top-left corner, blue) and a duplicate button (bottom-right corner, purple).</li>
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
   <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
+  <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
   <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
 </ul>
@@ -8744,7 +8907,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On the black board below, the pencil always stays the default tool.</li>
 </ul>
 
 <h4>File and history</h4>

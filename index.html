@@ -50,7 +50,8 @@
     .pdf-pane.has-doc .pdf-pane-empty { display: none; }
     .pdf-pane-divider { height: 20px; flex-shrink: 0; background: #3a3a42; cursor: row-resize; touch-action: none; position: relative; }
     .pdf-pane-divider::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 3px; background: #6a6a75; border-radius: 2px; transform: translate(-50%, -50%); }
-    .pdf-pane-controls { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; background: rgba(20,20,24,0.82); padding: 4px 6px; border-radius: 10px; z-index: 6; }
+    .pdf-pane-controls { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; background: rgba(20,20,24,0.82); padding: 4px 6px; border-radius: 10px; z-index: 6; transition: opacity 0.35s ease, transform 0.35s ease; }
+    .pdf-pane-controls.pdf-pane-controls-hidden { opacity: 0; transform: translateX(-50%) translateY(14px); pointer-events: none; }
     .pdf-pane-pagenum { color: #eee; font-size: 11px; padding: 0 4px; min-width: 30px; text-align: center; }
     .pdf-ctl-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.25); margin: 0 3px; }
     button.pdf-ctl { background: rgba(255,255,255,0.1); border: none; border-radius: 6px; color: #fff; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; touch-action: manipulation; }
@@ -464,7 +465,7 @@
         <button class="pdf-ctl" data-act="right" title="Mută dreapta"><i class="ti ti-arrow-right"></i></button>
       </div>
     </div>
-    <div class="pdf-pane-divider" id="pdf-pane-divider" title="Trage pentru a redimensiona ferestrele" style="display:none;"></div>
+    <div class="pdf-pane-divider" id="pdf-pane-divider" title="Trage pentru a redimensiona ferestrele • atinge pentru a arăta bara de control a fișei PDF" style="display:none;"></div>
 
     <div id="canvas-wrap">
       <canvas id="bg-canvas"></canvas>
@@ -564,6 +565,7 @@
       <button class="tool select-tool" id="btn-select"><i class="ti ti-select"></i></button>
       <button class="tool" id="btn-multiselect" title="Selecție multiplă (pentru ecran tactil, fără tastă Shift)"><i class="ti ti-stack-2"></i></button>
       <button class="tool" id="btn-panmode" title="Plimbă tabla cu degetul (suprafață infinită)"><i class="ti ti-hand-stop"></i></button>
+      <button class="tool" id="btn-vspace" title="Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă"><i class="ti ti-arrows-vertical"></i></button>
       <button class="tool" id="btn-recenter-board" title="Revino la poziția inițială a tablei"><i class="ti ti-viewfinder"></i></button>
     </div>
     <div class="sep"></div>
