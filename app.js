@@ -7897,18 +7897,23 @@ function buildGeoSetsquare() {
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
-  const pencilBtn = geoBuildPencilButton();
-  g.appendChild(pencilBtn);
+  // Câte un creion lângă fiecare dintre cele 3 muchii — un singur tap,
+  // exact pe muchia dorită, fără să mai fie nevoie de clicuri repetate
+  // pentru a ajunge la ea (cum era înainte, cu un singur creion ciclic).
+  const pencilBtns = [geoBuildPencilButton(), geoBuildPencilButton(), geoBuildPencilButton()];
+  pencilBtns.forEach((btn, i) => {
+    g.appendChild(btn);
+    btn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+    btn.addEventListener('click', ev => { ev.stopPropagation(); startSetsquarePencilSeg(i); });
+  });
   guideSvg.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn };
-  pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startSetsquarePencilSeg(); });
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandle, pencilBtns };
   renderGeoSetsquare();
 }
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandle, pencilBtn } = geoGroups.setsquare;
+  const { body, ticks, rotateHandle, resizeHandle, pencilBtns } = geoGroups.setsquare;
   const S = st.size;
   body.setAttribute('points', `0,0 ${S},0 0,${-S}`);
 
@@ -7935,10 +7940,19 @@ function renderGeoSetsquare() {
   rotateHandle.setAttribute('cy', -24);
   resizeHandle.setAttribute('x', S - 8);
   resizeHandle.setAttribute('y', -8);
-  // Butonul-creion — în interiorul triunghiului; un click pornește un
-  // segment de precizie pe muchia curentă din ciclul celor 3 (bază,
-  // catetă verticală, ipotenuză), trecând la următoarea la fiecare click.
-  pencilBtn.setAttribute('transform', `translate(${S * 0.3},${-S * 0.3})`);
+  // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în afara
+  // triunghiului (pe direcția normalei către exterior), ca să nu acopere
+  // gradațiile și să fie clar cărei muchii îi aparțin.
+  const off = 20;
+  const mids = [
+    { x: S / 2, y: 0, nx: 0, ny: 1 },                                  // bază orizontală
+    { x: 0, y: -S / 2, nx: -1, ny: 0 },                                // catetă verticală
+    { x: S / 2, y: -S / 2, nx: Math.SQRT1_2, ny: -Math.SQRT1_2 }       // ipotenuză
+  ];
+  pencilBtns.forEach((btn, i) => {
+    const m = mids[i];
+    btn.setAttribute('transform', `translate(${m.x + m.nx * off},${m.y + m.ny * off})`);
+  });
 }
 
 // ---------------- RAPORTOR ----------------
@@ -8736,10 +8750,6 @@ function geoNearestEdgeSegment(name, p) {
 
 let geoSegBuild = null;
 
-// Ciclează cele 3 muchii ale echerului (bază, catetă verticală, ipotenuză)
-// la fiecare apăsare a creionului.
-let geoSetsquarePencilEdge = 0;
-
 // Tipul de linie desenată de creion urmează unealta curentă selectată:
 // "Linie întreruptă" -> linie întreruptă, altfel -> linie continuă.
 function geoPencilSegKind() {
@@ -8759,7 +8769,7 @@ function startRulerPencilSeg() {
   startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'ruler', axis);
 }
 
-function startSetsquarePencilSeg() {
+function startSetsquarePencilSeg(edgeIndex) {
   confirmGeoSegBuild();
   const st = geoGuides.setsquare;
   const S = st.size;
@@ -8769,8 +8779,7 @@ function startSetsquarePencilSeg() {
     [{ x: 0, y: 0 }, { x: 0, y: -S }],  // catetă verticală
     [{ x: S, y: 0 }, { x: 0, y: -S }]   // ipotenuză
   ];
-  const e = edgesLocal[geoSetsquarePencilEdge];
-  geoSetsquarePencilEdge = (geoSetsquarePencilEdge + 1) % 3;
+  const e = edgesLocal[edgeIndex];
 
   const zero = geoLocalToWorld(st, e[0].x, e[0].y);
   const far = geoLocalToWorld(st, e[1].x, e[1].y);
@@ -8960,7 +8969,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
   <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
-  <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent afișat lângă fiecare punct (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). La echer, fiecare apăsare a creionului trece la următoarea dintre cele 3 muchii. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
+  <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent și distanța totală afișate lângă puncte (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). Echerul are câte un creion lângă fiecare dintre cele 3 muchii (bază, catetă, ipotenuză) — atingi direct pe cel de care ai nevoie. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
 </ul>
 
 <h4>Rotirea corpurilor 3D</h4>
@@ -9059,7 +9068,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
   <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
-  <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number shown next to each point (it can go below 0, negative, if you drag a point past the 0 mark). On the set square, each tap of the pencil moves to the next of the 3 edges. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
+  <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number plus total distance shown next to the points (it can go below 0, negative, if you drag a point past the 0 mark). The set square has one pencil next to each of its 3 edges (base, leg, hypotenuse) — just tap the one you need. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
 </ul>
 
 <h4>Rotating 3D solids</h4>
