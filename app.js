@@ -48,6 +48,7 @@ const UI_TEXT = {
   'Reprezintă grafic o funcție f(x)': 'Plot a function f(x)',
   'Corpuri geometrice': 'Geometric solids',
   'Figuri geometrice': 'Geometric figures',
+  'Lipire de rețea — elementele desenate se lipesc de nodurile caroiajului': 'Snap to grid — drawn elements snap to the grid nodes',
   'Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă': 'Vertical space — drag up/down to insert or remove space on the board',
   'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
   'Mijlocul unui segment (click pe un segment)': 'Midpoint of a segment (click on a segment)',
@@ -140,6 +141,9 @@ const RO_EN_RULES = [
   [/^✓ Rotit \((-?\d+\.?\d*)°\)$/, '✓ Rotated ($1°)'],
   [/^✓ Rotit$/, '✓ Rotated'],
   [/^✓ Copiat$/, '✓ Copied'],
+  [/^✓ Lipire de rețea activă — s-a activat și caroiajul, ca să vezi nodurile$/, '✓ Snap to grid is on — the grid was also turned on so you can see the nodes'],
+  [/^✓ Lipire de rețea activă$/, '✓ Snap to grid is on'],
+  [/^Lipire de rețea dezactivată$/, 'Snap to grid turned off'],
   [/^✓ Spațiu vertical aplicat$/, '✓ Vertical space applied'],
   [/^↕️ Trage în sus\/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu$/, '↕️ Drag up/down: everything below the starting point moves with you, inserting or removing space'],
   [/^↕️ 0 cm$/, '↕️ 0 cm'],
@@ -400,6 +404,7 @@ let protractorPhase = 0;
 let bgColor = '#000000';
 let boardRuling = 'none'; // 'none' | 'grid' | 'dictando' | 'music'
 let rulingSize = 28; // distanța de bază (px) dintre liniile/pătratele liniaturii
+let snapToGridEnabled = false; // când e activ, elementele desenate se lipesc de nodurile caroiajului
 let rulingColor = '#ffffff'; // culoarea liniaturii; implicit alb, fiindcă tabla pornește cu fundal negru
 let rulingOpacity = 0.5; // opacitatea liniaturii (0-1); implicit 50%
 
@@ -1911,6 +1916,20 @@ const pos = e => {
   const r = drawC.getBoundingClientRect();
   let x = e.clientX - r.left, y = e.clientY - r.top;
   if (activeSurface === 'board') { x -= boardPanX; y -= boardPanY; }
+  // Lipire de rețea (snap to grid): rotunjim la cel mai apropiat nod al
+  // caroiajului, cu pasul liniaturii curente. NU se aplică la desenul liber
+  // (pen/erase, care ar deveni în trepte), la selecție/mutare/redimensionare
+  // (ar sări brusc între noduri), la mijlocul unui segment (caută un stroke
+  // existent, nu plasează un punct nou) sau cât timp se trage un mâner de
+  // ghidaj (riglă/echer/raportor/compas) ori o imagine.
+  if (snapToGridEnabled && !geoActiveDrag && !isDraggingSelected && !isResizingStroke &&
+      !isRotatingSolid && !isRotatingPolygon && !isImageDrag && !resizeImageId &&
+      tool !== 'pen' && tool !== 'erase' && tool !== 'select' &&
+      tool !== 'midpoint' && tool !== 'vspace') {
+    const step = rulingSize || 28;
+    x = Math.round(x / step) * step;
+    y = Math.round(y / step) * step;
+  }
   return { x, y };
 };
 
@@ -7178,6 +7197,16 @@ document.getElementById('bg-blue').onclick = () => setBackgroundColor('#add8e6',
 document.getElementById('bg-green').onclick = () => setBackgroundColor('#90ee90', 'bg-green');
 document.getElementById('ruling-none').onclick = () => setBoardRuling('none', 'ruling-none');
 document.getElementById('ruling-grid').onclick = () => setBoardRuling('grid', 'ruling-grid');
+document.getElementById('btn-snap-grid').onclick = () => {
+  snapToGridEnabled = !snapToGridEnabled;
+  document.getElementById('btn-snap-grid').classList.toggle('active', snapToGridEnabled);
+  if (snapToGridEnabled && boardRuling !== 'grid') {
+    setBoardRuling('grid', 'ruling-grid');
+    showToast('✓ Lipire de rețea activă — s-a activat și caroiajul, ca să vezi nodurile');
+  } else {
+    showToast(snapToGridEnabled ? '✓ Lipire de rețea activă' : 'Lipire de rețea dezactivată');
+  }
+};
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
 document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
@@ -9012,6 +9041,7 @@ const HELP_CONTENT_HTML = `
 <h4>Pagini și fundal</h4>
 <p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
 <p>Din grupul alăturat de butoane poți alege și o liniatură pentru tablă: <b>caroiaj</b> (ca în caietul de matematică), <b>dictando</b> (linii ca în caietul de scriere/dictando) sau <b>portativ</b> (ca în caietul de muzică). Cu butoanele −/+ reglezi mărimea pătratelor/liniilor și opacitatea lor, iar cu selectorul de culoare alegi manual culoarea liniaturii — implicit e alb, la 50% opacitate, potrivit fundalului negru al tablei.</p>
+<p><b>Lipire de rețea</b> — butonul de lângă liniatură activează lipirea de nodurile caroiajului: capetele liniei/liniei întrerupte/săgeții, colțurile dreptunghiului, centrul cercului și vârfurile poligonului "sar" automat la cel mai apropiat nod, la pasul curent al caroiajului (reglabil cu −/+). Nu afectează desenul liber (creion/radieră) și nici mutarea/redimensionarea elementelor deja existente. Dacă activezi lipirea fără caroiaj vizibil, acesta se activează automat, ca să vezi nodurile.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -9111,6 +9141,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Pages and background</h4>
 <p>Navigate between pages with the corner arrows, add or delete pages, and change the board's background color from the palette at the bottom right of the toolbar.</p>
 <p>From the nearby button group you can also pick a ruling for the board: <b>grid</b> (like a math notebook), <b>ruled lines</b> (like a writing notebook) or <b>staff lines</b> (like a music notebook). Use the −/+ buttons to adjust the size of the squares/lines and their opacity, and use the color picker to manually choose the ruling color — it defaults to white at 50% opacity, suited to the board's black background.</p>
+<p><b>Snap to grid</b> — the button next to the ruling turns on snapping to the grid nodes: the ends of a line/dashed line/arrow, the corners of a rectangle, the center of a circle, and polygon vertices automatically "jump" to the nearest node, at the current grid spacing (adjustable with −/+). It doesn't affect freehand drawing (pencil/eraser) or moving/resizing already-placed elements. If you turn snapping on without the grid visible, the grid turns on automatically so you can see the nodes.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `
