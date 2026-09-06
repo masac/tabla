@@ -477,6 +477,7 @@ function makePdfPane() {
     undoStack: [], redoStack: [],
     pageNum: 1, zoom: 1, panX: 0, panY: 0,
     canvasW: 0, canvasH: 0,
+    finalScale: 1, // scala reală curentă a bitmap-ului PDF (baseScale × zoom) — folosită ca să convertim corect coordonatele stroke-urilor la pan/zoom
     panMode: false // când e activ, un singur deget plimbă fișa (nu mai desenează)
   };
 }
@@ -496,6 +497,21 @@ function getCurrentPage() {
 // ================================================================
 // FIȘĂ PDF - MOTOR FERESTRE DUALE (sus / jos)
 // ================================================================
+
+// Calculează transformarea curentă (scală + decalaj în pixeli ecran) dintre
+// coordonatele "conținut PDF" (independente de pan/zoom — în care sunt
+// stocate stroke-urile desenate pe fereastra PDF) și pixelii de ecran ai
+// containerului ferestrei, la starea curentă de pan/zoom.
+function getPaneContentTransform(name) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  const rect = els.root.getBoundingClientRect();
+  const w = els.bg.width || 0, h = els.bg.height || 0;
+  const centerX = (rect.width - w) / 2;
+  const centerY = Math.max(0, (rect.height - h) / 2);
+  const scale = pane.finalScale || 1;
+  return { scale, offX: centerX + pane.panX, offY: centerY + pane.panY };
+}
 
 function getPaneEls(name) {
   const root = document.getElementById('pdf-pane-' + name);
@@ -569,9 +585,7 @@ function initPaneDrawCanvas(name) {
     ctx = els.draw.getContext('2d', { willReadFrequently: true });
     overlayCtx = els.overlay.getContext('2d');
     selCtx = els.select.getContext('2d');
-    ctx.resetTransform(); ctx.scale(dpr, dpr);
-    overlayCtx.resetTransform(); overlayCtx.scale(dpr, dpr);
-    selCtx.resetTransform(); selCtx.scale(dpr, dpr);
+    applyCanvasPanTransform();
     redrawStrokes();
     drawSelectionHighlights();
   }
@@ -596,6 +610,7 @@ function renderPdfPane(name) {
     // vertical - de-asta există pan sus/jos, ca să vezi câte un exercițiu).
     const baseScale = Math.min(maxW / viewport.width, 4.0);
     const finalScale = Math.max(0.1, baseScale * pane.zoom);
+    pane.finalScale = finalScale;
     const scaledViewport = page.getViewport({ scale: finalScale });
     const newW = Math.round(scaledViewport.width);
     const newH = Math.round(scaledViewport.height);
@@ -632,6 +647,17 @@ function updatePdfPanePosition(name) {
   const centerX = (rect.width - w) / 2;
   const centerY = Math.max(0, (rect.height - h) / 2);
   els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
+  // Stroke-urile desenate pe fereastra PDF sunt stocate în coordonate
+  // "conținut" (independente de pan/zoom) — de fiecare dată când fișa se
+  // mișcă sau se scalează, trebuie reactualizată transformarea canvas-ului
+  // de cerneală și redesenate, ca adnotările să rămână lipite de conținutul
+  // PDF-ului (poziție păstrată la pan, mărime adaptată la zoom).
+  if (activeSurface === name) {
+    applyCanvasPanTransform();
+    redrawStrokes();
+    drawSelectionHighlights();
+    renderImages();
+  }
 }
 
 function setBoardMode(isPdf) {
@@ -820,6 +846,7 @@ function attachPanePanZoom(name) {
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
       if (e.pointerType === 'mouse' && e.button !== 0) return; // doar click stânga
       if (pane && pane.panMode) {
+        activatePane(name);
         pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
         singleFingerPan = true;
         lastMid = { x: e.clientX, y: e.clientY };
@@ -831,6 +858,7 @@ function attachPanePanZoom(name) {
     if (pts.size === 1 && pane && pane.panMode) {
       // Mod plimbare cu un deget activat explicit din bara de control —
       // un singur deget mișcă fișa în loc să deseneze.
+      activatePane(name);
       singleFingerPan = true;
       lastMid = { x: e.clientX, y: e.clientY };
     } else if (pts.size === 2) {
@@ -891,6 +919,7 @@ function attachPanePanZoom(name) {
   root.addEventListener('wheel', function(e) {
     if (!e.ctrlKey || !pdfDoc) return;
     e.preventDefault();
+    activatePane(name);
     const factor = Math.exp(-e.deltaY * 0.0015);
     zoomPaneAtPoint(name, factor, e.clientX, e.clientY);
   }, { passive: false });
@@ -1397,11 +1426,21 @@ function hideAngleReadout(duration = 4000) {
 }
 
 function applyCanvasPanTransform() {
-  const px = (activeSurface === 'board') ? boardPanX : 0;
-  const py = (activeSurface === 'board') ? boardPanY : 0;
-  [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => {
-    cx.setTransform(DPR, 0, 0, DPR, px * DPR, py * DPR);
-  });
+  if (activeSurface === 'board') {
+    [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => {
+      cx.setTransform(DPR, 0, 0, DPR, boardPanX * DPR, boardPanY * DPR);
+    });
+  } else if (pdfPanes[activeSurface]) {
+    const t = getPaneContentTransform(activeSurface);
+    [ctx, overlayCtx, selCtx].forEach(cx => {
+      cx.setTransform(t.scale * DPR, 0, 0, t.scale * DPR, t.offX * DPR, t.offY * DPR);
+    });
+    bgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  } else {
+    [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => {
+      cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    });
+  }
 }
 
 function initCanvas() {
@@ -1915,7 +1954,17 @@ function updateStatus() {
 const pos = e => {
   const r = drawC.getBoundingClientRect();
   let x = e.clientX - r.left, y = e.clientY - r.top;
-  if (activeSurface === 'board') { x -= boardPanX; y -= boardPanY; }
+  if (activeSurface === 'board') {
+    x -= boardPanX; y -= boardPanY;
+  } else if (pdfPanes[activeSurface]) {
+    // Fereastra PDF: convertim din pixeli de ecran în coordonate "conținut
+    // PDF" (independente de pan/zoom-ul curent al fișei), ca stroke-urile
+    // să rămână lipite de conținutul PDF-ului la panoramare și să se
+    // scaleze corect la zoom — nu la poziția/mărimea lor pe ecran.
+    const t = getPaneContentTransform(activeSurface);
+    x = (x - t.offX) / t.scale;
+    y = (y - t.offY) / t.scale;
+  }
   // Lipire de rețea (snap to grid): rotunjim la cel mai apropiat nod al
   // caroiajului, cu pasul liniaturii curente. NU se aplică la desenul liber
   // (pen/erase, care ar deveni în trepte), la selecție/mutare/redimensionare
@@ -9027,7 +9076,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe laptop, cât timp modul plimbare e activ, poți plimba fișa și cu mouse-ul (click stânga + trage), iar Ctrl+rotița mouse-ului (sau pinch pe trackpad) mărește/micșorează fișa, centrat pe poziția cursorului. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe laptop, cât timp modul plimbare e activ, poți plimba fișa și cu mouse-ul (click stânga + trage), iar Ctrl+rotița mouse-ului (sau pinch pe trackpad) mărește/micșorează fișa, centrat pe poziția cursorului. Ce desenezi peste fișă rămâne lipit de conținutul PDF-ului: își păstrează poziția la panoramare și se scalează odată cu zoom-ul. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -9127,7 +9176,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On a laptop, while pan mode is on you can also pan the sheet with the mouse (left-click + drag), and Ctrl+scroll (or a trackpad pinch) zooms in/out centered on the cursor. On the black board below, the pencil always stays the default tool.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On a laptop, while pan mode is on you can also pan the sheet with the mouse (left-click + drag), and Ctrl+scroll (or a trackpad pinch) zooms in/out centered on the cursor. Anything you draw over the sheet stays attached to the PDF content: it keeps its position when panning and scales with the zoom. On the black board below, the pencil always stays the default tool.</li>
 </ul>
 
 <h4>File and history</h4>
