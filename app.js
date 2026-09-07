@@ -383,8 +383,8 @@ function panBoardBy(dx, dy) {
 // #guide-svg primește aceeași translatare CSS, ca instrumentele să se
 // deplaseze împreună cu restul conținutului.
 function updateGuideSvgPan() {
-  const el = document.getElementById('guide-svg');
-  if (el) el.style.transform = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px)` : 'none';
+  const el = document.getElementById('guide-pan-group');
+  if (el) el.setAttribute('transform', (activeSurface === 'board') ? `translate(${boardPanX},${boardPanY})` : 'translate(0,0)');
 }
 let ctx = drawC.getContext('2d');
 let overlayCtx = overlayC.getContext('2d');
@@ -7903,6 +7903,14 @@ document.addEventListener('fullscreenchange', () => {
 // ================================================================
 
 const guideSvg = document.getElementById('guide-svg');
+// Toate instrumentele geometrice se adaugă în acest grup interior, nu direct
+// în <svg>. Motiv: transformarea CSS pusă direct pe elementul <svg> rădăcină
+// îi mișcă și clipping-ul implicit (fereastra lui de decupare), tăind orice
+// iese din cadrul deplasat — de-aia rigla "dispărea" parțial la panoramare.
+// Translatând doar acest <g> interior, <svg>-ul rămâne fix pe ecran (fără
+// nicio decupare nouă), iar conținutul lui se mișcă normal, ca o cameră.
+const guidePanGroup = geoEl('g', { id: 'guide-pan-group' });
+guideSvg.appendChild(guidePanGroup);
 const GUIDE_SNAP_DIST = 14;
 const PX_PER_CM = 50;
 const PX_PER_MM = PX_PER_CM / 10;
@@ -8013,7 +8021,7 @@ function buildGeoRuler() {
   g.appendChild(pencilBtn);
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
-  guideSvg.appendChild(g);
+  guidePanGroup.appendChild(g);
   geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn, closeBtn };
   pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
@@ -8084,7 +8092,7 @@ function buildGeoSetsquare() {
   });
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
-  guideSvg.appendChild(g);
+  guidePanGroup.appendChild(g);
   geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn };
 
   resizeHandleW.addEventListener('pointerdown', e => {
@@ -8218,7 +8226,7 @@ function buildGeoProtractor() {
   arcRadiusHandle.setAttribute('cy', 25);
   g.appendChild(arcRadiusHandle);
 
-  const arcBuildBox = geoEl('rect', { x: -138, y: -78, width: 18, height: 18, rx: 3,
+  const arcBuildBox = geoEl('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3,
     fill: '#ffffff', stroke: '#2d9d4f', 'stroke-width': 1.5, style: 'cursor:pointer; pointer-events:auto;' });
   arcBuildBox.setAttribute('data-checked', '0');
   g.appendChild(arcBuildBox);
@@ -8241,7 +8249,7 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
-  guideSvg.appendChild(g);
+  guidePanGroup.appendChild(g);
   geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, arcLabel, arcHandle, arcRadiusHandle, arcBuildBox, arcBuildCheck };
   renderGeoProtractor();
 }
@@ -8259,7 +8267,7 @@ function toggleProtractorArcCheckbox() {
   if (!st.arcAngle || st.arcAngle < 1) { showToast('⚠ Setați mai întâi un unghi pe raportor'); return; }
   arcBuildBox.setAttribute('data-checked', '1');
   arcBuildBox.setAttribute('fill', '#2d9d4f');
-  arcBuildCheck.setAttribute('d', 'M -133 -69 L -130 -65 L -124 -74');
+  arcBuildCheck.setAttribute('d', 'M -4 0 L -1 4 L 5 -5');
   finalizeProtractorArc(true);
   setTimeout(() => {
     arcBuildBox.setAttribute('data-checked', '0');
@@ -8328,8 +8336,13 @@ function renderGeoProtractor() {
   closeBtn.setAttribute('transform', `translate(${-R - 4},0)`);
 
   const aRad = st.arcAngle * Math.PI / 180;
-  const hx = arcR * Math.cos(aRad);
-  const hy = -arcR * Math.sin(aRad);
+  // Mânerul verde (unghi) stă la o rază FIXĂ, în exteriorul raportorului
+  // (raza raportorului + 0,5cm) — independent de raza arcului afișat (care
+  // rămâne controlată separat, de mânerul portocaliu). Astfel mânerul verde
+  // e mereu ușor de apucat, indiferent cât de mic/mare e arcul curent.
+  const handleR = R + PX_PER_CM / 2;
+  const hx = handleR * Math.cos(aRad);
+  const hy = -handleR * Math.sin(aRad);
   
   let markD = `M ${arcR} 0 `;
   const steps = Math.max(1, Math.round(st.arcAngle / 3));
@@ -8393,7 +8406,7 @@ function buildGeoCompass() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('compass'); });
 
-  guideSvg.appendChild(g);
+  guidePanGroup.appendChild(g);
   geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn };
   renderGeoCompass();
 }
@@ -9109,7 +9122,7 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
     style: 'font-size:12px;font-weight:700;' });
   g.appendChild(lenLabel);
 
-  guideSvg.appendChild(g);
+  guidePanGroup.appendChild(g);
 
   geoSegBuild = { kind, guideName, axis, p0: { x: p0.x, y: p0.y }, p1: { x: p1.x, y: p1.y },
     color: strokeColor, size: strokeSize, g, preview, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel };
@@ -9207,7 +9220,7 @@ function animateGeoPencilDraw(p0, p1) {
   pencil.appendChild(geoEl('line', { x1: -15, y1: -3.5, x2: -15, y2: 3.5, stroke: '#00000022', 'stroke-width': 1 }));
   pencil.appendChild(geoEl('path', { d: 'M 5 -3.5 L 15 0 L 5 3.5 Z', fill: '#e8c88a' }));
   pencil.appendChild(geoEl('path', { d: 'M 11 -1.8 L 17 0 L 11 1.8 Z', fill: '#3a2a1a' }));
-  guideSvg.appendChild(pencil);
+  guidePanGroup.appendChild(pencil);
   const duration = 1400;
   const start = performance.now();
   function step(now) {
