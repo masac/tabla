@@ -370,9 +370,21 @@ function panBoardBy(dx, dy) {
   boardPanY += dy;
   applyCanvasPanTransform();
   applyImagesPanTransform();
+  updateGuideSvgPan();
   drawBg();
   redrawStrokes();
   drawSelectionHighlights();
+}
+
+// Instrumentele geometrice (riglă/echer/raportor/compas) sunt desenate în
+// aceleași coordonate "lume" ca desenele de pe tablă, dar trăiesc într-un
+// element SVG separat (#guide-svg), care nu avea niciun transform de
+// panoramare — de-aia rămâneau pe loc când se panorama tabla. Acum
+// #guide-svg primește aceeași translatare CSS, ca instrumentele să se
+// deplaseze împreună cu restul conținutului.
+function updateGuideSvgPan() {
+  const el = document.getElementById('guide-svg');
+  if (el) el.style.transform = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px)` : 'none';
 }
 let ctx = drawC.getContext('2d');
 let overlayCtx = overlayC.getContext('2d');
@@ -538,6 +550,7 @@ function activatePane(name) {
     hideSelectionInfo();
   }
   activeSurface = name;
+  updateGuideSvgPan();
 
   document.querySelectorAll('.pdf-pane').forEach(p => p.classList.remove('active-pane'));
 
@@ -1452,6 +1465,7 @@ function initCanvas() {
   });
   applyCanvasPanTransform();
   applyImagesPanTransform();
+  updateGuideSvgPan();
   drawBg(); 
   redrawStrokes(); 
   updateStatus(); 
@@ -7216,6 +7230,7 @@ document.getElementById('btn-recenter-board').onclick = () => {
   boardPanX = 0; boardPanY = 0;
   applyCanvasPanTransform();
   applyImagesPanTransform();
+  updateGuideSvgPan();
   drawBg(); redrawStrokes(); drawSelectionHighlights();
   showToast(LANG === 'en' ? '✓ Board recentered' : '✓ Tabla a revenit la poziția inițială');
 };
@@ -7790,6 +7805,28 @@ document.addEventListener('keydown', e => {
     return;
   }
 
+  // Deplasarea cu săgețile a instrumentului geometric activ (riglă, echer,
+  // raportor, compas) — utilă pe calculator. Are prioritate față de
+  // navigarea de pagini, dar doar cât timp un instrument e vizibil și a
+  // fost atins recent.
+  if (geoLastActiveGuide && geoGuides[geoLastActiveGuide] && geoGuides[geoLastActiveGuide].visible &&
+      (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const name = geoLastActiveGuide;
+    const st = geoGuides[name];
+    const step = e.shiftKey ? 20 : 4;
+    if (e.key === 'ArrowLeft') st.x -= step;
+    else if (e.key === 'ArrowRight') st.x += step;
+    else if (e.key === 'ArrowUp') st.y -= step;
+    else if (e.key === 'ArrowDown') st.y += step;
+    if (name === 'ruler') renderGeoRuler();
+    else if (name === 'setsquare') renderGeoSetsquare();
+    else if (name === 'protractor') renderGeoProtractor();
+    else if (name === 'compass') renderGeoCompass();
+    if (name !== 'compass') updateGeoTransform(name);
+    return;
+  }
+
   if (e.key === 'ArrowLeft') { e.preventDefault(); prevPage(); return; }
   if (e.key === 'ArrowRight') { e.preventDefault(); nextPage(); return; }
   
@@ -7881,7 +7918,7 @@ const GEO_PEN_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 let lastSnapGuideName = null;
 const geoGuides = {
   ruler:      { visible: false, x: 160, y: 160, angle: 0,             length: 700, thickness: 50 },
-  setsquare:  { visible: false, x: 520, y: 560, angle: 0,             size: 420 },
+  setsquare:  { visible: false, x: 520, y: 560, angle: 0,             width: 420, height: 420 },
   protractor: { visible: false, x: 360, y: 600, angle: 0,             radius: 260, arcAngle: 60, arcRadiusScale: 0.45 },
   compass:    { visible: false, x: 520, y: 380, angle: -Math.PI * 0.65, radius: 160 }
 };
@@ -7908,6 +7945,58 @@ function geoBuildPencilButton() {
   return g;
 }
 
+// ---------------- ICONIȚE COMUNE (inspirate din controalele OpenBoard) ----------------
+
+// Buton rotund negru cu X — închide instrumentul (ascunde ghidajul și
+// dezactivează butonul corespunzător din bara de unelte).
+function geoBuildCloseButton() {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 11, fill: '#222222', stroke: '#ffffff', 'stroke-width': 1.5 }));
+  g.appendChild(geoEl('path', { d: 'M -4 -4 L 4 4 M 4 -4 L -4 4',
+    stroke: '#ffffff', 'stroke-width': 2, 'stroke-linecap': 'round' }));
+  return g;
+}
+
+// Mâner de rotire (cerc albastru cu o mică săgeată circulară), folosit la
+// riglă/echer/raportor — vizual mai clar decât un cerc simplu.
+function geoBuildRotateHandle() {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 10, fill: '#0055cc', stroke: '#ffffff', 'stroke-width': 1.5 }));
+  g.appendChild(geoEl('path', { d: 'M -4 -1 A 4.2 4.2 0 1 1 -4 1',
+    fill: 'none', stroke: '#ffffff', 'stroke-width': 1.4, 'stroke-linecap': 'round' }));
+  g.appendChild(geoEl('path', { d: 'M -4 1 L -6.6 1.4 L -5.2 3.6 Z', fill: '#ffffff' }));
+  return g;
+}
+
+// Buton de resetare la orizontală (unghi = 0) — cerc gri cu o mică săgeată.
+function geoBuildResetHorizButton() {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 11, fill: '#555555', stroke: '#ffffff', 'stroke-width': 1.5 }));
+  g.appendChild(geoEl('line', { x1: -5, y1: 0, x2: 4, y2: 0, stroke: '#ffffff', 'stroke-width': 2, 'stroke-linecap': 'round' }));
+  g.appendChild(geoEl('path', { d: 'M 1.5 -3 L 5 0 L 1.5 3', fill: 'none',
+    stroke: '#ffffff', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  return g;
+}
+
+// Buton de oglindire (flip) orizontal/vertical — pentru echer, ca să poți
+// alege rapid în ce colț stă unghiul drept.
+function geoBuildFlipButton(horizontal) {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 10, fill: '#7a5cff', stroke: '#ffffff', 'stroke-width': 1.5 }));
+  if (horizontal) {
+    g.appendChild(geoEl('path', { d: 'M -5 -4 L 0 -4 M -5 4 L 0 4 M 5 -4 L 0 -4 M 5 4 L 0 4',
+      stroke: '#ffffff', 'stroke-width': 1.4, 'stroke-linecap': 'round' }));
+    g.appendChild(geoEl('path', { d: 'M -6 -4 L -3 -4 L -4.5 -1.5 Z M 6 4 L 3 4 L 4.5 1.5 Z', fill: '#ffffff' }));
+    g.appendChild(geoEl('line', { x1: 0, y1: -6, x2: 0, y2: 6, stroke: '#ffffff', 'stroke-width': 1, 'stroke-dasharray': '1.5,1.5' }));
+  } else {
+    g.appendChild(geoEl('path', { d: 'M -4 -6 L -4 0 M 4 -6 L 4 0 M -4 6 L -4 0 M 4 6 L 4 0',
+      stroke: '#ffffff', 'stroke-width': 1.4, 'stroke-linecap': 'round' }));
+    g.appendChild(geoEl('path', { d: 'M -4 -7 L -4 -4 L -1.5 -5.5 Z M 4 7 L 4 4 L 1.5 5.5 Z', fill: '#ffffff' }));
+    g.appendChild(geoEl('line', { x1: -6, y1: 0, x2: 6, y2: 0, stroke: '#ffffff', 'stroke-width': 1, 'stroke-dasharray': '1.5,1.5' }));
+  }
+  return g;
+}
+
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
@@ -7915,24 +8004,27 @@ function buildGeoRuler() {
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
-  const rotateHandle = geoEl('circle', { class: 'guide-handle', r: 10,
-    fill: '#0055cc', stroke: '#ffffff', 'stroke-width': 1.5 });
+  const rotateHandle = geoBuildRotateHandle();
   g.appendChild(rotateHandle);
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
   const pencilBtn = geoBuildPencilButton();
   g.appendChild(pencilBtn);
+  const closeBtn = geoBuildCloseButton();
+  g.appendChild(closeBtn);
   guideSvg.appendChild(g);
-  geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn };
+  geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn, closeBtn };
   pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
+  closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('ruler'); });
   renderGeoRuler();
 }
 
 function renderGeoRuler() {
   const st = geoGuides.ruler;
-  const { body, ticks, rotateHandle, resizeHandle, pencilBtn } = geoGroups.ruler;
+  const { body, ticks, rotateHandle, resizeHandle, pencilBtn, closeBtn } = geoGroups.ruler;
   const L = st.length, T = st.thickness;
   body.setAttribute('x', 0); body.setAttribute('y', 0);
   body.setAttribute('width', L); body.setAttribute('height', T);
@@ -7952,13 +8044,15 @@ function renderGeoRuler() {
       ticks.appendChild(t);
     }
   }
-  rotateHandle.setAttribute('cx', 26);
-  rotateHandle.setAttribute('cy', T / 2);
+  // Mânerul de rotire stă lângă diviziunea 0, ca rotația să se simtă
+  // "în raport cu diviziunea 0" (capătul respectiv rămâne aproape pe loc).
+  rotateHandle.setAttribute('transform', `translate(26,${T / 2})`);
   resizeHandle.setAttribute('x', L - 8);
   resizeHandle.setAttribute('y', T / 2 - 8);
   // Butonul-creion (pornește un segment de precizie 0→3cm) — sub mijlocul
   // riglei, ca să nu se suprapună cu mânerele de rotire/redimensionare.
   pencilBtn.setAttribute('transform', `translate(${L / 2},${T + 16})`);
+  closeBtn.setAttribute('transform', `translate(-16,${T / 2})`);
 }
 
 // ---------------- ECHER ----------------
@@ -7969,12 +8063,16 @@ function buildGeoSetsquare() {
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
-  const rotateHandle = geoEl('circle', { class: 'guide-handle', r: 10,
-    fill: '#0055cc', stroke: '#ffffff', 'stroke-width': 1.5 });
+  const rotateHandle = geoBuildRotateHandle();
   g.appendChild(rotateHandle);
-  const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
-    fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
-  g.appendChild(resizeHandle);
+  // Două mânere de scalare INDEPENDENTE — unul pentru fiecare catetă, ca la
+  // un echer real, care nu e neapărat isoscel.
+  const resizeHandleW = geoEl('path', { class: 'guide-handle', d: 'M -9 -7 L 9 0 L -9 7 Z',
+    fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 }); // "Scalare spre dreapta"
+  g.appendChild(resizeHandleW);
+  const resizeHandleH = geoEl('path', { class: 'guide-handle', d: 'M -7 9 L 0 -9 L 7 9 Z',
+    fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 }); // "Scalare în sus"
+  g.appendChild(resizeHandleH);
   // Câte un creion lângă fiecare dintre cele 3 muchii — un singur tap,
   // exact pe muchia dorită, fără să mai fie nevoie de clicuri repetate
   // pentru a ajunge la ea (cum era înainte, cu un singur creion ciclic).
@@ -7984,48 +8082,82 @@ function buildGeoSetsquare() {
     btn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
     btn.addEventListener('click', ev => { ev.stopPropagation(); startSetsquarePencilSeg(i); });
   });
+  const closeBtn = geoBuildCloseButton();
+  g.appendChild(closeBtn);
   guideSvg.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandle, pencilBtns };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn };
+
+  resizeHandleW.addEventListener('pointerdown', e => {
+    if (geoSegBuild) confirmGeoSegBuild();
+    e.stopPropagation(); e.preventDefault();
+    geoLastActiveGuide = 'setsquare';
+    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareW' };
+    try { resizeHandleW.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  resizeHandleH.addEventListener('pointerdown', e => {
+    if (geoSegBuild) confirmGeoSegBuild();
+    e.stopPropagation(); e.preventDefault();
+    geoLastActiveGuide = 'setsquare';
+    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareH' };
+    try { resizeHandleH.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('setsquare'); });
+
   renderGeoSetsquare();
 }
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandle, pencilBtns } = geoGroups.setsquare;
-  const S = st.size;
-  body.setAttribute('points', `0,0 ${S},0 0,${-S}`);
+  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn } = geoGroups.setsquare;
+  const W = st.width, H = st.height;
+  body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
 
   geoClear(ticks);
-  const totalMM = Math.round(S / PX_PER_MM);
-  for (let mm = 0; mm <= totalMM; mm++) {
+  const totalMMW = Math.round(W / PX_PER_MM);
+  for (let mm = 0; mm <= totalMMW; mm++) {
     const d = mm * PX_PER_MM;
     const isCM = mm % 10 === 0;
     const isHalf = mm % 5 === 0;
     const tickLen = isCM ? 16 : (isHalf ? 11 : 6);
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
     ticks.appendChild(geoEl('line', { x1: d, y1: 0, x2: d, y2: -tickLen, stroke: 'rgba(20,20,20,0.65)', 'stroke-width': sw }));
-    ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: 'rgba(20,20,20,0.65)', 'stroke-width': sw }));
     if (isCM && mm > 0) {
       const t1 = geoEl('text', { class: 'guide-label', x: d - 4, y: -6 });
       t1.textContent = mm / 10;
       ticks.appendChild(t1);
+    }
+  }
+  const totalMMH = Math.round(H / PX_PER_MM);
+  for (let mm = 0; mm <= totalMMH; mm++) {
+    const d = mm * PX_PER_MM;
+    const isCM = mm % 10 === 0;
+    const isHalf = mm % 5 === 0;
+    const tickLen = isCM ? 16 : (isHalf ? 11 : 6);
+    const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
+    ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: 'rgba(20,20,20,0.65)', 'stroke-width': sw }));
+    if (isCM && mm > 0) {
       const t2 = geoEl('text', { class: 'guide-label', x: 4, y: -d - 3 });
       t2.textContent = mm / 10;
       ticks.appendChild(t2);
     }
   }
-  rotateHandle.setAttribute('cx', 24);
-  rotateHandle.setAttribute('cy', -24);
-  resizeHandle.setAttribute('x', S - 8);
-  resizeHandle.setAttribute('y', -8);
+  // Mânerul de rotire — lângă colțul unghiului drept (diviziunea 0 comună
+  // ambelor catete), ca rotația să se simtă "în raport cu diviziunea 0".
+  rotateHandle.setAttribute('transform', 'translate(24,-24)');
+  // "Scalare spre dreapta" — la capătul catetei orizontale.
+  resizeHandleW.setAttribute('transform', `translate(${W + 2},0)`);
+  // "Scalare în sus" — la capătul catetei verticale.
+  resizeHandleH.setAttribute('transform', `translate(0,${-H - 2})`);
+  closeBtn.setAttribute('transform', 'translate(-16,16)');
   // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în afara
   // triunghiului (pe direcția normalei către exterior), ca să nu acopere
   // gradațiile și să fie clar cărei muchii îi aparțin.
   const off = 20;
   const mids = [
-    { x: S / 2, y: 0, nx: 0, ny: 1 },                                  // bază orizontală
-    { x: 0, y: -S / 2, nx: -1, ny: 0 },                                // catetă verticală
-    { x: S / 2, y: -S / 2, nx: Math.SQRT1_2, ny: -Math.SQRT1_2 }       // ipotenuză
+    { x: W / 2, y: 0, nx: 0, ny: 1 },                                  // bază orizontală
+    { x: 0, y: -H / 2, nx: -1, ny: 0 },                                // catetă verticală
+    { x: W / 2, y: -H / 2, nx: Math.SQRT1_2, ny: -Math.SQRT1_2 }       // ipotenuză
   ];
   pencilBtns.forEach((btn, i) => {
     const m = mids[i];
@@ -8056,13 +8188,18 @@ function buildGeoProtractor() {
   const vertexDot = geoEl('circle', { cx: 0, cy: 0, r: 4, fill: 'rgba(255,255,255,0)', stroke: '#e63946', 'stroke-width': 1.5 });
   g.appendChild(vertexDot);
 
-  const rotateHandle = geoEl('circle', { class: 'guide-handle', r: 10,
-    fill: '#0055cc', stroke: '#ffffff', 'stroke-width': 1.5 });
+  const rotateHandle = geoBuildRotateHandle();
   g.appendChild(rotateHandle);
 
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
+
+  const resetHorizBtn = geoBuildResetHorizButton();
+  g.appendChild(resetHorizBtn);
+
+  const closeBtn = geoBuildCloseButton();
+  g.appendChild(closeBtn);
 
   const arcMark = geoEl('path', { fill: 'none', stroke: '#2d9d4f', 'stroke-width': 2,
     'stroke-dasharray': '5,4', 'pointer-events': 'none' });
@@ -8094,8 +8231,18 @@ function buildGeoProtractor() {
   arcBuildBox.addEventListener('pointerdown', e => e.stopPropagation());
   arcBuildBox.addEventListener('click', arcBuildToggle);
 
+  resetHorizBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  resetHorizBtn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    geoGuides.protractor.angle = 0;
+    updateGeoTransform('protractor');
+    showToast('↺ Raportor resetat la orizontală');
+  });
+  closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
+
   guideSvg.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, arcMark, arcLabel, arcHandle, arcRadiusHandle, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, arcLabel, arcHandle, arcRadiusHandle, arcBuildBox, arcBuildCheck };
   renderGeoProtractor();
 }
 
@@ -8123,7 +8270,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, arcMark, arcLabel, arcHandle, arcRadiusHandle } = geoGroups.protractor;
+  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, arcLabel, arcHandle, arcRadiusHandle } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
 
@@ -8174,10 +8321,11 @@ function renderGeoProtractor() {
     }
   }
 
-  rotateHandle.setAttribute('cx', 0);
-  rotateHandle.setAttribute('cy', -R + 34);
+  rotateHandle.setAttribute('transform', `translate(0,${-R + 34})`);
   resizeHandle.setAttribute('x', R - 8);
   resizeHandle.setAttribute('y', -8);
+  resetHorizBtn.setAttribute('transform', `translate(${-R + 20},18)`);
+  closeBtn.setAttribute('transform', `translate(${-R - 4},0)`);
 
   const aRad = st.arcAngle * Math.PI / 180;
   const hx = arcR * Math.cos(aRad);
@@ -8240,14 +8388,19 @@ function buildGeoCompass() {
   const arcLabel = geoEl('text', { class: 'guide-label', 'font-weight': 'bold', 'font-size': '11', fill: '#e63946' });
   g.appendChild(arcLabel);
 
+  const closeBtn = geoBuildCloseButton();
+  g.appendChild(closeBtn);
+  closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('compass'); });
+
   guideSvg.appendChild(g);
-  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel };
+  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn };
   renderGeoCompass();
 }
 
 function renderGeoCompass() {
   const st = geoGuides.compass;
-  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle } = geoGroups.compass;
+  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, closeBtn } = geoGroups.compass;
   const cosA = Math.cos(st.angle), sinA = Math.sin(st.angle);
   const tipX = st.x + st.radius * cosA;
   const tipY = st.y + st.radius * sinA;
@@ -8268,6 +8421,10 @@ function renderGeoCompass() {
   resizeHandle.setAttribute('y', rzY - 6.5);
 
   tipHandle.setAttribute('cx', tipX); tipHandle.setAttribute('cy', tipY);
+
+  // Butonul X — dincolo de pivot, în partea opusă vârfului de desenare
+  // (ca acul unui compas real, care iese puțin în spatele balamalei).
+  closeBtn.setAttribute('transform', `translate(${st.x - 22 * cosA},${st.y - 22 * sinA})`);
 
   const perp = st.angle + Math.PI / 2;
   radiusLabel.setAttribute('x', midX + 18 * Math.cos(perp));
@@ -8367,6 +8524,7 @@ Object.keys(geoGroups).forEach(name => {
   grp.body.addEventListener('pointerdown', e => {
     if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
+    geoLastActiveGuide = name;
     const p = pos(e);
     geoActiveDrag = { name, mode: 'move', offX: p.x - geoGuides[name].x, offY: p.y - geoGuides[name].y };
     try { grp.body.setPointerCapture(e.pointerId); } catch (err) {}
@@ -8374,6 +8532,7 @@ Object.keys(geoGroups).forEach(name => {
   grp.rotateHandle.addEventListener('pointerdown', e => {
     if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
+    geoLastActiveGuide = name;
     if (e.shiftKey) {
       geoActiveDrag = { name, mode: 'rotateSnap', lastAngle: geoGuides[name].angle };
     } else {
@@ -8385,6 +8544,7 @@ Object.keys(geoGroups).forEach(name => {
     grp.resizeHandle.addEventListener('pointerdown', e => {
       if (geoSegBuild) confirmGeoSegBuild();
       e.stopPropagation(); e.preventDefault();
+      geoLastActiveGuide = name;
       geoActiveDrag = { name, mode: 'resize' };
       try { grp.resizeHandle.setPointerCapture(e.pointerId); } catch (err) {}
     });
@@ -8408,6 +8568,7 @@ geoGroups.protractor.arcRadiusHandle.addEventListener('pointerdown', e => {
 
   grp.centerHandle.addEventListener('pointerdown', e => {
     e.stopPropagation(); e.preventDefault();
+    geoLastActiveGuide = 'compass';
     const p = pos(e);
     const st = geoGuides.compass;
     geoActiveDrag = { name: 'compass', mode: 'compassMove', offX: p.x - st.x, offY: p.y - st.y };
@@ -8482,13 +8643,24 @@ function geoDragMove(e) {
     if (geoActiveDrag.name === 'ruler') {
       st.length = Math.max(150, Math.min(2400, proj));
       renderGeoRuler();
-    } else if (geoActiveDrag.name === 'setsquare') {
-      st.size = Math.max(120, Math.min(1400, proj));
-      renderGeoSetsquare();
     } else if (geoActiveDrag.name === 'protractor') {
       st.radius = Math.max(90, Math.min(900, proj));
       renderGeoProtractor();
     }
+  } else if (geoActiveDrag.mode === 'resizeSetsquareW') {
+    // Lățimea (cateta orizontală) — proiecție pe axa locală +X ("Scalare
+    // spre dreapta"), independentă de înălțime.
+    const dx = p.x - st.x, dy = p.y - st.y;
+    const proj = dx * Math.cos(st.angle) + dy * Math.sin(st.angle);
+    st.width = Math.max(120, Math.min(1400, proj));
+    renderGeoSetsquare();
+  } else if (geoActiveDrag.mode === 'resizeSetsquareH') {
+    // Înălțimea (cateta verticală) — proiecție pe axa locală -Y ("Scalare
+    // în sus"), independentă de lățime.
+    const dx = p.x - st.x, dy = p.y - st.y;
+    const proj = dx * Math.sin(st.angle) - dy * Math.cos(st.angle);
+    st.height = Math.max(120, Math.min(1400, proj));
+    renderGeoSetsquare();
   } else if (geoActiveDrag.mode === 'compassMove') {
     st.x = p.x - geoActiveDrag.offX;
     st.y = p.y - geoActiveDrag.offY;
@@ -8657,7 +8829,7 @@ function fitGeoGuideToViewport(name) {
     const designS = 420;
     const scale = Math.min(1, availW / designS, availH / designS);
     const S = Math.max(150, designS * scale);
-    st.size = S; st.angle = 0;
+    st.width = S; st.height = S; st.angle = 0;
     st.x = viewLeft + vw / 2 - S / 2;
     st.y = viewTop + vh / 2 + S / 2;
   } else if (name === 'protractor') {
@@ -8675,6 +8847,22 @@ function fitGeoGuideToViewport(name) {
     st.x = viewLeft + vw / 2;
     st.y = viewTop + vh / 2;
   }
+}
+
+// Numele butonului din bara de unelte, pentru fiecare ghidaj — folosit la
+// închiderea rapidă (X) direct de pe instrument.
+const GEO_GUIDE_BTN_ID = { ruler: 'btn-ruler', setsquare: 'btn-setsquare', protractor: 'btn-protractor', compass: 'btn-compass' };
+
+// Ultimul ghidaj cu care s-a interacționat (atins/tras) — folosit pentru
+// deplasarea cu săgețile tastaturii (utilă pe calculator).
+let geoLastActiveGuide = null;
+
+function closeGeoGuide(name) {
+  geoGuides[name].visible = false;
+  geoGroups[name].g.classList.remove('visible');
+  const btnId = GEO_GUIDE_BTN_ID[name];
+  if (btnId) document.getElementById(btnId).classList.remove('active');
+  if (geoLastActiveGuide === name) geoLastActiveGuide = null;
 }
 
 function toggleGeoGuide(name, btnId) {
@@ -8726,11 +8914,11 @@ function getGeoSegments(name) {
     ];
   }
   if (name === 'setsquare') {
-    const S = st.size;
+    const W = st.width, H = st.height;
     return [
-      [geoLocalToWorld(st, 0, 0), geoLocalToWorld(st, S, 0)],
-      [geoLocalToWorld(st, 0, 0), geoLocalToWorld(st, 0, -S)],
-      [geoLocalToWorld(st, S, 0), geoLocalToWorld(st, 0, -S)]
+      [geoLocalToWorld(st, 0, 0), geoLocalToWorld(st, W, 0)],
+      [geoLocalToWorld(st, 0, 0), geoLocalToWorld(st, 0, -H)],
+      [geoLocalToWorld(st, W, 0), geoLocalToWorld(st, 0, -H)]
     ];
   }
   if (name === 'protractor') {
@@ -8850,12 +9038,12 @@ function startRulerPencilSeg() {
 function startSetsquarePencilSeg(edgeIndex) {
   confirmGeoSegBuild();
   const st = geoGuides.setsquare;
-  const S = st.size;
+  const W = st.width, H = st.height;
   // Cele 3 muchii, în coordonate locale: [zero, capătul îndepărtat]
   const edgesLocal = [
-    [{ x: 0, y: 0 }, { x: S, y: 0 }],   // bază orizontală
-    [{ x: 0, y: 0 }, { x: 0, y: -S }],  // catetă verticală
-    [{ x: S, y: 0 }, { x: 0, y: -S }]   // ipotenuză
+    [{ x: 0, y: 0 }, { x: W, y: 0 }],   // bază orizontală
+    [{ x: 0, y: 0 }, { x: 0, y: -H }],  // catetă verticală
+    [{ x: W, y: 0 }, { x: 0, y: -H }]   // ipotenuză
   ];
   const e = edgesLocal[edgeIndex];
 
@@ -9000,10 +9188,42 @@ function confirmGeoSegBuild() {
       pushStroke(page, { points: [{ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }], color: strokeColor, size, erase: false, dashed: kind === 'dashed' });
     }
     showToast('✓ Segment desenat (' + (dist / PX_PER_CM).toFixed(1) + ' cm)');
+    animateGeoPencilDraw({ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y });
   }
   cancelGeoSegBuild();
   redrawStrokes();
   updateStatus();
+}
+
+// Mică animație "sugestivă": un creionaș parcurge segmentul tocmai desenat,
+// de la un capăt la celălalt, apoi dispare.
+function animateGeoPencilDraw(p0, p1) {
+  const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+  const pencil = geoEl('g', { 'pointer-events': 'none' });
+  // Creionaș orientat spre direcția de deplasare (vârful înainte): gumă,
+  // corp galben, lemn și mină — fără cerc de fundal, ca să se vadă doar el.
+  pencil.appendChild(geoEl('rect', { x: -20, y: -3.5, width: 5, height: 7, rx: 1, fill: '#e0605d' }));
+  pencil.appendChild(geoEl('rect', { x: -15, y: -3.5, width: 20, height: 7, fill: '#f4c542' }));
+  pencil.appendChild(geoEl('line', { x1: -15, y1: -3.5, x2: -15, y2: 3.5, stroke: '#00000022', 'stroke-width': 1 }));
+  pencil.appendChild(geoEl('path', { d: 'M 5 -3.5 L 15 0 L 5 3.5 Z', fill: '#e8c88a' }));
+  pencil.appendChild(geoEl('path', { d: 'M 11 -1.8 L 17 0 L 11 1.8 Z', fill: '#3a2a1a' }));
+  guideSvg.appendChild(pencil);
+  const duration = 1400;
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const x = p0.x + (p1.x - p0.x) * ease;
+    const y = p0.y + (p1.y - p0.y) * ease;
+    pencil.setAttribute('transform', `translate(${x},${y}) rotate(${angle})`);
+    pencil.setAttribute('opacity', t > 0.85 ? String(1 - (t - 0.85) / 0.15) : '1');
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else if (pencil.parentNode) {
+      pencil.parentNode.removeChild(pencil);
+    }
+  }
+  requestAnimationFrame(step);
 }
 
 function cancelGeoSegBuild() {
@@ -9045,7 +9265,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
   <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
-  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic.</li>
+  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic. Fiecare are un buton X pentru închidere rapidă, o cruce pentru mutare și un mâner albastru pentru rotire (lângă diviziunea 0). Raportorul are și un buton de resetare la orizontală. Echerul are două mânere de scalare independente (unul pentru fiecare catetă), ca să poți face un triunghi nu neapărat isoscel. Pe calculator, tastele săgeți deplasează fin instrumentul cu care ai interacționat ultima dată.</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
   <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent și distanța totală afișate lângă puncte (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). Echerul are câte un creion lângă fiecare dintre cele 3 muchii (bază, catetă, ipotenuză) — atingi direct pe cel de care ai nevoie. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
 </ul>
@@ -9145,7 +9365,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
   <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
   <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
-  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools.</li>
+  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools. Each has an X button to close it quickly, a cross for moving it, and a blue handle for rotating it (near the 0 mark). The protractor also has a reset-to-horizontal button. The set square has two independent scale handles (one per leg), so it doesn't have to stay isosceles. On a computer, arrow keys nudge the tool you last interacted with.</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
   <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number plus total distance shown next to the points (it can go below 0, negative, if you drag a point past the 0 mark). The set square has one pencil next to each of its 3 edges (base, leg, hypotenuse) — just tap the one you need. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
 </ul>
