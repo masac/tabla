@@ -49,6 +49,7 @@ const UI_TEXT = {
   'Corpuri geometrice': 'Geometric solids',
   'Figuri geometrice': 'Geometric figures',
   'Lipire de rețea — elementele desenate se lipesc de nodurile caroiajului': 'Snap to grid — drawn elements snap to the grid nodes',
+  'Lipire de punct — elementele desenate se lipesc de punctele speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul cercului la compas)': 'Snap to point — drawn elements snap to special points on the geometric tools (the ruler\'s 0 mark, the set square\'s right-angle vertex, the protractor\'s center, the compass\'s circle center)',
   'Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă': 'Vertical space — drag up/down to insert or remove space on the board',
   'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
   'Mijlocul unui segment (click pe un segment)': 'Midpoint of a segment (click on a segment)',
@@ -144,6 +145,8 @@ const RO_EN_RULES = [
   [/^✓ Lipire de rețea activă — s-a activat și caroiajul, ca să vezi nodurile$/, '✓ Snap to grid is on — the grid was also turned on so you can see the nodes'],
   [/^✓ Lipire de rețea activă$/, '✓ Snap to grid is on'],
   [/^Lipire de rețea dezactivată$/, 'Snap to grid turned off'],
+  [/^✓ Lipire de punct activă — diviziunea 0 a riglei, vârful echerului, centrul raportorului, centrul viitor al cercului la compas$/, '✓ Snap to point is on — the ruler\'s 0 mark, the set square\'s vertex, the protractor\'s center, the compass\'s future circle center'],
+  [/^Lipire de punct dezactivată$/, 'Snap to point turned off'],
   [/^✓ Spațiu vertical aplicat$/, '✓ Vertical space applied'],
   [/^↕️ Trage în sus\/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu$/, '↕️ Drag up/down: everything below the starting point moves with you, inserting or removing space'],
   [/^↕️ 0 cm$/, '↕️ 0 cm'],
@@ -417,6 +420,7 @@ let bgColor = '#000000';
 let boardRuling = 'none'; // 'none' | 'grid' | 'dictando' | 'music'
 let rulingSize = 28; // distanța de bază (px) dintre liniile/pătratele liniaturii
 let snapToGridEnabled = false; // când e activ, elementele desenate se lipesc de nodurile caroiajului
+let snapToPointEnabled = false; // când e activ, elementele desenate se lipesc de puncte speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas)
 let rulingColor = '#ffffff'; // culoarea liniaturii; implicit alb, fiindcă tabla pornește cu fundal negru
 let rulingOpacity = 0.5; // opacitatea liniaturii (0-1); implicit 50%
 
@@ -1965,6 +1969,86 @@ function updateStatus() {
   document.getElementById('btn-prev-page').disabled = (currentPageIdx === 0);
 }
 
+// Punctele "capăt de desen" existente pe pagina curentă (primul și ultimul
+// punct al fiecărui stroke cu traseu, plus centrul cercurilor/arcelor) —
+// folosite pentru a lipi POZIȚIA instrumentului geometric (nu un desen nou)
+// de un desen deja existent.
+function getStrokeEndpointsList(page) {
+  const pts = [];
+  if (!page) return pts;
+  page.strokes.forEach(s => {
+    if (s.points && s.points.length) {
+      pts.push(s.points[0]);
+      if (s.points.length > 1) pts.push(s.points[s.points.length - 1]);
+    } else if (s.type === 'circle' || s.type === 'arc') {
+      pts.push({ x: s.cx, y: s.cy });
+    } else if (s.type === 'midpoint') {
+      pts.push({ x: s.x, y: s.y });
+    }
+  });
+  return pts;
+}
+
+// Când muți un instrument geometric (riglă/echer/raportor/compas) cu
+// "Lipire de punct" activă, punctul lui de referință (diviziunea 0 la
+// riglă, vârful unghiului drept la echer, centrul la raportor/compas) se
+// lipește de cel mai apropiat capăt de desen existent — util ca să continui
+// un desen exact din capătul unui segment deja trasat.
+function snapGuideMoveToStrokePoint(name) {
+  if (!snapToPointEnabled) return;
+  const st = geoGuides[name];
+  let zeroWorld;
+  if (name === 'ruler') zeroWorld = geoLocalToWorld(st, 0, 0);
+  else if (name === 'setsquare' || name === 'protractor') zeroWorld = geoLocalToWorld(st, 0, 0);
+  else if (name === 'compass') zeroWorld = { x: st.x, y: st.y };
+  else return;
+
+  const pts = getStrokeEndpointsList(getCurrentPage());
+  let best = null, bestD = 18;
+  pts.forEach(pt => {
+    const d = Math.hypot(zeroWorld.x - pt.x, zeroWorld.y - pt.y);
+    if (d < bestD) { bestD = d; best = pt; }
+  });
+  if (best) {
+    st.x += best.x - zeroWorld.x;
+    st.y += best.y - zeroWorld.y;
+  }
+}
+
+// Punctele speciale ale instrumentelor geometrice vizibile, pentru "lipire
+// de punct": diviziunea 0 a riglei, vârful unghiului drept al echerului,
+// centrul (pivotul) raportorului și centrul viitor al cercului la compas.
+function getGeoSnapPoints() {
+  const pts = [];
+  if (typeof geoGuides === 'undefined') return pts;
+  if (geoGuides.ruler && geoGuides.ruler.visible) {
+    pts.push(geoLocalToWorld(geoGuides.ruler, 0, 0));
+  }
+  if (geoGuides.setsquare && geoGuides.setsquare.visible) {
+    pts.push(geoLocalToWorld(geoGuides.setsquare, 0, 0));
+  }
+  if (geoGuides.protractor && geoGuides.protractor.visible) {
+    pts.push(geoLocalToWorld(geoGuides.protractor, 0, 0));
+  }
+  if (geoGuides.compass && geoGuides.compass.visible) {
+    pts.push({ x: geoGuides.compass.x, y: geoGuides.compass.y });
+  }
+  return pts;
+}
+
+// Returnează cel mai apropiat punct special (dacă e destul de aproape),
+// altfel null — folosită în pos(e), înaintea lipirii de rețea.
+function applyPointSnap(p) {
+  if (!snapToPointEnabled) return null;
+  const pts = getGeoSnapPoints();
+  let best = null, bestD = 18;
+  pts.forEach(pt => {
+    const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+    if (d < bestD) { bestD = d; best = pt; }
+  });
+  return best;
+}
+
 const pos = e => {
   const r = drawC.getBoundingClientRect();
   let x = e.clientX - r.left, y = e.clientY - r.top;
@@ -1979,19 +2063,26 @@ const pos = e => {
     x = (x - t.offX) / t.scale;
     y = (y - t.offY) / t.scale;
   }
-  // Lipire de rețea (snap to grid): rotunjim la cel mai apropiat nod al
-  // caroiajului, cu pasul liniaturii curente. NU se aplică la desenul liber
-  // (pen/erase, care ar deveni în trepte), la selecție/mutare/redimensionare
-  // (ar sări brusc între noduri), la mijlocul unui segment (caută un stroke
-  // existent, nu plasează un punct nou) sau cât timp se trage un mâner de
-  // ghidaj (riglă/echer/raportor/compas) ori o imagine.
-  if (snapToGridEnabled && !geoActiveDrag && !isDraggingSelected && !isResizingStroke &&
+  // Lipire de punct și lipire de rețea (snap to point / snap to grid).
+  // Lipirea de punct are prioritate (agață exact diviziunea 0 a riglei,
+  // vârful unghiului drept al echerului, centrul raportorului sau centrul
+  // viitor al cercului la compas), iar dacă niciun punct special nu e
+  // suficient de aproape, se aplică (dacă e activă) lipirea de rețea. NU se
+  // aplică la desenul liber (pen/erase, care ar deveni în trepte), la
+  // selecție/mutare/redimensionare (ar sări brusc) sau cât timp se trage un
+  // mâner de ghidaj (riglă/echer/raportor/compas) ori o imagine.
+  if ((snapToPointEnabled || snapToGridEnabled) && !geoActiveDrag && !isDraggingSelected && !isResizingStroke &&
       !isRotatingSolid && !isRotatingPolygon && !isImageDrag && !resizeImageId &&
       tool !== 'pen' && tool !== 'erase' && tool !== 'select' &&
       tool !== 'midpoint' && tool !== 'vspace') {
-    const step = rulingSize || 28;
-    x = Math.round(x / step) * step;
-    y = Math.round(y / step) * step;
+    const pointSnap = applyPointSnap({ x, y });
+    if (pointSnap) {
+      x = pointSnap.x; y = pointSnap.y;
+    } else if (snapToGridEnabled) {
+      const step = rulingSize || 28;
+      x = Math.round(x / step) * step;
+      y = Math.round(y / step) * step;
+    }
   }
   return { x, y };
 };
@@ -7271,6 +7362,13 @@ document.getElementById('btn-snap-grid').onclick = () => {
     showToast(snapToGridEnabled ? '✓ Lipire de rețea activă' : 'Lipire de rețea dezactivată');
   }
 };
+document.getElementById('btn-snap-point').onclick = () => {
+  snapToPointEnabled = !snapToPointEnabled;
+  document.getElementById('btn-snap-point').classList.toggle('active', snapToPointEnabled);
+  showToast(snapToPointEnabled
+    ? '✓ Lipire de punct activă — diviziunea 0 a riglei, vârful echerului, centrul raportorului, centrul viitor al cercului la compas'
+    : 'Lipire de punct dezactivată');
+};
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
 document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
@@ -8052,9 +8150,10 @@ function renderGeoRuler() {
       ticks.appendChild(t);
     }
   }
-  // Mânerul de rotire stă lângă diviziunea 0, ca rotația să se simtă
-  // "în raport cu diviziunea 0" (capătul respectiv rămâne aproape pe loc).
-  rotateHandle.setAttribute('transform', `translate(26,${T / 2})`);
+  // Mânerul de rotire stă acum lângă pătrățelul de redimensionare (capătul
+  // din dreapta), imediat în stânga lui — mai ușor de controlat, fiindcă
+  // ambele mânere sunt la îndemână în aceeași zonă.
+  rotateHandle.setAttribute('transform', `translate(${L - 34},${T / 2})`);
   resizeHandle.setAttribute('x', L - 8);
   resizeHandle.setAttribute('y', T / 2 - 8);
   // Butonul-creion (pornește un segment de precizie 0→3cm) — sub mijlocul
@@ -8213,6 +8312,13 @@ function buildGeoProtractor() {
     'stroke-dasharray': '5,4', 'pointer-events': 'none' });
   g.appendChild(arcMark);
 
+  // Segment permanent, de la centrul (pivotul) raportorului până la mânerul
+  // verde — arată clar direcția unghiului curent, tot timpul, nu doar cât
+  // timp se trage mânerul.
+  const vertexLine = geoEl('line', { stroke: '#2d9d4f', 'stroke-width': 1.5,
+    opacity: '0.85', 'pointer-events': 'none' });
+  g.appendChild(vertexLine);
+
   const arcLabel = geoEl('text', { class: 'guide-label', 'font-weight': 'bold', fill: '#2d9d4f', 'font-size': '12' });
   g.appendChild(arcLabel);
 
@@ -8226,14 +8332,19 @@ function buildGeoProtractor() {
   arcRadiusHandle.setAttribute('cy', 25);
   g.appendChild(arcRadiusHandle);
 
+  // Grupul căsuță+bifă se mută împreună, la mijlocul distanței dintre
+  // mânerul de rotire și centrul raportorului (poziționare dinamică, în
+  // renderGeoProtractor, fiindcă mânerul de rotire depinde de raza R).
+  const arcBuildGroup = geoEl('g', {});
   const arcBuildBox = geoEl('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3,
     fill: '#ffffff', stroke: '#2d9d4f', 'stroke-width': 1.5, style: 'cursor:pointer; pointer-events:auto;' });
   arcBuildBox.setAttribute('data-checked', '0');
-  g.appendChild(arcBuildBox);
+  arcBuildGroup.appendChild(arcBuildBox);
 
   const arcBuildCheck = geoEl('path', { d: '', fill: 'none', stroke: '#2d9d4f',
     'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'pointer-events': 'none' });
-  g.appendChild(arcBuildCheck);
+  arcBuildGroup.appendChild(arcBuildCheck);
+  g.appendChild(arcBuildGroup);
 
   const arcBuildToggle = (e) => { e.stopPropagation(); e.preventDefault(); toggleProtractorArcCheckbox(); };
   arcBuildBox.addEventListener('pointerdown', e => e.stopPropagation());
@@ -8250,7 +8361,7 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, arcLabel, arcHandle, arcRadiusHandle, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   renderGeoProtractor();
 }
 
@@ -8278,7 +8389,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, arcLabel, arcHandle, arcRadiusHandle } = geoGroups.protractor;
+  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
 
@@ -8334,6 +8445,10 @@ function renderGeoProtractor() {
   resizeHandle.setAttribute('y', -8);
   resetHorizBtn.setAttribute('transform', `translate(${-R + 20},18)`);
   closeBtn.setAttribute('transform', `translate(${-R - 4},0)`);
+  // Grupul căsuță+bifă — la mijlocul distanței dintre mânerul de rotire și
+  // centrul (pivotul) raportorului.
+  const rotateY = -R + 34;
+  arcBuildGroup.setAttribute('transform', `translate(0,${rotateY / 2})`);
 
   const aRad = st.arcAngle * Math.PI / 180;
   // Mânerul verde (unghi) stă la o rază FIXĂ, în exteriorul raportorului
@@ -8343,6 +8458,12 @@ function renderGeoProtractor() {
   const handleR = R + PX_PER_CM / 2;
   const hx = handleR * Math.cos(aRad);
   const hy = -handleR * Math.sin(aRad);
+  // Segment permanent din centrul raportorului până la mânerul verde — arată
+  // tot timpul direcția unghiului curent.
+  vertexLine.setAttribute('x1', 0);
+  vertexLine.setAttribute('y1', 0);
+  vertexLine.setAttribute('x2', hx);
+  vertexLine.setAttribute('y2', hy);
   
   let markD = `M ${arcR} 0 `;
   const steps = Math.max(1, Math.round(st.arcAngle / 3));
@@ -8525,10 +8646,19 @@ function updateGeoTransform(name) {
 Object.keys(geoGuides).forEach(name => { if (name !== 'compass') updateGeoTransform(name); });
 
 const GEO_ROTATE_HANDLE_LOCAL_ANGLE = {
-  ruler: Math.atan2(geoGuides.ruler.thickness / 2, 26),
   setsquare: Math.atan2(-24, 24),
   protractor: -Math.PI / 2
 };
+// Mânerul de rotire al riglei stă lângă capătul din dreapta, a cărui
+// poziție depinde de lungimea curentă L (se schimbă la redimensionare) —
+// de-aia unghiul local se calculează dinamic, nu ca o constantă fixă.
+function geoRotateHandleLocalAngle(name) {
+  if (name === 'ruler') {
+    const st = geoGuides.ruler;
+    return Math.atan2(st.thickness / 2, st.length - 34);
+  }
+  return GEO_ROTATE_HANDLE_LOCAL_ANGLE[name] || 0;
+}
 
 let geoActiveDrag = null;
 Object.keys(geoGroups).forEach(name => {
@@ -8549,7 +8679,7 @@ Object.keys(geoGroups).forEach(name => {
     if (e.shiftKey) {
       geoActiveDrag = { name, mode: 'rotateSnap', lastAngle: geoGuides[name].angle };
     } else {
-      geoActiveDrag = { name, mode: 'rotate', localOffset: GEO_ROTATE_HANDLE_LOCAL_ANGLE[name] || 0 };
+      geoActiveDrag = { name, mode: 'rotate', localOffset: geoRotateHandleLocalAngle(name) };
     }
     try { grp.rotateHandle.setPointerCapture(e.pointerId); } catch (err) {}
   });
@@ -8640,6 +8770,7 @@ function geoDragMove(e) {
   if (geoActiveDrag.mode === 'move') {
     st.x = p.x - geoActiveDrag.offX;
     st.y = p.y - geoActiveDrag.offY;
+    snapGuideMoveToStrokePoint(geoActiveDrag.name);
     updateGeoTransform(geoActiveDrag.name);
   } else if (geoActiveDrag.mode === 'rotate') {
     st.angle = Math.atan2(p.y - st.y, p.x - st.x) - geoActiveDrag.localOffset;
@@ -8677,6 +8808,7 @@ function geoDragMove(e) {
   } else if (geoActiveDrag.mode === 'compassMove') {
     st.x = p.x - geoActiveDrag.offX;
     st.y = p.y - geoActiveDrag.offY;
+    snapGuideMoveToStrokePoint('compass');
     renderGeoCompass();
   } else if (geoActiveDrag.mode === 'compassRotate') {
     st.angle = Math.atan2(p.y - st.y, p.x - st.x);
@@ -9324,6 +9456,7 @@ const HELP_CONTENT_HTML = `
 <p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
 <p>Din grupul alăturat de butoane poți alege și o liniatură pentru tablă: <b>caroiaj</b> (ca în caietul de matematică), <b>dictando</b> (linii ca în caietul de scriere/dictando) sau <b>portativ</b> (ca în caietul de muzică). Cu butoanele −/+ reglezi mărimea pătratelor/liniilor și opacitatea lor, iar cu selectorul de culoare alegi manual culoarea liniaturii — implicit e alb, la 50% opacitate, potrivit fundalului negru al tablei.</p>
 <p><b>Lipire de rețea</b> — butonul de lângă liniatură activează lipirea de nodurile caroiajului: capetele liniei/liniei întrerupte/săgeții, colțurile dreptunghiului, centrul cercului și vârfurile poligonului "sar" automat la cel mai apropiat nod, la pasul curent al caroiajului (reglabil cu −/+). Nu afectează desenul liber (creion/radieră) și nici mutarea/redimensionarea elementelor deja existente. Dacă activezi lipirea fără caroiaj vizibil, acesta se activează automat, ca să vezi nodurile.</p>
+<p><b>Lipire de punct</b> — butonul de lângă lipirea de rețea face ca desenele să se lipească exact de punctele speciale ale instrumentelor geometrice vizibile: diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul (pivotul) raportorului și punctul unde va fi centrul cercului la compas. Funcționează și invers: dacă muți rigla/echerul/raportorul/compasul, punctul lui de referință se lipește de capătul celui mai apropiat desen deja existent — util ca să continui exact dintr-un segment trasat anterior.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -9424,6 +9557,7 @@ const HELP_CONTENT_HTML_EN = `
 <p>Navigate between pages with the corner arrows, add or delete pages, and change the board's background color from the palette at the bottom right of the toolbar.</p>
 <p>From the nearby button group you can also pick a ruling for the board: <b>grid</b> (like a math notebook), <b>ruled lines</b> (like a writing notebook) or <b>staff lines</b> (like a music notebook). Use the −/+ buttons to adjust the size of the squares/lines and their opacity, and use the color picker to manually choose the ruling color — it defaults to white at 50% opacity, suited to the board's black background.</p>
 <p><b>Snap to grid</b> — the button next to the ruling turns on snapping to the grid nodes: the ends of a line/dashed line/arrow, the corners of a rectangle, the center of a circle, and polygon vertices automatically "jump" to the nearest node, at the current grid spacing (adjustable with −/+). It doesn't affect freehand drawing (pencil/eraser) or moving/resizing already-placed elements. If you turn snapping on without the grid visible, the grid turns on automatically so you can see the nodes.</p>
+<p><b>Snap to point</b> — the button next to snap-to-grid makes drawings snap exactly to special points on the visible geometric tools: the ruler's 0 mark, the set square's right-angle vertex, the protractor's center (pivot), and the point where the compass's circle center will be. It also works the other way: moving the ruler/set square/protractor/compass snaps its own reference point to the nearest existing drawing's endpoint — handy for continuing exactly from a previously drawn segment.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `
