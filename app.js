@@ -1980,6 +1980,11 @@ function getStrokeEndpointsList(page) {
     if (s.points && s.points.length) {
       pts.push(s.points[0]);
       if (s.points.length > 1) pts.push(s.points[s.points.length - 1]);
+    } else if (s.type === 'rect') {
+      pts.push({ x: s.x, y: s.y });
+      pts.push({ x: s.x + s.w, y: s.y });
+      pts.push({ x: s.x, y: s.y + s.h });
+      pts.push({ x: s.x + s.w, y: s.y + s.h });
     } else if (s.type === 'circle' || s.type === 'arc') {
       pts.push({ x: s.cx, y: s.cy });
     } else if (s.type === 'midpoint') {
@@ -2036,11 +2041,71 @@ function getGeoSnapPoints() {
   return pts;
 }
 
-// Returnează cel mai apropiat punct special (dacă e destul de aproape),
+// Segmentele "drepte" din desenele existente (linie/linie întreruptă/
+// săgeată cu 2 puncte, plus fiecare latură a poligoanelor) — folosite doar
+// pentru calculul intersecțiilor; desenul liber (creion) nu are laturi
+// drepte relevante și e ignorat aici (rămâne inclus doar prin capetele lui,
+// via getStrokeEndpointsList).
+function getStrokeSegmentsForIntersection(page) {
+  const segs = [];
+  if (!page) return segs;
+  page.strokes.forEach(s => {
+    if (!s.points || s.points.length < 2) return;
+    if (s.type === 'polygon') {
+      for (let i = 0; i < s.points.length; i++) {
+        segs.push([s.points[i], s.points[(i + 1) % s.points.length]]);
+      }
+    } else if ((!s.type || s.type === 'arrow') && s.points.length === 2) {
+      segs.push([s.points[0], s.points[1]]);
+    }
+  });
+  return segs;
+}
+
+// Punctul de intersecție a două segmente (a1-a2 și b1-b2), sau null dacă
+// sunt paralele ori intersecția cade în afara ambelor segmente.
+function segIntersection(a1, a2, b1, b2) {
+  const d1x = a2.x - a1.x, d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x, d2y = b2.y - b1.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  const u = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / denom;
+  if (t < -0.01 || t > 1.01 || u < -0.01 || u > 1.01) return null;
+  return { x: a1.x + d1x * t, y: a1.y + d1y * t };
+}
+
+// Toate punctele de intersecție dintre perechile de segmente existente pe
+// pagina curentă.
+function getStrokeIntersectionPoints(page) {
+  const segs = getStrokeSegmentsForIntersection(page);
+  const pts = [];
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const ip = segIntersection(segs[i][0], segs[i][1], segs[j][0], segs[j][1]);
+      if (ip) pts.push(ip);
+    }
+  }
+  return pts;
+}
+
+// Toate punctele candidat pentru "lipire de punct" la desenare: punctele
+// speciale ale instrumentelor geometrice + capetele desenelor existente +
+// intersecțiile dintre segmentele existente — funcționează indiferent dacă
+// grila e activată sau nu.
+function getAllSnapPoints() {
+  const page = getCurrentPage();
+  const pts = getGeoSnapPoints();
+  pts.push(...getStrokeEndpointsList(page));
+  pts.push(...getStrokeIntersectionPoints(page));
+  return pts;
+}
+
+// Returnează cel mai apropiat punct de lipire (dacă e destul de aproape),
 // altfel null — folosită în pos(e), înaintea lipirii de rețea.
 function applyPointSnap(p) {
   if (!snapToPointEnabled) return null;
-  const pts = getGeoSnapPoints();
+  const pts = getAllSnapPoints();
   let best = null, bestD = 18;
   pts.forEach(pt => {
     const d = Math.hypot(p.x - pt.x, p.y - pt.y);
@@ -9042,6 +9107,28 @@ function geoLocalToWorld(st, lx, ly) {
   return { x: st.x + lx * cos - ly * sin, y: st.y + lx * sin + ly * cos };
 }
 
+// La fel ca geoLocalToWorld, dar pentru o DIRECȚIE (vector), nu un punct —
+// aplică doar rotația, fără translația st.x/st.y.
+function geoLocalDirToWorld(st, lx, ly) {
+  const cos = Math.cos(st.angle), sin = Math.sin(st.angle);
+  return { x: lx * cos - ly * sin, y: lx * sin + ly * cos };
+}
+
+// Direcția "spre exterior" a unei muchii (definite prin capetele ei locale
+// zero/far), față de centrul aproximativ al formei (centroidLocal) — folosită
+// ca să știm în ce parte să scoatem mânerele de reglaj, în afara riglei sau
+// a echerului, indiferent de care muchie anume e implicată.
+function geoEdgeOutwardNormalLocal(zeroLocal, farLocal, centroidLocal) {
+  const dx = farLocal.x - zeroLocal.x, dy = farLocal.y - zeroLocal.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const d = { x: dx / len, y: dy / len };
+  const mid = { x: (zeroLocal.x + farLocal.x) / 2, y: (zeroLocal.y + farLocal.y) / 2 };
+  const nA = { x: -d.y, y: d.x };
+  const toMid = { x: mid.x - centroidLocal.x, y: mid.y - centroidLocal.y };
+  const dot = nA.x * toMid.x + nA.y * toMid.y;
+  return dot >= 0 ? nA : { x: -nA.x, y: -nA.y };
+}
+
 function geoWorldToLocal(st, wx, wy) {
   const dx = wx - st.x, dy = wy - st.y;
   const cos = Math.cos(-st.angle), sin = Math.sin(-st.angle);
@@ -9176,7 +9263,10 @@ function startRulerPencilSeg() {
   const three = geoLocalToWorld(st, 3 * PX_PER_CM, 0);
   const dx = far.x - zero.x, dy = far.y - zero.y;
   const len = Math.hypot(dx, dy) || 1;
-  const axis = { zero, dir: { x: dx / len, y: dy / len } };
+  const normalLocal = geoEdgeOutwardNormalLocal({ x: 0, y: 0 }, { x: st.length, y: 0 },
+    { x: st.length / 2, y: st.thickness / 2 });
+  const normal = geoLocalDirToWorld(st, normalLocal.x, normalLocal.y);
+  const axis = { zero, dir: { x: dx / len, y: dy / len }, normal };
   startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'ruler', axis);
 }
 
@@ -9198,8 +9288,26 @@ function startSetsquarePencilSeg(edgeIndex) {
   const len = Math.hypot(dx, dy) || 1;
   const dirUnit = { x: dx / len, y: dy / len };
   const three = { x: zero.x + dirUnit.x * 3 * PX_PER_CM, y: zero.y + dirUnit.y * 3 * PX_PER_CM };
-  const axis = { zero, dir: dirUnit };
+  const centroidLocal = { x: W / 3, y: -H / 3 };
+  const normalLocal = geoEdgeOutwardNormalLocal(e[0], e[1], centroidLocal);
+  const normal = geoLocalDirToWorld(st, normalLocal.x, normalLocal.y);
+  const axis = { zero, dir: dirUnit, normal };
   startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'setsquare', axis);
+}
+
+// Mâner semitransparent, cu o cruciuliță mică exact în centru — folosit la
+// cele două puncte de reglaj ale segmentului de precizie (riglă/echer), ca
+// gradațiile de dedesubt să rămână vizibile prin mâner, pentru o fixare
+// mai exactă a lungimii segmentului.
+function geoBuildTransparentPointHandle(color) {
+  const g = geoEl('g', { class: 'guide-handle' });
+  g.appendChild(geoEl('circle', { r: 13, fill: color, opacity: '0.32',
+    stroke: color, 'stroke-width': 1.5, 'stroke-opacity': '0.75' }));
+  g.appendChild(geoEl('line', { x1: -6, y1: 0, x2: 6, y2: 0,
+    stroke: color, 'stroke-width': 1.4, opacity: '0.9' }));
+  g.appendChild(geoEl('line', { x1: 0, y1: -6, x2: 0, y2: 6,
+    stroke: color, 'stroke-width': 1.4, opacity: '0.9' }));
+  return g;
 }
 
 function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axisOverride) {
@@ -9211,9 +9319,24 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
     if (!edge) return; // siguranță — dacă ghidajul a dispărut între timp, ieșim
     const dx = edge[1].x - edge[0].x, dy = edge[1].y - edge[0].y;
     const len = Math.hypot(dx, dy) || 1;
+    const dir = { x: dx / len, y: dy / len };
+    // Direcția "spre exterior" — perpendiculara aleasă astfel încât să se
+    // îndepărteze de centrul aproximativ al riglei/echerului.
+    let normal = { x: -dir.y, y: dir.x };
+    const st = geoGuides[guideName];
+    if (st) {
+      let centroidWorld = null;
+      if (guideName === 'ruler') centroidWorld = geoLocalToWorld(st, st.length / 2, st.thickness / 2);
+      else if (guideName === 'setsquare') centroidWorld = geoLocalToWorld(st, st.width / 3, -st.height / 3);
+      if (centroidWorld) {
+        const mid = { x: (edge[0].x + edge[1].x) / 2, y: (edge[0].y + edge[1].y) / 2 };
+        const toMid = { x: mid.x - centroidWorld.x, y: mid.y - centroidWorld.y };
+        if (normal.x * toMid.x + normal.y * toMid.y < 0) normal = { x: -normal.x, y: -normal.y };
+      }
+    }
     // Primul capăt al muchiei auto-detectate corespunde diviziunii 0 (așa
     // sunt construite segmentele riglei/echerului în getGeoSegments).
-    axis = { zero: { x: edge[0].x, y: edge[0].y }, dir: { x: dx / len, y: dy / len } };
+    axis = { zero: { x: edge[0].x, y: edge[0].y }, dir, normal };
   }
 
   const g = geoEl('g', { class: 'guide-segbuild' });
@@ -9222,10 +9345,20 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
   if (kind === 'dashed') preview.setAttribute('stroke-dasharray', Math.max(4, strokeSize * 2.5) + ' ' + Math.max(3, strokeSize * 1.8));
   g.appendChild(preview);
 
-  const h0 = geoEl('circle', { class: 'guide-handle', r: 13,
-    fill: '#2d9d4f', stroke: '#ffffff', 'stroke-width': 2.5 });
-  const h1 = geoEl('circle', { class: 'guide-handle', r: 13,
-    fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 2.5 });
+  // Linii-indicator subțiri, de la punctul real de pe riglă/echer (unde va
+  // cădea efectiv desenul) până la mânerul scos puțin în exterior — ca
+  // gradațiile să rămână complet vizibile, fără mânerul deasupra lor.
+  const leader0 = geoEl('line', { stroke: '#2d9d4f', 'stroke-width': 1.3, opacity: '0.6', 'pointer-events': 'none' });
+  g.appendChild(leader0);
+  const leader1 = geoEl('line', { stroke: '#e67e00', 'stroke-width': 1.3, opacity: '0.6', 'pointer-events': 'none' });
+  g.appendChild(leader1);
+  const tick0 = geoEl('circle', { r: 2.5, fill: '#2d9d4f', 'pointer-events': 'none' });
+  g.appendChild(tick0);
+  const tick1 = geoEl('circle', { r: 2.5, fill: '#e67e00', 'pointer-events': 'none' });
+  g.appendChild(tick1);
+
+  const h0 = geoBuildTransparentPointHandle('#2d9d4f');
+  const h1 = geoBuildTransparentPointHandle('#e67e00');
   g.appendChild(h0);
   g.appendChild(h1);
 
@@ -9257,7 +9390,7 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
   guidePanGroup.appendChild(g);
 
   geoSegBuild = { kind, guideName, axis, p0: { x: p0.x, y: p0.y }, p1: { x: p1.x, y: p1.y },
-    color: strokeColor, size: strokeSize, g, preview, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel };
+    color: strokeColor, size: strokeSize, g, preview, leader0, leader1, tick0, tick1, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel };
 
   h0.addEventListener('pointerdown', ev => {
     ev.stopPropagation(); ev.preventDefault();
@@ -9280,37 +9413,52 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
 
 function renderGeoSegBuild() {
   if (!geoSegBuild) return;
-  const { p0, p1, preview, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel, size, axis } = geoSegBuild;
+  const { p0, p1, preview, leader0, leader1, tick0, tick1, h0, h1, okBtn, cancelBtn, label0, label1, lenLabel, size, axis } = geoSegBuild;
 
   preview.setAttribute('x1', p0.x); preview.setAttribute('y1', p0.y);
   preview.setAttribute('x2', p1.x); preview.setAttribute('y2', p1.y);
   preview.setAttribute('stroke-width', Math.max(2, size));
 
-  h0.setAttribute('cx', p0.x); h0.setAttribute('cy', p0.y);
-  h1.setAttribute('cx', p1.x); h1.setAttribute('cy', p1.y);
+  // Punctele reale (exact pe riglă/echer, unde va cădea segmentul desenat).
+  tick0.setAttribute('cx', p0.x); tick0.setAttribute('cy', p0.y);
+  tick1.setAttribute('cx', p1.x); tick1.setAttribute('cy', p1.y);
 
-  const dx = p1.x - p0.x, dy = p1.y - p0.y;
-  const len = Math.hypot(dx, dy) || 1;
-  // Vector normal pe segment, orientat preferențial spre partea de sus a
-  // ecranului, ca etichetele/butoanele să nu fie acoperite de mâna care
-  // ține rigla.
-  let nx = -dy / len, ny = dx / len;
-  if (ny > 0) { nx = -nx; ny = -ny; }
+  // Mânerele ies puțin în exterior (pe direcția "spre exterior" a muchiei),
+  // ca să nu mai acopere gradațiile — legate de punctul real printr-o
+  // linie-indicator subțire, ca să se vadă precis de unde până unde se
+  // desenează.
+  const HANDLE_OFFSET = 24;
+  const n = axis && axis.normal ? axis.normal : { x: 0, y: -1 };
+  const off0 = { x: p0.x + n.x * HANDLE_OFFSET, y: p0.y + n.y * HANDLE_OFFSET };
+  const off1 = { x: p1.x + n.x * HANDLE_OFFSET, y: p1.y + n.y * HANDLE_OFFSET };
+
+  leader0.setAttribute('x1', p0.x); leader0.setAttribute('y1', p0.y);
+  leader0.setAttribute('x2', off0.x); leader0.setAttribute('y2', off0.y);
+  leader1.setAttribute('x1', p1.x); leader1.setAttribute('y1', p1.y);
+  leader1.setAttribute('x2', off1.x); leader1.setAttribute('y2', off1.y);
+
+  h0.setAttribute('transform', `translate(${off0.x},${off0.y})`);
+  h1.setAttribute('transform', `translate(${off1.x},${off1.y})`);
 
   // Valoarea (în cm) a fiecărui punct față de diviziunea 0 a ghidajului —
-  // poate fi și negativă, dacă punctul e tras dincolo de 0.
+  // poate fi și negativă, dacă punctul e tras dincolo de 0. Etichetele stau
+  // lângă mânerele scoase în exterior, puțin mai departe încă.
   if (axis) {
     const v0 = ((p0.x - axis.zero.x) * axis.dir.x + (p0.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
     const v1 = ((p1.x - axis.zero.x) * axis.dir.x + (p1.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
-    const labelOffset = 20;
-    label0.setAttribute('x', p0.x + nx * labelOffset);
-    label0.setAttribute('y', p0.y + ny * labelOffset);
+    const labelExtra = 18;
+    label0.setAttribute('x', off0.x + n.x * labelExtra);
+    label0.setAttribute('y', off0.y + n.y * labelExtra);
     label0.textContent = formatCmValue(v0);
-    label1.setAttribute('x', p1.x + nx * labelOffset);
-    label1.setAttribute('y', p1.y + ny * labelOffset);
+    label1.setAttribute('x', off1.x + n.x * labelExtra);
+    label1.setAttribute('y', off1.y + n.y * labelExtra);
     label1.textContent = formatCmValue(v1);
   }
 
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1;
+  let nx = -dy / len, ny = dx / len;
+  if (ny > 0) { nx = -nx; ny = -ny; }
   const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
   const offset = 38;
   const bx = mx + nx * offset, by = my + ny * offset;
@@ -9456,7 +9604,7 @@ const HELP_CONTENT_HTML = `
 <p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
 <p>Din grupul alăturat de butoane poți alege și o liniatură pentru tablă: <b>caroiaj</b> (ca în caietul de matematică), <b>dictando</b> (linii ca în caietul de scriere/dictando) sau <b>portativ</b> (ca în caietul de muzică). Cu butoanele −/+ reglezi mărimea pătratelor/liniilor și opacitatea lor, iar cu selectorul de culoare alegi manual culoarea liniaturii — implicit e alb, la 50% opacitate, potrivit fundalului negru al tablei.</p>
 <p><b>Lipire de rețea</b> — butonul de lângă liniatură activează lipirea de nodurile caroiajului: capetele liniei/liniei întrerupte/săgeții, colțurile dreptunghiului, centrul cercului și vârfurile poligonului "sar" automat la cel mai apropiat nod, la pasul curent al caroiajului (reglabil cu −/+). Nu afectează desenul liber (creion/radieră) și nici mutarea/redimensionarea elementelor deja existente. Dacă activezi lipirea fără caroiaj vizibil, acesta se activează automat, ca să vezi nodurile.</p>
-<p><b>Lipire de punct</b> — butonul de lângă lipirea de rețea face ca desenele să se lipească exact de punctele speciale ale instrumentelor geometrice vizibile: diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul (pivotul) raportorului și punctul unde va fi centrul cercului la compas. Funcționează și invers: dacă muți rigla/echerul/raportorul/compasul, punctul lui de referință se lipește de capătul celui mai apropiat desen deja existent — util ca să continui exact dintr-un segment trasat anterior.</p>
+<p><b>Lipire de punct</b> — butonul de lângă lipirea de rețea face ca desenele să se lipească exact de: punctele speciale ale instrumentelor geometrice vizibile (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas), <b>capătul oricărui desen existent</b> (linie, poligon, cerc etc.), <b>vârfurile unui dreptunghi/pătrat</b> deja desenat și <b>intersecția dintre două segmente</b> deja desenate — util, de exemplu, ca să continui exact dintr-un capăt de segment sau să pornești chiar din punctul unde se taie două linii. Funcționează indiferent dacă rețeaua (caroiajul) e activată sau nu. Funcționează și invers: dacă muți rigla/echerul/raportorul/compasul, punctul lui de referință se lipește de capătul celui mai apropiat desen deja existent.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -9557,7 +9705,7 @@ const HELP_CONTENT_HTML_EN = `
 <p>Navigate between pages with the corner arrows, add or delete pages, and change the board's background color from the palette at the bottom right of the toolbar.</p>
 <p>From the nearby button group you can also pick a ruling for the board: <b>grid</b> (like a math notebook), <b>ruled lines</b> (like a writing notebook) or <b>staff lines</b> (like a music notebook). Use the −/+ buttons to adjust the size of the squares/lines and their opacity, and use the color picker to manually choose the ruling color — it defaults to white at 50% opacity, suited to the board's black background.</p>
 <p><b>Snap to grid</b> — the button next to the ruling turns on snapping to the grid nodes: the ends of a line/dashed line/arrow, the corners of a rectangle, the center of a circle, and polygon vertices automatically "jump" to the nearest node, at the current grid spacing (adjustable with −/+). It doesn't affect freehand drawing (pencil/eraser) or moving/resizing already-placed elements. If you turn snapping on without the grid visible, the grid turns on automatically so you can see the nodes.</p>
-<p><b>Snap to point</b> — the button next to snap-to-grid makes drawings snap exactly to special points on the visible geometric tools: the ruler's 0 mark, the set square's right-angle vertex, the protractor's center (pivot), and the point where the compass's circle center will be. It also works the other way: moving the ruler/set square/protractor/compass snaps its own reference point to the nearest existing drawing's endpoint — handy for continuing exactly from a previously drawn segment.</p>
+<p><b>Snap to point</b> — the button next to snap-to-grid makes drawings snap exactly to: special points on the visible geometric tools (the ruler's 0 mark, the set square's right-angle vertex, the protractor's center, the compass's future circle center), <b>the endpoint of any existing drawing</b> (line, polygon, circle, etc.), <b>the corners of an already-drawn rectangle/square</b>, and <b>the intersection of two already-drawn segments</b> — handy for continuing exactly from a segment's end, or starting right where two lines cross. Works whether the grid is on or not. It also works the other way: moving the ruler/set square/protractor/compass snaps its own reference point to the nearest existing drawing's endpoint.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `
