@@ -341,6 +341,7 @@ let bgCtx = bgC.getContext('2d');
 // ("coordonate lume") — doar transformarea canvas-ului se deplasează, ca și cum
 // ai muta o cameră peste o suprafață infinită.
 let boardPanX = 0, boardPanY = 0;
+let boardZoom = 1; // nivelul de zoom al întregii table (1 = normal)
 let boardPanMode = false;
 
 // Golește complet un canvas, indiferent de transformarea curentă (scale DPR +
@@ -359,18 +360,14 @@ function clearCanvas(cx, canvas) {
 // transform CSS pe containerele lor, în loc să recalculăm poziția fiecărei
 // imagini în parte.
 function applyImagesPanTransform() {
-  const t = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px)` : 'none';
+  const t = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px) scale(${boardZoom})` : 'none';
   if (typeof imagesContainer !== 'undefined' && imagesContainer) imagesContainer.style.transform = t;
   if (typeof imagesContainerFront !== 'undefined' && imagesContainerFront) imagesContainerFront.style.transform = t;
 }
 
-// Deplasează panoramarea tablei cu (dx, dy) — folosit la tragerea cu un deget
-// când modul "Deget" (panoramare) e activ. Suprafața e nemărginită: nu există
-// nicio clemă/limită pe boardPanX/boardPanY, deci tabla se poate întinde oricât
-// de departe în orice direcție.
-function panBoardBy(dx, dy) {
-  boardPanX += dx;
-  boardPanY += dy;
+// Reîmprospătează tot ce depinde de pan/zoom-ul tablei — canvas-uri, imagini,
+// instrumente geometrice, fundal/liniatură, desene, selecție.
+function refreshBoardView() {
   applyCanvasPanTransform();
   applyImagesPanTransform();
   updateGuideSvgPan();
@@ -379,15 +376,40 @@ function panBoardBy(dx, dy) {
   drawSelectionHighlights();
 }
 
+// Deplasează panoramarea tablei cu (dx, dy) — folosit la tragerea cu un deget
+// când modul "Deget" (panoramare) e activ. Suprafața e nemărginită: nu există
+// nicio clemă/limită pe boardPanX/boardPanY, deci tabla se poate întinde oricât
+// de departe în orice direcție.
+// Aplică un factor de zoom pe toată tabla, păstrând fix punctul de sub
+// cursor/pinch (clientX, clientY) — folosită la Ctrl+rotița mouse-ului și la
+// pinch cu două degete.
+function zoomBoardAtPoint(factor, clientX, clientY) {
+  const r = boardDrawC.getBoundingClientRect();
+  const localX = clientX - r.left, localY = clientY - r.top;
+  const z0 = boardZoom;
+  const z1 = Math.max(0.2, Math.min(6, z0 * factor));
+  const worldX = (localX - boardPanX) / z0;
+  const worldY = (localY - boardPanY) / z0;
+  boardZoom = z1;
+  boardPanX = localX - worldX * z1;
+  boardPanY = localY - worldY * z1;
+}
+
+function panBoardBy(dx, dy) {
+  boardPanX += dx;
+  boardPanY += dy;
+  refreshBoardView();
+}
+
 // Instrumentele geometrice (riglă/echer/raportor/compas) sunt desenate în
 // aceleași coordonate "lume" ca desenele de pe tablă, dar trăiesc într-un
 // element SVG separat (#guide-svg), care nu avea niciun transform de
 // panoramare — de-aia rămâneau pe loc când se panorama tabla. Acum
-// #guide-svg primește aceeași translatare CSS, ca instrumentele să se
-// deplaseze împreună cu restul conținutului.
+// #guide-svg primește aceeași translatare + scalare, ca instrumentele să se
+// deplaseze și să se scaleze împreună cu restul conținutului.
 function updateGuideSvgPan() {
   const el = document.getElementById('guide-pan-group');
-  if (el) el.setAttribute('transform', (activeSurface === 'board') ? `translate(${boardPanX},${boardPanY})` : 'translate(0,0)');
+  if (el) el.setAttribute('transform', (activeSurface === 'board') ? `translate(${boardPanX},${boardPanY}) scale(${boardZoom})` : 'translate(0,0)');
 }
 let ctx = drawC.getContext('2d');
 let overlayCtx = overlayC.getContext('2d');
@@ -1445,7 +1467,7 @@ function hideAngleReadout(duration = 4000) {
 function applyCanvasPanTransform() {
   if (activeSurface === 'board') {
     [bgCtx, ctx, overlayCtx, selCtx].forEach(cx => {
-      cx.setTransform(DPR, 0, 0, DPR, boardPanX * DPR, boardPanY * DPR);
+      cx.setTransform(boardZoom * DPR, 0, 0, boardZoom * DPR, boardPanX * DPR, boardPanY * DPR);
     });
   } else if (pdfPanes[activeSurface]) {
     const t = getPaneContentTransform(activeSurface);
@@ -1523,11 +1545,12 @@ function drawBoardRuling() {
   const scale = rulingSize / 28;
   const panX = (activeSurface === 'board') ? boardPanX : 0;
   const panY = (activeSurface === 'board') ? boardPanY : 0;
+  const zoom = (activeSurface === 'board') ? boardZoom : 1;
   // Domeniul, în coordonate "lume", efectiv vizibil pe ecran acum — liniatura
   // trebuie desenată aici, nu de la 0, ca să acopere ecranul indiferent cât
-  // de departe s-a panoramat tabla (efect de suprafață infinită).
-  const x0 = -panX, x1 = w - panX;
-  const y0 = -panY, y1 = h - panY;
+  // de departe s-a panoramat sau s-a mărit/micșorat tabla.
+  const x0 = -panX / zoom, x1 = (w - panX) / zoom;
+  const y0 = -panY / zoom, y1 = (h - panY) / zoom;
   cx.save();
   cx.strokeStyle = getRulingColor();
 
@@ -2118,7 +2141,7 @@ const pos = e => {
   const r = drawC.getBoundingClientRect();
   let x = e.clientX - r.left, y = e.clientY - r.top;
   if (activeSurface === 'board') {
-    x -= boardPanX; y -= boardPanY;
+    x = (x - boardPanX) / boardZoom; y = (y - boardPanY) / boardZoom;
   } else if (pdfPanes[activeSurface]) {
     // Fereastra PDF: convertim din pixeli de ecran în coordonate "conținut
     // PDF" (independente de pan/zoom-ul curent al fișei), ca stroke-urile
@@ -3797,8 +3820,46 @@ function handleDblClick(e) {
 }
 
 let boardPanDragId = null, boardPanLastX = 0, boardPanLastY = 0;
+let boardCtrlPanActive = false;
+// Puncte de atingere urmărite pentru pinch cu două degete (zoom + panoramare
+// simultană a întregii table), independent de modul "Deget" (panoramare).
+let boardTouchPts = new Map();
+let boardPinchLastDist = null, boardPinchLastMid = null;
+
 boardDrawC.addEventListener('pointerdown', function(e) {
   activatePane('board');
+
+  if (e.pointerType === 'touch') {
+    boardTouchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (boardTouchPts.size === 2) {
+      // Al doilea deget atinge tabla — pornim pinch (zoom + panoramare),
+      // anulând orice linie începută cu primul deget, ca gestul cu 2
+      // degete să nu lase o urmă nedorită pe desen.
+      boardPanDragId = null;
+      if (drawing) {
+        drawing = false;
+        currentStroke = [];
+        clearCanvas(overlayCtx, overlayC);
+        redrawStrokes();
+      }
+      const pts = Array.from(boardTouchPts.values());
+      boardPinchLastDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      boardPinchLastMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      e.preventDefault();
+      return;
+    }
+    if (boardTouchPts.size > 2) { e.preventDefault(); return; }
+  }
+
+  if (e.pointerType === 'mouse' && e.ctrlKey && e.button === 0) {
+    boardCtrlPanActive = true;
+    boardPanDragId = e.pointerId;
+    boardPanLastX = e.clientX; boardPanLastY = e.clientY;
+    try { boardDrawC.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+    return;
+  }
+
   if (boardPanMode) {
     boardPanDragId = e.pointerId;
     boardPanLastX = e.clientX; boardPanLastY = e.clientY;
@@ -3809,6 +3870,36 @@ boardDrawC.addEventListener('pointerdown', function(e) {
   handlePointerDown(e);
 });
 boardDrawC.addEventListener('pointermove', function(e) {
+  if (e.pointerType === 'touch' && boardTouchPts.has(e.pointerId)) {
+    boardTouchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (boardTouchPts.size === 2) {
+      const pts = Array.from(boardTouchPts.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      if (boardPinchLastDist != null) {
+        const factor = dist / boardPinchLastDist;
+        // Zoom centrat pe mijlocul curent al celor două degete — dacă
+        // micșorezi ținând degetele în stânga-sus, totul se micșorează și
+        // se strânge spre acel punct, exact ca la orice aplicație obișnuită.
+        zoomBoardAtPoint(factor, mid.x, mid.y);
+        boardPanX += (mid.x - boardPinchLastMid.x);
+        boardPanY += (mid.y - boardPinchLastMid.y);
+        refreshBoardView();
+      }
+      boardPinchLastDist = dist; boardPinchLastMid = mid;
+      e.preventDefault();
+      return;
+    }
+  }
+
+  if (boardCtrlPanActive && boardPanDragId === e.pointerId) {
+    const dx = e.clientX - boardPanLastX, dy = e.clientY - boardPanLastY;
+    boardPanLastX = e.clientX; boardPanLastY = e.clientY;
+    panBoardBy(dx, dy);
+    e.preventDefault();
+    return;
+  }
+
   if (boardPanMode && boardPanDragId === e.pointerId) {
     const dx = e.clientX - boardPanLastX, dy = e.clientY - boardPanLastY;
     boardPanLastX = e.clientX; boardPanLastY = e.clientY;
@@ -3819,6 +3910,19 @@ boardDrawC.addEventListener('pointermove', function(e) {
   handlePointerMove(e);
 });
 function endBoardPanDrag(e) {
+  if (e.pointerType === 'touch') {
+    boardTouchPts.delete(e.pointerId);
+    if (boardTouchPts.size < 2) { boardPinchLastDist = null; boardPinchLastMid = null; }
+    if (boardTouchPts.size === 0 && boardPanDragId === null && !boardPanMode) {
+      // gestul cu 2 degete s-a terminat complet, fără alt mod activ
+      return;
+    }
+  }
+  if (boardCtrlPanActive && boardPanDragId === e.pointerId) {
+    boardCtrlPanActive = false;
+    boardPanDragId = null;
+    return;
+  }
   if (boardPanMode && boardPanDragId === e.pointerId) {
     boardPanDragId = null;
     return;
@@ -3829,9 +3933,22 @@ boardDrawC.addEventListener('pointerup', endBoardPanDrag);
 boardDrawC.addEventListener('pointercancel', endBoardPanDrag);
 boardDrawC.addEventListener('pointerleave', function(e) {
   if (boardPanMode && boardPanDragId === e.pointerId) return;
+  if (boardCtrlPanActive && boardPanDragId === e.pointerId) return;
   handlePointerLeave(e);
 });
 boardDrawC.addEventListener('dblclick', handleDblClick);
+
+// Zoom cu Ctrl+rotița mouse-ului (sau pinch de trackpad, raportat tot ca
+// 'wheel' cu ctrlKey=true), centrat pe poziția cursorului.
+boardDrawC.addEventListener('wheel', function(e) {
+  if (!e.ctrlKey || activeSurface !== 'board') return;
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  zoomBoardAtPoint(factor, e.clientX, e.clientY);
+  refreshBoardView();
+}, { passive: false });
+
+
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -7383,11 +7500,8 @@ document.getElementById('btn-panmode').onclick = () => {
     : (LANG === 'en' ? '✎ Drawing mode restored' : '✎ Modul de desen a fost restaurat'));
 };
 document.getElementById('btn-recenter-board').onclick = () => {
-  boardPanX = 0; boardPanY = 0;
-  applyCanvasPanTransform();
-  applyImagesPanTransform();
-  updateGuideSvgPan();
-  drawBg(); redrawStrokes(); drawSelectionHighlights();
+  boardPanX = 0; boardPanY = 0; boardZoom = 1;
+  refreshBoardView();
   showToast(LANG === 'en' ? '✓ Board recentered' : '✓ Tabla a revenit la poziția inițială');
 };
 document.getElementById('btn-compass').onclick = () => toggleGeoGuide('compass', 'btn-compass');
@@ -8221,9 +8335,10 @@ function renderGeoRuler() {
   rotateHandle.setAttribute('transform', `translate(${L - 34},${T / 2})`);
   resizeHandle.setAttribute('x', L - 8);
   resizeHandle.setAttribute('y', T / 2 - 8);
-  // Butonul-creion (pornește un segment de precizie 0→3cm) — sub mijlocul
-  // riglei, ca să nu se suprapună cu mânerele de rotire/redimensionare.
-  pencilBtn.setAttribute('transform', `translate(${L / 2},${T + 16})`);
+  // Butonul-creion (pornește un segment de precizie 0→3cm) — în interiorul
+  // riglei, la mijlocul ei, ca să nu se mai suprapună cu mânerele de reglaj
+  // (care ies acum în exterior, cu linie-indicator, la desenul de precizie).
+  pencilBtn.setAttribute('transform', `translate(${L / 2},${T / 2})`);
   closeBtn.setAttribute('transform', `translate(-16,${T / 2})`);
 }
 
@@ -8256,8 +8371,21 @@ function buildGeoSetsquare() {
   });
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
+
+  // Căsuță de bifat — desenează un mic pătrățel la vârful unghiului drept,
+  // ca să-l evidențieze (convenția uzuală din geometrie).
+  const rightAngleBox = geoEl('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3,
+    fill: '#ffffff', stroke: '#2d9d4f', 'stroke-width': 1.5, style: 'cursor:pointer; pointer-events:auto;' });
+  rightAngleBox.setAttribute('data-checked', '0');
+  g.appendChild(rightAngleBox);
+  const rightAngleCheck = geoEl('path', { d: '', fill: 'none', stroke: '#2d9d4f',
+    'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'pointer-events': 'none' });
+  g.appendChild(rightAngleCheck);
+  rightAngleBox.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  rightAngleBox.addEventListener('click', ev => { ev.stopPropagation(); toggleSetsquareRightAngleMark(); });
+
   guidePanGroup.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck };
 
   resizeHandleW.addEventListener('pointerdown', e => {
     if (geoSegBuild) confirmGeoSegBuild();
@@ -8281,7 +8409,7 @@ function buildGeoSetsquare() {
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn } = geoGroups.setsquare;
+  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck } = geoGroups.setsquare;
   const W = st.width, H = st.height;
   body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
 
@@ -8314,6 +8442,32 @@ function renderGeoSetsquare() {
       ticks.appendChild(t2);
     }
   }
+  // Graduații și pe ipotenuză — de la vârful catetei orizontale (W,0) spre
+  // vârful catetei verticale (0,-H), cu ticurile îndreptate spre interiorul
+  // triunghiului (aceeași convenție ca la celelalte două catete).
+  const hypLen = Math.hypot(W, H) || 1;
+  const hypDir = { x: -W / hypLen, y: -H / hypLen };
+  const hypInward = { x: -H / hypLen, y: W / hypLen };
+  const totalMMHyp = Math.round(hypLen / PX_PER_MM);
+  for (let mm = 0; mm <= totalMMHyp; mm++) {
+    const d = mm * PX_PER_MM;
+    const px = W + hypDir.x * d, py = hypDir.y * d;
+    const isCM = mm % 10 === 0;
+    const isHalf = mm % 5 === 0;
+    const tickLen = isCM ? 16 : (isHalf ? 11 : 6);
+    const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
+    ticks.appendChild(geoEl('line', {
+      x1: px, y1: py,
+      x2: px + hypInward.x * tickLen, y2: py + hypInward.y * tickLen,
+      stroke: 'rgba(20,20,20,0.65)', 'stroke-width': sw
+    }));
+    if (isCM && mm > 0) {
+      const lx = px + hypInward.x * (tickLen + 9), ly = py + hypInward.y * (tickLen + 9);
+      const t3 = geoEl('text', { class: 'guide-label', x: lx - 4, y: ly + 3 });
+      t3.textContent = mm / 10;
+      ticks.appendChild(t3);
+    }
+  }
   // Mânerul de rotire — lângă colțul unghiului drept (diviziunea 0 comună
   // ambelor catete), ca rotația să se simtă "în raport cu diviziunea 0".
   rotateHandle.setAttribute('transform', 'translate(24,-24)');
@@ -8322,10 +8476,13 @@ function renderGeoSetsquare() {
   // "Scalare în sus" — la capătul catetei verticale.
   resizeHandleH.setAttribute('transform', `translate(0,${-H - 2})`);
   closeBtn.setAttribute('transform', 'translate(-16,16)');
-  // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în afara
-  // triunghiului (pe direcția normalei către exterior), ca să nu acopere
-  // gradațiile și să fie clar cărei muchii îi aparțin.
-  const off = 20;
+  rightAngleBox.setAttribute('transform', 'translate(-16,-16)');
+  rightAngleCheck.setAttribute('transform', 'translate(-16,-16)');
+  // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în
+  // interiorul triunghiului (pe direcția normalei spre interior) — nu în
+  // exterior, ca să nu se mai suprapună cu mânerele de reglaj (care ies ele
+  // în exterior, cu linie-indicator, la desenul de precizie).
+  const off = -22;
   const mids = [
     { x: W / 2, y: 0, nx: 0, ny: 1 },                                  // bază orizontală
     { x: 0, y: -H / 2, nx: -1, ny: 0 },                                // catetă verticală
@@ -8428,6 +8585,42 @@ function buildGeoProtractor() {
   guidePanGroup.appendChild(g);
   geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   renderGeoProtractor();
+}
+
+// Desenează un mic pătrățel la vârful unghiului drept al echerului (cu
+// laturile pe direcția celor două catete) — convenția uzuală din geometrie
+// pentru a evidenția un unghi de 90°.
+function finalizeSetsquareRightAngleMark() {
+  const st = geoGuides.setsquare;
+  const page = getCurrentPage();
+  if (!page) return;
+  const s = 20; // latura pătrățelului, în pixeli
+  const localPts = [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: -s }, { x: 0, y: -s }];
+  const points = localPts.map(p => geoLocalToWorld(st, p.x, p.y));
+  pushStroke(page, { type: 'polygon', points, color, size: lastPenSize, closed: true });
+  redrawStrokes();
+  updateStatus();
+  showToast('✓ Unghi drept evidențiat');
+}
+
+function toggleSetsquareRightAngleMark() {
+  const { rightAngleBox, rightAngleCheck } = geoGroups.setsquare;
+  const isChecked = rightAngleBox.getAttribute('data-checked') === '1';
+  if (isChecked) {
+    rightAngleBox.setAttribute('data-checked', '0');
+    rightAngleBox.setAttribute('fill', '#ffffff');
+    rightAngleCheck.setAttribute('d', '');
+    return;
+  }
+  rightAngleBox.setAttribute('data-checked', '1');
+  rightAngleBox.setAttribute('fill', '#2d9d4f');
+  rightAngleCheck.setAttribute('d', 'M -4 0 L -1 4 L 5 -5');
+  finalizeSetsquareRightAngleMark();
+  setTimeout(() => {
+    rightAngleBox.setAttribute('data-checked', '0');
+    rightAngleBox.setAttribute('fill', '#ffffff');
+    rightAngleCheck.setAttribute('d', '');
+  }, 600);
 }
 
 function toggleProtractorArcCheckbox() {
@@ -9021,9 +9214,10 @@ function finalizeProtractorArc(skipUsageRecord) {
 // tablei, ca instrumentul să apară exact în zona vizibilă acum.
 function fitGeoGuideToViewport(name) {
   const st = geoGuides[name];
-  const vw = wrap.clientWidth, vh = wrap.clientHeight;
-  const viewLeft = -boardPanX, viewTop = -boardPanY;
-  const margin = 24;
+  const zoom = boardZoom || 1;
+  const vw = wrap.clientWidth / zoom, vh = wrap.clientHeight / zoom;
+  const viewLeft = -boardPanX / zoom, viewTop = -boardPanY / zoom;
+  const margin = 24 / zoom;
   const availW = Math.max(160, vw - margin * 2);
   const availH = Math.max(160, vh - margin * 2);
 
@@ -9295,18 +9489,14 @@ function startSetsquarePencilSeg(edgeIndex) {
   startGeoSegBuild(geoPencilSegKind(), zero, three, color, lastPenSize, 'setsquare', axis);
 }
 
-// Mâner semitransparent, cu o cruciuliță mică exact în centru — folosit la
-// cele două puncte de reglaj ale segmentului de precizie (riglă/echer), ca
-// gradațiile de dedesubt să rămână vizibile prin mâner, pentru o fixare
-// mai exactă a lungimii segmentului.
+// Mâner semitransparent — folosit la cele două puncte de reglaj ale
+// segmentului de precizie (riglă/echer), ca gradațiile de dedesubt să
+// rămână vizibile prin mâner, pentru o fixare mai exactă a lungimii
+// segmentului.
 function geoBuildTransparentPointHandle(color) {
   const g = geoEl('g', { class: 'guide-handle' });
   g.appendChild(geoEl('circle', { r: 13, fill: color, opacity: '0.32',
     stroke: color, 'stroke-width': 1.5, 'stroke-opacity': '0.75' }));
-  g.appendChild(geoEl('line', { x1: -6, y1: 0, x2: 6, y2: 0,
-    stroke: color, 'stroke-width': 1.4, opacity: '0.9' }));
-  g.appendChild(geoEl('line', { x1: 0, y1: -6, x2: 0, y2: 6,
-    stroke: color, 'stroke-width': 1.4, opacity: '0.9' }));
   return g;
 }
 
@@ -9550,6 +9740,8 @@ const HELP_CONTENT_HTML = `
   <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
 </ul>
 
+<p><b>Zoom pe tablă</b> — cu două degete (pinch), tot ce e pe tablă se mărește sau se micșorează, centrat exact pe mijlocul dintre degete (dacă micșorezi ținând degetele în stânga-sus, totul se strânge spre acel punct). Pe calculator: <b>Ctrl + click și trage</b> plimbă tabla, iar <b>Ctrl + rotița mouse-ului</b> (sau pinch pe trackpad) mărește/micșorează, centrat pe poziția cursorului. Butonul de recentrare readuce tabla la poziția și mărimea inițială.</p>
+
 <h4>Matematică</h4>
 <ul>
   <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
@@ -9650,6 +9842,8 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then press the check mark (✓) to close the shape.</li>
   <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
 </ul>
+
+<p><b>Board zoom</b> — with two fingers (pinch), everything on the board zooms in or out, centered exactly on the midpoint between your fingers (if you pinch to zoom out while your fingers are at the top-left, everything shrinks toward that point). On a computer: <b>Ctrl + click and drag</b> pans the board, and <b>Ctrl + mouse wheel</b> (or a trackpad pinch) zooms in/out, centered on the cursor position. The recenter button brings the board back to its starting position and zoom level.</p>
 
 <h4>Math</h4>
 <ul>

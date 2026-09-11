@@ -69,8 +69,8 @@
     }
     #selection-canvas { pointer-events: none; z-index: 4; }
     #draw-canvas { cursor: default; z-index: 3; }
-    #images-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-    #images-container-front { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }
+    #images-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; transform-origin: 0 0; }
+    #images-container-front { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; transform-origin: 0 0; }
     #images-container .image-item, #images-container-front .image-item { pointer-events: auto; touch-action: none; }
     #images-container.hidden-in-replay { display: none !important; }
 
