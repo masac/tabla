@@ -706,6 +706,13 @@ function renderPdfPane(name) {
       els.bg.style.height = scaledViewport.height + 'px';
       els.bg.getContext('2d').drawImage(off, 0, 0);
       updatePdfPanePosition(name);
+      // Dacă schimbarea de pagină a venit din tragerea barei de defilare,
+      // aplicăm acum poziția exactă (nu doar vârful paginii), ca mișcarea
+      // să continue lin, nu doar să sară de la o pagină la alta.
+      if (pane._pendingScrollFrac != null) {
+        setPanYFromFraction(name, pane._pendingScrollFrac);
+        pane._pendingScrollFrac = null;
+      }
       els.bg.style.opacity = '1';
       pane._lastRenderedPage = pane.pageNum;
       els.root.classList.add('has-doc');
@@ -778,7 +785,7 @@ function updatePdfPanePosition(name) {
   els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
 
   if (els.bgAdj && pane.adjNum) {
-    const gap = 16;
+    const gap = 0;
     const wA = pane.adjWidth, hA = pane.adjHeight;
     const centerXA = (rect.width - wA) / 2;
     const adjY = pane.adjDir > 0
@@ -858,7 +865,7 @@ function checkPdfPageBoundaryScroll(name) {
   if (!els.bg || !els.bg.height) return;
   const rect = els.root.getBoundingClientRect();
   const h = els.bg.height;
-  const gap = 16;
+  const gap = 0;
   const centerY = Math.max(0, (rect.height - h) / 2);
   const topEdge = centerY + pane.panY;
   const bottomEdge = topEdge + h;
@@ -871,7 +878,14 @@ function checkPdfPageBoundaryScroll(name) {
       els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
       updatePdfPanePosition(name);
       renderAdjacentPage(name, 1);
+      checkPdfPageBoundaryScroll(name); // recuperăm din urmă dacă s-a sărit peste mai multe pagini deodată
     } else {
+      // Pagina următoare nu e încă gata (derulare mai rapidă decât randarea
+      // ei) — limităm derularea exact la finalul conținutului deja pregătit,
+      // ca să nu se vadă vreodată fundalul întunecat al ferestrei (o mică
+      // rezistență temporară, mult mai bună decât o bandă neagră).
+      pane.panY = rect.height - margin - h - centerY;
+      updatePdfPanePosition(name);
       renderAdjacentPage(name, 1);
     }
   } else if (topEdge > margin && pane.pageNum > 1) {
@@ -882,7 +896,12 @@ function checkPdfPageBoundaryScroll(name) {
       els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
       updatePdfPanePosition(name);
       renderAdjacentPage(name, -1);
+      checkPdfPageBoundaryScroll(name);
     } else {
+      // La fel, în sens invers — limităm la vârful conținutului deja
+      // pregătit.
+      pane.panY = margin - centerY;
+      updatePdfPanePosition(name);
       renderAdjacentPage(name, -1);
     }
   }
@@ -1307,6 +1326,21 @@ attachPanePanZoom('top');
 // Bara de defilare a ferestrei PDF — interactivă: apeși sau tragi (mouse,
 // stylus sau deget) oriunde pe ea ca să sari direct la poziția respectivă
 // din fișă (aproximat pe baza numărului de pagini).
+// Setează panY astfel încât fracția de derulare din interiorul paginii
+// curente (0 = vârf, 1 = final) să corespundă exact valorii cerute —
+// folosită la tragerea barei de defilare, ca poziția în pagină să fie
+// precisă, nu doar vârful ei.
+function setPanYFromFraction(name, frac) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  const rect = els.root.getBoundingClientRect();
+  const h = els.bg.height || 0;
+  const scrollableH = Math.max(0, h - rect.height);
+  pane.panY = -frac * scrollableH;
+  pane.panX = 0;
+  updatePdfPanePosition(name);
+}
+
 function setupPdfScrollbarDrag(name) {
   const els = getPaneEls(name);
   if (!els.scrollTrack) return;
@@ -1318,9 +1352,25 @@ function setupPdfScrollbarDrag(name) {
     let frac = (clientY - rect.top) / trackH;
     frac = Math.max(0, Math.min(0.999, frac));
     const total = Math.max(1, pdfTotalPages);
-    const targetPage = Math.max(1, Math.min(pdfTotalPages, Math.floor(frac * total) + 1));
+    // Poziția "virtuală" în tot documentul (0..total) — partea întreagă e
+    // numărul paginii, partea zecimală e cât de mult ai derulat în ea.
+    const overall = frac * total;
+    const targetPage = Math.max(1, Math.min(pdfTotalPages, Math.floor(overall) + 1));
+    const withinFrac = overall - (targetPage - 1);
+
+    const pane = pdfPanes[name];
     activatePane(name);
-    jumpToPdfPage(name, targetPage);
+    if (targetPage === pane.pageNum) {
+      // Rămânem pe aceeași pagină deja randată — doar mutăm panY, fără nicio
+      // randare nouă, ca mișcarea să fie perfect lină la tragere.
+      setPanYFromFraction(name, withinFrac);
+    } else {
+      // Pagină diferită — trebuie randată din nou (nu o avem gata), dar
+      // aplicăm poziția exactă cerută imediat ce se termină randarea (vezi
+      // renderPdfPane), nu doar vârful noii pagini.
+      pane._pendingScrollFrac = withinFrac;
+      jumpToPdfPage(name, targetPage);
+    }
   }
 
   els.scrollTrack.addEventListener('pointerdown', function(e) {
@@ -8946,14 +8996,22 @@ function buildGeoSetsquare() {
     if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = 'setsquare';
-    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareW' };
+    const st = geoGuides.setsquare;
+    const p = pos(e);
+    const dx = p.x - st.x, dy = p.y - st.y;
+    const startProj = dx * Math.cos(st.angle) + dy * Math.sin(st.angle);
+    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareW', startProj, origWidth: st.width };
     try { resizeHandleW.setPointerCapture(e.pointerId); } catch (err) {}
   });
   resizeHandleH.addEventListener('pointerdown', e => {
     if (geoSegBuild) confirmGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = 'setsquare';
-    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareH' };
+    const st = geoGuides.setsquare;
+    const p = pos(e);
+    const dx = p.x - st.x, dy = p.y - st.y;
+    const startProj = dx * Math.sin(st.angle) - dy * Math.cos(st.angle);
+    geoActiveDrag = { name: 'setsquare', mode: 'resizeSetsquareH', startProj, origHeight: st.height };
     try { resizeHandleH.setPointerCapture(e.pointerId); } catch (err) {}
   });
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
@@ -9040,7 +9098,7 @@ function renderGeoSetsquare() {
   // interiorul triunghiului (pe direcția normalei spre interior) — nu în
   // exterior, ca să nu se mai suprapună cu mânerele de reglaj (care ies ele
   // în exterior, cu linie-indicator, la desenul de precizie).
-  const off = -22;
+  const off = -34;
   const mids = [
     { x: W / 2, y: 0, nx: 0, ny: 1 },                                  // bază orizontală
     { x: 0, y: -H / 2, nx: -1, ny: 0 },                                // catetă verticală
@@ -9622,18 +9680,19 @@ function geoDragMove(e) {
       renderGeoProtractor();
     }
   } else if (geoActiveDrag.mode === 'resizeSetsquareW') {
-    // Lățimea (cateta orizontală) — proiecție pe axa locală +X ("Scalare
-    // spre dreapta"), independentă de înălțime.
+    // Lățimea (cateta orizontală) — deplasare relativă față de proiecția
+    // inițială a atingerii, adăugată la lățimea avută la începutul tragerii
+    // (nu poziția absolută a degetului) — altfel, cum mânerul nu mai stă
+    // chiar în vârf, redimensionarea "sărea" la atingere.
     const dx = p.x - st.x, dy = p.y - st.y;
     const proj = dx * Math.cos(st.angle) + dy * Math.sin(st.angle);
-    st.width = Math.max(120, Math.min(1400, proj));
+    st.width = Math.max(120, Math.min(1400, geoActiveDrag.origWidth + (proj - geoActiveDrag.startProj)));
     renderGeoSetsquare();
   } else if (geoActiveDrag.mode === 'resizeSetsquareH') {
-    // Înălțimea (cateta verticală) — proiecție pe axa locală -Y ("Scalare
-    // în sus"), independentă de lățime.
+    // Înălțimea (cateta verticală) — la fel, deplasare relativă.
     const dx = p.x - st.x, dy = p.y - st.y;
     const proj = dx * Math.sin(st.angle) - dy * Math.cos(st.angle);
-    st.height = Math.max(120, Math.min(1400, proj));
+    st.height = Math.max(120, Math.min(1400, geoActiveDrag.origHeight + (proj - geoActiveDrag.startProj)));
     renderGeoSetsquare();
   } else if (geoActiveDrag.mode === 'compassMove') {
     st.x = p.x - geoActiveDrag.offX;
@@ -10217,13 +10276,15 @@ function renderGeoSegBuild() {
     label1.textContent = formatCmValue(v1);
   }
 
+  // Butoanele ✓/✕ și eticheta de lungime — pe aceeași direcție "spre
+  // exterior" ca mânerele (nu o euristică separată "preferă susul
+  // ecranului"), altfel puteau ajunge peste echer pe muchii a căror parte
+  // exterioară e în jos (ex. baza orizontală).
   const dx = p1.x - p0.x, dy = p1.y - p0.y;
   const len = Math.hypot(dx, dy) || 1;
-  let nx = -dy / len, ny = dx / len;
-  if (ny > 0) { nx = -nx; ny = -ny; }
   const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
-  const offset = 38;
-  const bx = mx + nx * offset, by = my + ny * offset;
+  const btnOffset = 46; // dincolo de mânere + etichete
+  const bx = mx + n.x * btnOffset, by = my + n.y * btnOffset;
   okBtn.setAttribute('transform', `translate(${bx - 24},${by})`);
   cancelBtn.setAttribute('transform', `translate(${bx + 24},${by})`);
   lenLabel.setAttribute('x', bx);
@@ -10243,7 +10304,7 @@ function confirmGeoSegBuild() {
       pushStroke(page, { points: [{ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }], color: strokeColor, size, erase: false, dashed: kind === 'dashed' });
     }
     showToast('✓ Segment desenat (' + (dist / PX_PER_CM).toFixed(1) + ' cm)');
-    animateGeoPencilDraw({ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y });
+    animateGeoPencilDraw({ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }, geoSegBuild.axis && geoSegBuild.axis.normal);
   }
   cancelGeoSegBuild();
   redrawStrokes();
@@ -10251,9 +10312,29 @@ function confirmGeoSegBuild() {
 }
 
 // Mică animație "sugestivă": un creionaș parcurge segmentul tocmai desenat,
-// de la un capăt la celălalt, apoi dispare.
-function animateGeoPencilDraw(p0, p1) {
-  const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+// de la un capăt la celălalt, apoi dispare. Traiectoria e decalată puțin în
+// afara riglei/echerului (pe direcția "spre exterior" a muchiei folosite),
+// nu chiar pe linia trasă — altfel creionul se suprapunea vizual cu corpul
+// instrumentului și părea că se mișcă "în interiorul" lui, nu de-a lungul
+// segmentului desenat.
+function animateGeoPencilDraw(p0, p1, normal) {
+  // Direcția de deplasare (de-a lungul segmentului) e diferită de unghiul de
+  // ținere al creionului: un creion real se ține înclinat cam la 135° față
+  // de linia trasă, nu paralel cu ea. Sunt două variante posibile (+135°
+  // sau -135°) — alegem cea la care CORPUL creionului (partea din spatele
+  // vârfului) se înclină spre exteriorul ghidajului, nu în interiorul lui
+  // (relevant mai ales la echer, unde interiorul triunghiului e aproape).
+  const travelDeg = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+  let tilt = 135;
+  if (normal) {
+    let bestDot = -Infinity;
+    [135, -135].forEach(candidate => {
+      const bodyRad = (travelDeg + candidate + 180) * Math.PI / 180; // direcția spre spatele corpului
+      const dot = Math.cos(bodyRad) * normal.x + Math.sin(bodyRad) * normal.y;
+      if (dot > bestDot) { bestDot = dot; tilt = candidate; }
+    });
+  }
+  const angle = travelDeg + tilt;
   const pencil = geoEl('g', { 'pointer-events': 'none' });
   // Creionaș orientat spre direcția de deplasare (vârful înainte): gumă,
   // corp galben, lemn și mină — fără cerc de fundal, ca să se vadă doar el.
@@ -10265,11 +10346,19 @@ function animateGeoPencilDraw(p0, p1) {
   guidePanGroup.appendChild(pencil);
   const duration = 1400;
   const start = performance.now();
+  const angleRad = angle * Math.PI / 180;
+  // Vârful minei e la local (17, 0) — nu la originea grupului (0,0), care e
+  // undeva pe la mijlocul corpului creionului. Ca vârful (nu corpul) să
+  // urmărească exact segmentul real, decalăm originea grupului înapoi cu
+  // exact lungimea până la vârf, pe direcția în care e rotit creionul.
+  const tipLen = 17;
+  const tipDx = tipLen * Math.cos(angleRad), tipDy = tipLen * Math.sin(angleRad);
   function step(now) {
     const t = Math.min(1, (now - start) / duration);
     const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    const x = p0.x + (p1.x - p0.x) * ease;
-    const y = p0.y + (p1.y - p0.y) * ease;
+    const targetX = p0.x + (p1.x - p0.x) * ease;
+    const targetY = p0.y + (p1.y - p0.y) * ease;
+    const x = targetX - tipDx, y = targetY - tipDy;
     pencil.setAttribute('transform', `translate(${x},${y}) rotate(${angle})`);
     pencil.setAttribute('opacity', t > 0.85 ? String(1 - (t - 0.85) / 0.15) : '1');
     if (t < 1) {
