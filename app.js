@@ -68,6 +68,7 @@ const UI_TEXT = {
   'Alb': 'White',
   'Încarcă o fișă de lucru/test în format PDF': 'Load a worksheet/test as PDF',
   'Comută între tabla normală și fișa PDF': 'Switch between the normal board and the PDF sheet',
+  'Arată/ascunde tabla dedesubt (împarte ecranul cu fișa PDF)': 'Show/hide the board below (split the screen with the PDF sheet)',
   'Gri': 'Gray',
   'Gri deschis': 'Light gray',
   'Bej': 'Beige',
@@ -363,6 +364,17 @@ function applyImagesPanTransform() {
   const t = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px) scale(${boardZoom})` : 'none';
   if (typeof imagesContainer !== 'undefined' && imagesContainer) imagesContainer.style.transform = t;
   if (typeof imagesContainerFront !== 'undefined' && imagesContainerFront) imagesContainerFront.style.transform = t;
+
+  // Containerul de imagini al ferestrei PDF — aceeași transformare de
+  // conținut ca desenele de pe fișă, ca imaginile lipite peste PDF să
+  // rămână lipite de conținutul lui la panoramare și să se scaleze la zoom.
+  if (pdfPanes[activeSurface]) {
+    const els = getPaneEls(activeSurface);
+    if (els.images) {
+      const ct = getPaneContentTransform(activeSurface);
+      els.images.style.transform = `translate(${ct.offX}px, ${ct.offY}px) scale(${ct.scale})`;
+    }
+  }
 }
 
 // Reîmprospătează tot ce depinde de pan/zoom-ul tablei — canvas-uri, imagini,
@@ -511,15 +523,32 @@ let pdfTotalPages = 0;
 
 function makePdfPane() {
   return {
-    strokes: [], images: [],
+    pagesData: {}, // pageNum -> { strokes: [], images: [] } — separat pe fiecare pagină a fișei
     undoStack: [], redoStack: [],
     pageNum: 1, zoom: 1, panX: 0, panY: 0,
     canvasW: 0, canvasH: 0,
     finalScale: 1, // scala reală curentă a bitmap-ului PDF (baseScale × zoom) — folosită ca să convertim corect coordonatele stroke-urilor la pan/zoom
-    panMode: false // când e activ, un singur deget plimbă fișa (nu mai desenează)
+    panMode: false, // când e activ, un singur deget plimbă fișa (nu mai desenează)
+    // Derulare continuă: pagina imediat următoare (sau anterioară) e
+    // pre-randată și poziționată direct lângă cea curentă, ca scroll-ul să
+    // treacă lin dintr-una în alta, fără nicio "săritură" — o săritură reală
+    // de pagină se întâmplă doar la apăsarea butoanelor/săgeților stânga-dreapta.
+    adjNum: null,   // numărul paginii adiacente deja pre-randate (sau null)
+    adjDir: 0,      // +1 = adiacenta e dedesubt (înainte), -1 = deasupra (înapoi)
+    adjWidth: 0, adjHeight: 0
   };
 }
 let pdfPanes = { top: makePdfPane() };
+
+// Datele (desene + imagini) ale unei anumite pagini din fișa PDF — create
+// la prima accesare, ca fiecare pagină să-și păstreze propriile adnotări,
+// separat de restul paginilor.
+function getPdfPageData(pane, pageNum) {
+  if (!pane.pagesData[pageNum]) {
+    pane.pagesData[pageNum] = { strokes: [], images: [] };
+  }
+  return pane.pagesData[pageNum];
+}
 
 // ================================================================
 // FUNCȚII PENTRU IMAGINI
@@ -527,7 +556,8 @@ let pdfPanes = { top: makePdfPane() };
 
 function getCurrentPage() {
   if (pdfModeActive && activeSurface === 'top') {
-    return pdfPanes[activeSurface];
+    const pane = pdfPanes[activeSurface];
+    return getPdfPageData(pane, pane.pageNum);
   }
   return pages[currentPageIdx];
 }
@@ -556,10 +586,14 @@ function getPaneEls(name) {
   return {
     root,
     bg: root.querySelector('.pdf-pane-bg'),
+    bgAdj: root.querySelector('.pdf-pane-bg-adj'),
     draw: root.querySelector('.pdf-pane-draw'),
     overlay: root.querySelector('.pdf-pane-overlay'),
     select: root.querySelector('.pdf-pane-select'),
-    pagenum: root.querySelector('.pdf-pane-pagenum')
+    images: root.querySelector('.pdf-pane-images'),
+    pagenum: root.querySelector('.pdf-pane-pagenum'),
+    scrollTrack: root.querySelector('.pdf-scrollbar-track'),
+    scrollThumb: root.querySelector('.pdf-scrollbar-thumb')
   };
 }
 
@@ -639,6 +673,13 @@ function renderPdfPane(name) {
   // se panorama rapid). Marcăm doar că mai e nevoie de o randare, imediat ce se termină cea curentă.
   if (pane._rendering) { pane._renderPending = true; return; }
   pane._rendering = true;
+  // Trecere lină (fade) între pagini: dacă se schimbă efectiv numărul
+  // paginii (nu doar zoom-ul), pagina veche dispare treptat, iar cea nouă
+  // apare treptat, imediat ce e gata — nu mai e o schimbare bruscă. (Nu se
+  // întâmplă la promovarea prin derulare continuă — acolo pagina era deja
+  // randată și vizibilă dinainte, fără nicio tranziție necesară.)
+  const isPageChange = pane._lastRenderedPage !== undefined && pane._lastRenderedPage !== pane.pageNum;
+  if (isPageChange) els.bg.style.opacity = '0';
   pdfDoc.getPage(pane.pageNum).then(function(page) {
     const viewport = page.getViewport({ scale: 1.0 });
     const rect = els.root.getBoundingClientRect();
@@ -665,19 +706,68 @@ function renderPdfPane(name) {
       els.bg.style.height = scaledViewport.height + 'px';
       els.bg.getContext('2d').drawImage(off, 0, 0);
       updatePdfPanePosition(name);
+      els.bg.style.opacity = '1';
+      pane._lastRenderedPage = pane.pageNum;
       els.root.classList.add('has-doc');
       els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
       pane._rendering = false;
       if (pane._renderPending) { pane._renderPending = false; renderPdfPane(name); }
+      else renderAdjacentPage(name, 1); // pregătim implicit pagina următoare, pentru scroll continuu
     }).catch(function(e) { console.error(e); pane._rendering = false; });
   }).catch(function(e) { console.error(e); pane._rendering = false; });
+}
+
+// Pre-randează pagina imediat următoare (dir=+1) sau anterioară (dir=-1) și
+// o poziționează direct lângă pagina curentă — ca, la derulare, tranziția
+// să fie perfect lină (conținutul e deja acolo), nu o săritură.
+function renderAdjacentPage(name, dir) {
+  if (!pdfDoc) return;
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  const targetNum = pane.pageNum + dir;
+  if (targetNum < 1 || targetNum > pdfTotalPages) {
+    if (pane.adjDir === dir || !pane.adjNum) { pane.adjNum = null; pane.adjDir = 0; }
+    return;
+  }
+  if (pane.adjNum === targetNum && pane.adjDir === dir) return; // deja pregătită
+  pdfDoc.getPage(targetNum).then(function(page) {
+    const scaledViewport = page.getViewport({ scale: pane.finalScale });
+    const w = Math.round(scaledViewport.width), h = Math.round(scaledViewport.height);
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    page.render({ canvasContext: off.getContext('2d'), viewport: scaledViewport }).promise.then(function() {
+      if (!els.bgAdj) return;
+      els.bgAdj.width = w; els.bgAdj.height = h;
+      els.bgAdj.style.width = w + 'px'; els.bgAdj.style.height = h + 'px';
+      els.bgAdj.getContext('2d').drawImage(off, 0, 0);
+      pane.adjNum = targetNum;
+      pane.adjDir = dir;
+      pane.adjWidth = w; pane.adjHeight = h;
+      updatePdfPanePosition(name);
+    }).catch(function(e) { console.error(e); });
+  }).catch(function(e) { console.error(e); });
+}
+
+// Sare direct la o pagină anume (folosită de butoanele/săgețile stânga-
+// dreapta) — spre deosebire de promovarea prin derulare continuă, aici chiar
+// se dorește o schimbare vizibilă de pagină, cu revenire la vârful ei.
+function jumpToPdfPage(name, newPageNum) {
+  const pane = pdfPanes[name];
+  if (newPageNum < 1 || newPageNum > pdfTotalPages || newPageNum === pane.pageNum) return;
+  pane.pageNum = newPageNum;
+  pane.panX = 0; pane.panY = 0;
+  pane.adjNum = null; pane.adjDir = 0;
+  const els = getPaneEls(name);
+  if (els.bgAdj) { els.bgAdj.width = 0; els.bgAdj.height = 0; }
+  renderPdfPane(name);
 }
 
 // Repoziționează fișa PDF deja randată (doar transform CSS, instant) — folosită
 // la panoramarea cu degetul, ca să nu se relanseze o randare PDF.js costisitoare
 // (și potențial suprapusă/neclară) la fiecare mișcare minimă a degetului.
 // Zoom-ul rămâne neschimbat la panoramare, deci bitmap-ul deja randat e valid,
-// trebuie doar mutat.
+// trebuie doar mutat. Poziționează și pagina adiacentă pre-randată (dacă
+// există), direct lângă cea curentă, ca să nu se vadă nicio discontinuitate.
 function updatePdfPanePosition(name) {
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
@@ -686,6 +776,21 @@ function updatePdfPanePosition(name) {
   const centerX = (rect.width - w) / 2;
   const centerY = Math.max(0, (rect.height - h) / 2);
   els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
+
+  if (els.bgAdj && pane.adjNum) {
+    const gap = 16;
+    const wA = pane.adjWidth, hA = pane.adjHeight;
+    const centerXA = (rect.width - wA) / 2;
+    const adjY = pane.adjDir > 0
+      ? (centerY + pane.panY + h + gap)   // pagina următoare, dedesubt
+      : (centerY + pane.panY - hA - gap); // pagina anterioară, deasupra
+    els.bgAdj.style.transform = 'translate(' + (centerXA + pane.panX) + 'px, ' + adjY + 'px)';
+    els.bgAdj.style.display = '';
+  } else if (els.bgAdj) {
+    els.bgAdj.style.display = 'none';
+  }
+
+  updatePdfScrollbar(name);
   // Stroke-urile desenate pe fereastra PDF sunt stocate în coordonate
   // "conținut" (independente de pan/zoom) — de fiecare dată când fișa se
   // mișcă sau se scalează, trebuie reactualizată transformarea canvas-ului
@@ -699,34 +804,199 @@ function updatePdfPanePosition(name) {
   }
 }
 
+// Actualizează bara de defilare a ferestrei PDF — arată o poziție
+// aproximativă în TOATĂ fișa (nu doar pagina curentă), calculată din numărul
+// paginii curente plus cât s-a derulat în interiorul ei. E o aproximare
+// (presupune pagini de înălțime asemănătoare), suficientă pentru un indiciu
+// vizual util, fără să fie nevoie să randăm toate paginile dinainte.
+function updatePdfScrollbar(name) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  if (!els.scrollTrack || !els.scrollThumb || !els.bg || !els.bg.height) return;
+  const rect = els.root.getBoundingClientRect();
+  const trackH = els.scrollTrack.clientHeight || rect.height;
+  const h = els.bg.height;
+  const scrollableH = Math.max(1, h - rect.height);
+  const topEdge = Math.max(0, (rect.height - h) / 2) + pane.panY;
+  const pageFrac = h <= rect.height ? 0 : Math.min(1, Math.max(0, -topEdge / scrollableH));
+  const total = Math.max(1, pdfTotalPages);
+  const overall = ((pane.pageNum - 1) + pageFrac) / total;
+  const thumbH = Math.max(24, trackH / total);
+  const maxThumbTop = Math.max(0, trackH - thumbH);
+  const thumbTop = Math.min(maxThumbTop, Math.max(0, overall * trackH));
+  els.scrollThumb.style.height = thumbH + 'px';
+  els.scrollThumb.style.top = thumbTop + 'px';
+}
+
+let pdfSplitMode = false; // implicit: fișa PDF ocupă toată suprafața de lucru
+
+// Comută în DOM care dintre cele două canvas-uri de fundal e "cel curent" —
+// prin schimbarea claselor CSS, nu prin copierea pixelilor — ca elementul
+// deja poziționat corect (pagina adiacentă pre-randată) să devină pur și
+// simplu noua "pagină curentă", fără nicio mutare vizuală.
+function swapAdjacentIntoCurrent(name) {
+  const els = getPaneEls(name);
+  if (!els.bgAdj) return;
+  const bgClass = els.bg.className, adjClass = els.bgAdj.className;
+  els.bg.className = adjClass;
+  els.bgAdj.className = bgClass;
+  const pane = pdfPanes[name];
+  pane.adjNum = null;
+  pane.adjDir = 0;
+}
+
+// Derulare continuă: dacă utilizatorul a derulat dincolo de finalul paginii
+// curente, iar pagina următoare era deja pre-randată dedesubt, o "promovăm"
+// la rangul de pagină curentă — ajustând panY exact cu cât s-a câștigat deja
+// prin scroll, ca poziția vizuală să rămână IDENTICĂ (nicio săritură). Dacă
+// nu era încă pregătită, o randăm acum (fără să sărim peste conținut). La
+// fel și în sens invers, spre pagina anterioară. O săritură reală de pagină
+// se întâmplă doar la apăsarea explicită a butoanelor/săgeților.
+function checkPdfPageBoundaryScroll(name) {
+  const pane = pdfPanes[name];
+  const els = getPaneEls(name);
+  if (!els.bg || !els.bg.height) return;
+  const rect = els.root.getBoundingClientRect();
+  const h = els.bg.height;
+  const gap = 16;
+  const centerY = Math.max(0, (rect.height - h) / 2);
+  const topEdge = centerY + pane.panY;
+  const bottomEdge = topEdge + h;
+  const margin = 4;
+  if (bottomEdge < rect.height - margin && pane.pageNum < pdfTotalPages) {
+    if (pane.adjNum === pane.pageNum + 1 && pane.adjDir === 1) {
+      pane.panY += (h + gap);
+      pane.pageNum++;
+      swapAdjacentIntoCurrent(name);
+      els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
+      updatePdfPanePosition(name);
+      renderAdjacentPage(name, 1);
+    } else {
+      renderAdjacentPage(name, 1);
+    }
+  } else if (topEdge > margin && pane.pageNum > 1) {
+    if (pane.adjNum === pane.pageNum - 1 && pane.adjDir === -1) {
+      pane.panY -= (pane.adjHeight + gap);
+      pane.pageNum--;
+      swapAdjacentIntoCurrent(name);
+      els.pagenum.textContent = pane.pageNum + '/' + pdfTotalPages;
+      updatePdfPanePosition(name);
+      renderAdjacentPage(name, -1);
+    } else {
+      renderAdjacentPage(name, -1);
+    }
+  }
+}
+
 function setBoardMode(isPdf) {
   pdfModeActive = isPdf;
-  document.getElementById('pdf-pane-top').style.display = isPdf ? '' : 'none';
-  document.getElementById('pdf-pane-divider').style.display = isPdf ? '' : 'none';
+  const pdfPane = document.getElementById('pdf-pane-top');
+  const divider = document.getElementById('pdf-pane-divider');
+  const cw = document.getElementById('canvas-wrap');
+  pdfPane.style.display = isPdf ? '' : 'none';
+
   if (isPdf) {
     // Tabla de jos devine o tablă neagră, pe care rămân disponibile
-    // toate uneltele, inclusiv rigla/echerul/raportorul/compasul — aici
-    // creionul rămâne mereu unealta implicită, neschimbată.
+    // toate uneltele, inclusiv rigla/echerul/raportorul/compasul.
     setBackgroundColor('#000000', 'bg-black');
+    // IMPORTANT: aducem fereastra PDF la mărimea ei finală (tot ecranul)
+    // ÎNAINTE de a-i dimensiona/randa canvas-urile proprii — altfel acestea
+    // porneau dimensionate pe mărimea veche/greșită a ferestrei (încă la
+    // 50%, din CSS), iar desenul rămânea invizibil (dimensiune greșită,
+    // "tăiat" în afara zonei vizibile reale).
+    pdfSplitMode = false;
+    pdfPane.style.flex = '1 1 auto';
+    divider.style.display = 'none';
+    cw.style.display = 'none';
+    document.getElementById('btn-pdf-split').classList.remove('active');
 
     initPaneDrawCanvas('top');
     renderPdfPane('top');
+  } else {
+    divider.style.display = 'none';
+    cw.style.display = '';
+    pdfPane.style.flex = '';
+    pdfSplitMode = false;
+    document.getElementById('btn-pdf-split').classList.remove('active');
+    setColorFromButton('#ffffff', 'color-white');
   }
+  // initCanvas() dimensionează canvas-urile TABLEI (folosind mărimea lui
+  // "wrap") — trebuie să ruleze cât timp tabla e suprafața activă, indiferent
+  // de unde ajunge focusul de desen la final.
   activatePane('board');
   initCanvas();
   document.getElementById('btn-toggle-pdf-mode').classList.toggle('active', isPdf);
+  if (isPdf) {
+    // Implicit, fișa ocupă tot spațiul de lucru, cu creionul roșu activ —
+    // contrastează bine cu textul negru pe alb tipic unui PDF — ca să poți
+    // scrie imediat, fără niciun pas suplimentar. Modul plimbare NU se
+    // activează automat aici (doar la separarea ecranului).
+    setColorFromButton('#ff0000', 'color-red');
+    setTool('pen');
+    activatePane('top');
+    showPdfPaneControlsTemporarily();
+  }
 }
 
-// ===== Panorama implicită + auto-ascunderea barei de control pe fereastra PDF =====
-// Doar în fereastra PDF (nu pe tabla neagră de jos): la încărcarea fișei,
-// activăm implicit modul de plimbare cu degetul (fișa e de obicei prea
-// mare pentru ecran), iar bara ei de control (săgeți/zoom/pagini) dispare
-// după 10 secunde de inactivitate, ca fișa să se vadă pe o suprafață mai
-// mare. Bara reapare doar la atingerea barei de separare PDF/tablă.
+// Comută între "fișa PDF pe tot ecranul" (implicit, creion roșu, bara de
+// control mereu vizibilă) și "ecran împărțit" (fișa sus — trece implicit în
+// modul plimbare, ca zonă de navigare/referință — tablă neagră dedesubt, cu
+// creion alb, gata de scris).
+function setPdfSplitMode(split) {
+  pdfSplitMode = split;
+  const pdfPane = document.getElementById('pdf-pane-top');
+  const divider = document.getElementById('pdf-pane-divider');
+  const cw = document.getElementById('canvas-wrap');
+  const pane = pdfPanes.top;
+  if (split) {
+    pdfPane.style.flex = '';
+    divider.style.display = '';
+    cw.style.display = '';
+    if (pane) {
+      pane.panMode = true;
+      const btn = document.getElementById('pdf-panmode-btn');
+      if (btn) btn.classList.add('active');
+      updatePanePanCursor('top');
+    }
+    setColorFromButton('#ffffff', 'color-white');
+    setTool('pen');
+    activatePane('board');
+  } else {
+    pdfPane.style.flex = '1 1 auto';
+    divider.style.display = 'none';
+    cw.style.display = 'none';
+    if (pane) {
+      pane.panMode = false;
+      const btn = document.getElementById('pdf-panmode-btn');
+      if (btn) btn.classList.remove('active');
+      updatePanePanCursor('top');
+    }
+    activatePane('top');
+  }
+  document.getElementById('btn-pdf-split').classList.toggle('active', split);
+  showPdfPaneControlsTemporarily();
+  // Dimensiunile ferestrei PDF s-au schimbat — reinițializăm canvas-urile
+  // abia după ce layout-ul se stabilizează (același truc ca la ascunderea
+  // barei de pagini).
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      refreshCanvasesForViewport();
+    });
+  });
+}
+document.getElementById('btn-pdf-split').onclick = () => setPdfSplitMode(!pdfSplitMode);
+
+// ===== Bara de control a ferestrei PDF =====
+// În modul ecran complet (implicit la încărcare), bara rămâne mereu
+// vizibilă, ca utilizatorul să aibă mereu control. Doar în modul ecran
+// împărțit (după apăsarea butonului de separare) bara se ascunde automat
+// după 10 secunde de inactivitate, ca tabla + fișa să câștige spațiu —
+// reapare la atingerea barei de separare.
 let pdfPaneControlsHideTimer = null;
 function schedulePdfPaneControlsAutoHide() {
   clearTimeout(pdfPaneControlsHideTimer);
-  if (!pdfModeActive) return;
+  pdfPaneControlsHideTimer = null;
+  if (!pdfModeActive || !pdfSplitMode) return;
   pdfPaneControlsHideTimer = setTimeout(() => {
     const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
     if (bar) bar.classList.add('pdf-pane-controls-hidden');
@@ -736,16 +1006,6 @@ function showPdfPaneControlsTemporarily() {
   const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
   if (bar) bar.classList.remove('pdf-pane-controls-hidden');
   schedulePdfPaneControlsAutoHide();
-}
-function activatePdfPaneDefaultPan() {
-  const pane = pdfPanes.top;
-  if (!pane) return;
-  pane.panMode = true;
-  const btn = document.getElementById('pdf-panmode-btn');
-  if (btn) btn.classList.add('active');
-  updatePanePanCursor('top');
-  showPdfPaneControlsTemporarily();
-  showToast('✋ Plimbare cu degetul activă pe fișa PDF  |  Bara de control dispare în 10s — atinge bara de separare ca să reapară');
 }
 
 // ===== Încărcare fișă PDF =====
@@ -762,9 +1022,9 @@ pdfFileInput.addEventListener('change', function(e) {
       pdfTotalPages = doc.numPages;
       pdfPanes.top = makePdfPane();
       document.getElementById('btn-toggle-pdf-mode').disabled = false;
+      document.getElementById('btn-pdf-split').disabled = false;
       showToast('✓ Fișă PDF încărcată (' + pdfTotalPages + ' pagini)');
       setBoardMode(true);
-      activatePdfPaneDefaultPan();
     }).catch(function(err) {
       alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
     });
@@ -777,21 +1037,80 @@ document.getElementById('btn-toggle-pdf-mode').addEventListener('click', () => {
   setBoardMode(!pdfModeActive);
 });
 
+// Decide dacă un eveniment de pointer trebuie să panoreze fișa PDF (nu să
+// deseneze): fie modul plimbare e activ (deget sau mouse), fie se ține
+// apăsat Ctrl cu mouse-ul (funcționează indiferent de modul plimbare).
+function paneShouldPanInsteadOfDraw(name, e) {
+  const pane = pdfPanes[name];
+  if (e.pointerType === 'touch') return !!(pane && pane.panMode);
+  if (e.pointerType === 'mouse') return !!((pane && pane.panMode) || e.ctrlKey);
+  return false;
+}
+
+// Detectează "butonul de radiere": click dreapta cu mouse-ul SAU butonul
+// lateral (barrel button) al unui stylus (ex. Wacom) — browserele raportează
+// de obicei acest buton tot ca 2 (la fel ca dreapta-click), unele ca 5.
+function isEraserButtonEvent(e) {
+  return (e.pointerType === 'mouse' || e.pointerType === 'pen') && (e.button === 2 || e.button === 5);
+}
+
+// Cursor personalizat — un mic pătrățel alb — folosit cât timp se șterge cu
+// click dreapta ținut apăsat, ca indiciu vizual clar al zonei de radiere.
+function eraserSquareCursor(size) {
+  const s = Math.max(10, Math.min(48, Math.round(size * 1.6)));
+  const half = Math.round(s / 2);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}">` +
+    `<rect x="1" y="1" width="${s - 2}" height="${s - 2}" fill="#ffffff" stroke="#333333" stroke-width="1.5"/></svg>`;
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") ${half} ${half}, crosshair`;
+}
+
+// Ținând click dreapta apăsat pe fereastra PDF, se șterge (indiferent ce
+// unealtă e selectată în acel moment) — la eliberare, unealta anterioară
+// revine automat.
+let pdfRightClickErasing = false;
+let pdfRightClickPrevTool = null;
+
 // ===== Evenimente de desen pe fereastra PDF (sus) =====
 (function() {
   const name = 'top';
   const els = getPaneEls(name);
+  els.draw.addEventListener('contextmenu', e => e.preventDefault());
   els.draw.addEventListener('pointerdown', function(e) {
-    if (pdfPanes[name].panMode && (e.pointerType === 'touch' || e.pointerType === 'mouse')) return; // în mod plimbare, degetul/mouse-ul nu mai desenează
+    if (isEraserButtonEvent(e)) {
+      // Click dreapta sau butonul lateral al stylus-ului, ținut apăsat =
+      // radieră temporară, indiferent ce unealtă era selectată — revine
+      // automat la eliberare.
+      pdfRightClickErasing = true;
+      pdfRightClickPrevTool = tool;
+      tool = 'erase';
+      els.draw.style.cursor = eraserSquareCursor(lastEraserSize);
+      activatePane(name);
+      handlePointerDown(e);
+      return;
+    }
+    if (paneShouldPanInsteadOfDraw(name, e)) return;
     activatePane(name); handlePointerDown(e);
   });
   els.draw.addEventListener('pointermove', function(e) {
-    if (pdfPanes[name].panMode && (e.pointerType === 'touch' || e.pointerType === 'mouse')) return;
+    if (pdfRightClickErasing) { handlePointerMove(e); return; }
+    if (paneShouldPanInsteadOfDraw(name, e)) return;
     handlePointerMove(e);
   });
-  els.draw.addEventListener('pointerup', handlePointerUp);
-  els.draw.addEventListener('pointercancel', handlePointerUp);
-  els.draw.addEventListener('pointerleave', handlePointerLeave);
+  function endPdfDrawPointer(e) {
+    handlePointerUp(e);
+    if (pdfRightClickErasing) {
+      pdfRightClickErasing = false;
+      tool = pdfRightClickPrevTool || 'pen';
+      pdfRightClickPrevTool = null;
+      els.draw.style.cursor = '';
+    }
+  }
+  els.draw.addEventListener('pointerup', endPdfDrawPointer);
+  els.draw.addEventListener('pointercancel', endPdfDrawPointer);
+  els.draw.addEventListener('pointerleave', function(e) {
+    if (pdfRightClickErasing) { endPdfDrawPointer(e); return; }
+    handlePointerLeave(e);
+  });
   els.draw.addEventListener('dblclick', function(e) { activatePane(name); handleDblClick(e); });
 })();
 
@@ -831,8 +1150,8 @@ function performPdfCtlAction(btn) {
   else if (act === 'zoomout') pane.zoom = Math.max(0.2, pane.zoom - 0.25);
   else if (act === 'center') { pane.panX = 0; pane.panY = 0; panOnly = true; }
   else if (act === 'reset') { pane.panX = 0; pane.panY = 0; pane.zoom = 1; }
-  else if (act === 'pageprev') { if (pane.pageNum > 1) pane.pageNum--; }
-  else if (act === 'pagenext') { if (pane.pageNum < pdfTotalPages) pane.pageNum++; }
+  else if (act === 'pageprev') { jumpToPdfPage(name, pane.pageNum - 1); return; }
+  else if (act === 'pagenext') { jumpToPdfPage(name, pane.pageNum + 1); return; }
   else if (act === 'panmode') {
     pane.panMode = !pane.panMode;
     btn.classList.toggle('active', pane.panMode);
@@ -844,7 +1163,12 @@ function performPdfCtlAction(btn) {
   // Deplasare pură (săgeți/centrare) — repoziționare CSS instant, fără o
   // randare PDF.js nouă (zoom-ul nu se schimbă, deci bitmap-ul rămâne valid).
   // Restul acțiunilor (zoom, pagină, reset) chiar au nevoie de o randare nouă.
-  if (panOnly) updatePdfPanePosition(name); else renderPdfPane(name);
+  if (panOnly) {
+    updatePdfPanePosition(name);
+    if (act === 'up' || act === 'down') checkPdfPageBoundaryScroll(name);
+  } else {
+    renderPdfPane(name);
+  }
 }
 
 // Repetare automată cât ții apăsat pe săgețile de deplasare (sus/jos/stânga/
@@ -884,7 +1208,7 @@ function attachPanePanZoom(name) {
     const pane = pdfPanes[name];
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
       if (e.pointerType === 'mouse' && e.button !== 0) return; // doar click stânga
-      if (pane && pane.panMode) {
+      if (paneShouldPanInsteadOfDraw(name, e)) {
         activatePane(name);
         pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
         singleFingerPan = true;
@@ -954,16 +1278,68 @@ function attachPanePanZoom(name) {
   root.addEventListener('pointerleave', clearPt, { passive: true });
 
   // Zoom cu Ctrl+rotița mouse-ului (sau pinch de trackpad), centrat exact
-  // pe poziția cursorului — ca punctul de sub cursor să rămână pe loc.
+  // pe poziția cursorului — ca punctul de sub cursor să rămână pe loc. Fără
+  // Ctrl, rotița derulează pur și simplu fișa (vertical, sau orizontal cu
+  // Shift ori cu rotița orizontală a mouse-ului/trackpad-ului).
   root.addEventListener('wheel', function(e) {
-    if (!e.ctrlKey || !pdfDoc) return;
+    if (!pdfDoc) return;
     e.preventDefault();
-    activatePane(name);
-    const factor = Math.exp(-e.deltaY * 0.0015);
-    zoomPaneAtPoint(name, factor, e.clientX, e.clientY);
+    if (e.ctrlKey) {
+      activatePane(name);
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      zoomPaneAtPoint(name, factor, e.clientX, e.clientY);
+      return;
+    }
+    const pane = pdfPanes[name];
+    if (!pane) return;
+    if (e.shiftKey) {
+      pane.panX -= e.deltaY;
+    } else {
+      pane.panX -= e.deltaX;
+      pane.panY -= e.deltaY;
+    }
+    updatePdfPanePosition(name);
+    if (!e.shiftKey) checkPdfPageBoundaryScroll(name);
   }, { passive: false });
 }
 attachPanePanZoom('top');
+
+// Bara de defilare a ferestrei PDF — interactivă: apeși sau tragi (mouse,
+// stylus sau deget) oriunde pe ea ca să sari direct la poziția respectivă
+// din fișă (aproximat pe baza numărului de pagini).
+function setupPdfScrollbarDrag(name) {
+  const els = getPaneEls(name);
+  if (!els.scrollTrack) return;
+  let dragging = false;
+
+  function jumpToTrackPos(clientY) {
+    const rect = els.scrollTrack.getBoundingClientRect();
+    const trackH = rect.height || 1;
+    let frac = (clientY - rect.top) / trackH;
+    frac = Math.max(0, Math.min(0.999, frac));
+    const total = Math.max(1, pdfTotalPages);
+    const targetPage = Math.max(1, Math.min(pdfTotalPages, Math.floor(frac * total) + 1));
+    activatePane(name);
+    jumpToPdfPage(name, targetPage);
+  }
+
+  els.scrollTrack.addEventListener('pointerdown', function(e) {
+    if (!pdfDoc) return;
+    dragging = true;
+    try { els.scrollTrack.setPointerCapture(e.pointerId); } catch (err) {}
+    jumpToTrackPos(e.clientY);
+    e.preventDefault();
+  });
+  els.scrollTrack.addEventListener('pointermove', function(e) {
+    if (!dragging) return;
+    jumpToTrackPos(e.clientY);
+    e.preventDefault();
+  });
+  function endDrag() { dragging = false; }
+  els.scrollTrack.addEventListener('pointerup', endDrag);
+  els.scrollTrack.addEventListener('pointercancel', endDrag);
+}
+setupPdfScrollbarDrag('top');
 
 // Aplică un factor de zoom pe fișa PDF, păstrând fix punctul de sub cursor
 // (clientX, clientY) — folosită la Ctrl+rotița mouse-ului / pinch trackpad.
@@ -998,11 +1374,21 @@ function zoomPaneAtPoint(name, factor, clientX, clientY) {
   let dragging = false;
   let rafPending = false;
 
+  // initCanvas() dimensionează canvas-urile TABLEI — o izolăm mereu cu
+  // comutare temporară pe 'board', ca să nu corupă dimensiunile ferestrei
+  // PDF dacă aceasta e suprafața activă în acel moment.
+  function safeInitBoardCanvas() {
+    const wasActive = activeSurface;
+    if (wasActive !== 'board') activatePane('board');
+    initCanvas();
+    if (wasActive !== 'board') activatePane(wasActive);
+  }
+
   function applyResize() {
     rafPending = false;
     initPaneDrawCanvas('top');
     renderPdfPane('top');
-    initCanvas();
+    safeInitBoardCanvas();
   }
 
   divider.addEventListener('pointerdown', function(e) {
@@ -1033,7 +1419,7 @@ function zoomPaneAtPoint(name, factor, clientX, clientY) {
     if (e && e.preventDefault) e.preventDefault();
     initPaneDrawCanvas('top');
     renderPdfPane('top');
-    initCanvas();
+    safeInitBoardCanvas();
   }
   divider.addEventListener('pointerup', endDrag);
   divider.addEventListener('pointercancel', endDrag);
@@ -1095,6 +1481,11 @@ function getImageAt(page, x, y) {
 function renderImages() {
   imagesContainer.innerHTML = '';
   imagesContainerFront.innerHTML = '';
+  const isPdfPane = !!pdfPanes[activeSurface];
+  const pdfEls = isPdfPane ? getPaneEls(activeSurface) : null;
+  if (pdfEls && pdfEls.images) pdfEls.images.innerHTML = '';
+  const targetContainer = (isPdfPane && pdfEls && pdfEls.images) ? pdfEls.images : imagesContainer;
+
   const page = getCurrentPage();
   if (!page) return;
 
@@ -1150,7 +1541,7 @@ function renderImages() {
     resizer.className = 'resizer';
     div.appendChild(resizer);
     
-    imagesContainer.appendChild(div);
+    targetContainer.appendChild(div);
   });
   
   updateImageSelection();
@@ -1169,10 +1560,13 @@ let resizeOrigW = 0, resizeOrigH = 0;
 let imageDragStartPositions = new Map();
 
 function updateImageSelection() {
-  document.querySelectorAll('#images-container .image-item, #images-container-front .image-item').forEach(el => {
+  document.querySelectorAll('#images-container .image-item, #images-container-front .image-item, .pdf-pane-images .image-item').forEach(el => {
     const id = parseInt(el.dataset.imageId);
     const isSelected = selectedImages.has(id);
     el.classList.toggle('selected', isSelected);
+    // Distincția spate/față (mutarea între cele două containere) există
+    // doar pe tablă — fereastra PDF are un singur strat de imagini.
+    if (el.closest('.pdf-pane')) return;
     // Doar imaginea (imaginile) selectată(e) curent trec deasupra liniilor
     // desenate, ca butoanele de blocare/ștergere/redimensionare să rămână
     // accesibile la atingere. Imaginile neselectate stau sub linii, ca
@@ -1343,9 +1737,23 @@ function handleImagePointerDown(e) {
 // Imaginile selectate trec într-un container separat, aflat deasupra liniilor
 // desenate (vezi updateImageSelection) — handler-ul de mutare/redimensionare
 // trebuie atașat pe AMBELE containere, altfel mutarea/redimensionarea nu mai
-// funcționează din momentul în care o imagine devine selectată.
+// funcționează din momentul în care o imagine devine selectată. La fel și pe
+// containerul de imagini al ferestrei PDF, care are un singur strat.
 imagesContainer.addEventListener('pointerdown', handleImagePointerDown);
 imagesContainerFront.addEventListener('pointerdown', handleImagePointerDown);
+document.querySelectorAll('.pdf-pane-images').forEach(el => el.addEventListener('pointerdown', handleImagePointerDown));
+
+// Scala curentă de conținut a suprafeței active — folosită ca să convertim
+// corect o deplasare în pixeli de ecran (mișcarea reală a cursorului/
+// degetului) într-o deplasare în coordonate de conținut, la mutarea sau
+// redimensionarea imaginilor. Fără asta, imaginile s-ar muta prea repede
+// sau prea încet față de cursor ori de câte ori tabla e mărită/micșorată
+// (zoom) sau fereastra PDF nu e la scara 1:1.
+function currentContentScale() {
+  if (pdfPanes[activeSurface]) return getPaneContentTransform(activeSurface).scale || 1;
+  if (activeSurface === 'board') return boardZoom || 1;
+  return 1;
+}
 
 document.addEventListener('pointermove', (e) => {
   if (isImageResize && resizeImageId !== null) {
@@ -1353,8 +1761,9 @@ document.addEventListener('pointermove', (e) => {
     const imgData = page.images.find(img => img.id === resizeImageId);
     if (!imgData) return;
     
-    const dx = (e.clientX - resizeStartX);
-    const dy = (e.clientY - resizeStartY);
+    const scale = currentContentScale();
+    const dx = (e.clientX - resizeStartX) / scale;
+    const dy = (e.clientY - resizeStartY) / scale;
     const aspect = resizeOrigW / resizeOrigH;
     const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
     let newW = Math.max(40, resizeOrigW + delta);
@@ -1366,8 +1775,9 @@ document.addEventListener('pointermove', (e) => {
   }
   
   if (isImageDrag && selectedImages.size > 0) {
-    const dx = e.clientX - imageDragStartX;
-    const dy = e.clientY - imageDragStartY;
+    const scale = currentContentScale();
+    const dx = (e.clientX - imageDragStartX) / scale;
+    const dy = (e.clientY - imageDragStartY) / scale;
     const page = getCurrentPage();
     
     for (const id of selectedImages) {
@@ -2181,6 +2591,41 @@ function snapPointToAngle(start, end) {
   const step = Math.PI / 12;
   let angle = Math.round(Math.atan2(dy, dx) / step) * step;
   return { x: start.x + dist * Math.cos(angle), y: start.y + dist * Math.sin(angle) };
+}
+
+// Aliniere magnetică la multipli de 45° — implicit, fără să fie nevoie de
+// Shift, pentru liniile drepte (linie/săgeată/linie întreruptă): dacă
+// direcția în care tragi e deja aproape de un unghi de 45° (orizontală,
+// verticală sau diagonală), se prinde exact pe acel unghi; altfel rămâne
+// liberă, la orice unghi tras cu mâna.
+function magneticAngleSnap45(start, end) {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < 4) return end;
+  const step = Math.PI / 4;
+  const angle = Math.atan2(dy, dx);
+  const nearest = Math.round(angle / step) * step;
+  let diff = (angle - nearest) % (2 * Math.PI);
+  if (diff > Math.PI) diff -= 2 * Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  const threshold = 6 * Math.PI / 180; // prag de ~6°
+  if (Math.abs(diff) < threshold) {
+    return { x: start.x + dist * Math.cos(nearest), y: start.y + dist * Math.sin(nearest) };
+  }
+  return end;
+}
+
+// Calculează capătul liniei/săgeții/liniei întrerupte, ținând cont — în
+// această ordine de prioritate — de: Shift (aliniere fină la 15°, ca până
+// acum), muchia unui ghidaj (riglă/echer) dacă tocmai s-a tras de-a lungul
+// ei (unghiul e deja dat de muchie, nu mai forțăm 45°), și în rest alinierea
+// magnetică implicită la 45°. Folosită identic la previzualizare și la
+// finalizarea desenului, ca ce vezi să fie exact ce se salvează.
+function computeLineEndpoint(e, p) {
+  if (e.shiftKey) return snapPointToAngle(currentStroke[0], p);
+  const raw = snapToGuides(p);
+  const onGuideEdge = isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName;
+  return onGuideEdge ? raw : magneticAngleSnap45(currentStroke[0], raw);
 }
 
 function showMathInfo(text) {
@@ -3440,7 +3885,7 @@ function handlePointerMove(e) {
   } else if (tool === 'line' || tool === 'arrow' || tool === 'dashed') {
     clearCanvas(ctx, drawC);
     redrawStrokes();
-    const endPoint = e.shiftKey ? snapPointToAngle(currentStroke[0], p) : snapToGuides(p);
+    const endPoint = computeLineEndpoint(e, p);
     ctx.beginPath();
     ctx.moveTo(currentStroke[0].x, currentStroke[0].y);
     ctx.lineTo(endPoint.x, endPoint.y);
@@ -3758,21 +4203,21 @@ function handlePointerUp(e) {
   const page = getCurrentPage();
   const size = tool === 'erase' ? lastEraserSize : lastPenSize;
   if (tool === 'line') {
-    const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
+    const endP = computeLineEndpoint(e, pos(e));
     if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
       startGeoSegBuild('line', currentStroke[0], endP, color, size, currentStrokeGuideName);
     } else {
       pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false});
     }
   } else if (tool === 'dashed') {
-    const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
+    const endP = computeLineEndpoint(e, pos(e));
     if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
       startGeoSegBuild('dashed', currentStroke[0], endP, color, size, currentStrokeGuideName);
     } else {
       pushStroke(page, {points: [currentStroke[0], endP], color, size, erase: false, dashed: true});
     }
   } else if (tool === 'arrow') {
-    const endP = e.shiftKey ? snapPointToAngle(currentStroke[0], pos(e)) : snapToGuides(pos(e));
+    const endP = computeLineEndpoint(e, pos(e));
     if (!e.shiftKey && isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName) {
       startGeoSegBuild('arrow', currentStroke[0], endP, color, size, currentStrokeGuideName);
     } else {
@@ -3825,9 +4270,26 @@ let boardCtrlPanActive = false;
 // simultană a întregii table), independent de modul "Deget" (panoramare).
 let boardTouchPts = new Map();
 let boardPinchLastDist = null, boardPinchLastMid = null;
+// Radieră temporară cu click dreapta / butonul lateral al stylus-ului.
+let boardRightClickErasing = false;
+let boardRightClickPrevTool = null;
+
+boardDrawC.addEventListener('contextmenu', e => e.preventDefault());
 
 boardDrawC.addEventListener('pointerdown', function(e) {
   activatePane('board');
+
+  if (isEraserButtonEvent(e)) {
+    // Click dreapta sau butonul lateral al stylus-ului (ex. Wacom), ținut
+    // apăsat = radieră temporară, indiferent ce unealtă era selectată —
+    // revine automat la eliberare.
+    boardRightClickErasing = true;
+    boardRightClickPrevTool = tool;
+    tool = 'erase';
+    boardDrawC.style.cursor = eraserSquareCursor(lastEraserSize);
+    handlePointerDown(e);
+    return;
+  }
 
   if (e.pointerType === 'touch') {
     boardTouchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -3870,6 +4332,7 @@ boardDrawC.addEventListener('pointerdown', function(e) {
   handlePointerDown(e);
 });
 boardDrawC.addEventListener('pointermove', function(e) {
+  if (boardRightClickErasing) { handlePointerMove(e); return; }
   if (e.pointerType === 'touch' && boardTouchPts.has(e.pointerId)) {
     boardTouchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (boardTouchPts.size === 2) {
@@ -3910,6 +4373,14 @@ boardDrawC.addEventListener('pointermove', function(e) {
   handlePointerMove(e);
 });
 function endBoardPanDrag(e) {
+  if (boardRightClickErasing) {
+    handlePointerUp(e);
+    boardRightClickErasing = false;
+    tool = boardRightClickPrevTool || 'pen';
+    boardRightClickPrevTool = null;
+    boardDrawC.style.cursor = '';
+    return;
+  }
   if (e.pointerType === 'touch') {
     boardTouchPts.delete(e.pointerId);
     if (boardTouchPts.size < 2) { boardPinchLastDist = null; boardPinchLastMid = null; }
@@ -3932,6 +4403,7 @@ function endBoardPanDrag(e) {
 boardDrawC.addEventListener('pointerup', endBoardPanDrag);
 boardDrawC.addEventListener('pointercancel', endBoardPanDrag);
 boardDrawC.addEventListener('pointerleave', function(e) {
+  if (boardRightClickErasing) { endBoardPanDrag(e); return; }
   if (boardPanMode && boardPanDragId === e.pointerId) return;
   if (boardCtrlPanActive && boardPanDragId === e.pointerId) return;
   handlePointerLeave(e);
@@ -7584,13 +8056,32 @@ document.getElementById('file-input').onchange = e => {
   const img = new Image();
   img.onload = () => {
     const page = getCurrentPage();
-    const maxW = wrap.clientWidth * 0.7;
-    const maxH = wrap.clientHeight * 0.6;
+    const isPdfPane = !!pdfPanes[activeSurface];
+    let viewportW, viewportH, ct;
+    if (isPdfPane) {
+      const els = getPaneEls(activeSurface);
+      const rect = els.root.getBoundingClientRect();
+      viewportW = rect.width; viewportH = rect.height;
+      ct = getPaneContentTransform(activeSurface);
+    } else {
+      viewportW = wrap.clientWidth; viewportH = wrap.clientHeight;
+    }
+    const maxW = viewportW * 0.7;
+    const maxH = viewportH * 0.6;
     let w = img.naturalWidth * 1.5;
     let h = img.naturalHeight * 1.5;
     if (w > maxW) { h = h * maxW / w; w = maxW; }
     if (h > maxH) { w = w * maxH / h; h = maxH; }
-    addImageToPage(page, img, 40, 40, w, h);
+    let x, y, finalW, finalH;
+    if (isPdfPane) {
+      x = (40 - ct.offX) / ct.scale;
+      y = (40 - ct.offY) / ct.scale;
+      finalW = w / ct.scale;
+      finalH = h / ct.scale;
+    } else {
+      x = 40; y = 40; finalW = w; finalH = h;
+    }
+    addImageToPage(page, img, x, y, finalW, finalH);
     const imgData = page.images[page.images.length - 1];
     undoStack.push({ type: 'imageAdd', page, img: imgData });
     redoStack = [];
@@ -7636,8 +8127,18 @@ document.addEventListener('paste', (e) => {
 
   const img = new Image();
   img.onload = () => {
-    const maxW = wrap.clientWidth * 0.7;
-    const maxH = wrap.clientHeight * 0.6;
+    const isPdfPane = !!pdfPanes[activeSurface];
+    let viewportW, viewportH, ct;
+    if (isPdfPane) {
+      const els = getPaneEls(activeSurface);
+      const rect = els.root.getBoundingClientRect();
+      viewportW = rect.width; viewportH = rect.height;
+      ct = getPaneContentTransform(activeSurface);
+    } else {
+      viewportW = wrap.clientWidth; viewportH = wrap.clientHeight;
+    }
+    const maxW = viewportW * 0.7;
+    const maxH = viewportH * 0.6;
     let w = img.naturalWidth;
     let h = img.naturalHeight;
     if (w > maxW) { h = h * maxW / w; w = maxW; }
@@ -7648,11 +8149,25 @@ document.addEventListener('paste', (e) => {
     const offset = (pasteOffsetCount % 8) * 28;
     pasteOffsetCount++;
 
-    const x = Math.max(20, (wrap.clientWidth - w) / 2) + offset;
-    const y = Math.max(20, (wrap.clientHeight - h) / 2) + offset;
+    // Poziția vizată (centrată în fereastra vizibilă), în pixeli de ecran.
+    const screenX = Math.max(20, (viewportW - w) / 2) + offset;
+    const screenY = Math.max(20, (viewportH - h) / 2) + offset;
+
+    let x, y, finalW, finalH;
+    if (isPdfPane) {
+      // Pe fereastra PDF, imaginile se stochează în coordonate de conținut
+      // (la fel ca stroke-urile), ca lipite peste fișă să rămână la locul
+      // lor la panoramare și să se scaleze corect la zoom.
+      x = (screenX - ct.offX) / ct.scale;
+      y = (screenY - ct.offY) / ct.scale;
+      finalW = w / ct.scale;
+      finalH = h / ct.scale;
+    } else {
+      x = screenX; y = screenY; finalW = w; finalH = h;
+    }
 
     const page = getCurrentPage();
-    const id = addImageToPage(page, img, x, y, w, h);
+    const id = addImageToPage(page, img, x, y, finalW, finalH);
     const imgData = page.images[page.images.length - 1];
 
     undoStack.push({ type: 'imageAdd', page, img: imgData });
@@ -7790,18 +8305,15 @@ document.getElementById('pdf-clear-ink-btn').addEventListener('click', async () 
     : 'Ștergi tot ce ai scris pe fișa PDF? Fișa încărcată rămâne neatinsă.';
   if (await customConfirm(msg)) {
     const pane = pdfPanes.top;
-    pane.strokes = []; pane.images = [];
+    pane.pagesData = {}; // golește adnotările de pe TOATE paginile fișei
+    pane.undoStack = []; pane.redoStack = [];
     if (activeSurface === 'top') {
-      undoStack = undoStack.filter(a => a.page !== pane);
-      redoStack = redoStack.filter(a => a.page !== pane);
+      undoStack = pane.undoStack; redoStack = pane.redoStack;
       selectedStrokes.clear();
       selectedImages.clear();
       updateImageSelection();
       hideSelectionInfo();
       redrawStrokes(); renderImages();
-    } else {
-      pane.undoStack = pane.undoStack.filter(a => a.page !== pane);
-      pane.redoStack = pane.redoStack.filter(a => a.page !== pane);
     }
     initPaneDrawCanvas('top');
     renderPdfPane('top');
@@ -8104,6 +8616,31 @@ document.addEventListener('keydown', e => {
     return;
   }
 
+  // Derulare verticală a fișei PDF cu săgețile sus/jos, când fereastra PDF
+  // e suprafața activă — utilă pe calculator, pe lângă scroll/pinch/Ctrl+
+  // click. Dacă se ajunge la finalul/începutul paginii curente, se trece
+  // automat la pagina următoare/anterioară (derulare continuă a fișei).
+  if (pdfModeActive && activeSurface === 'top' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const pane = pdfPanes.top;
+    const step = e.shiftKey ? 120 : 40;
+    pane.panY += (e.key === 'ArrowUp' ? step : -step);
+    updatePdfPanePosition('top');
+    checkPdfPageBoundaryScroll('top');
+    return;
+  }
+
+  // Navigare pagini stânga/dreapta pentru fișa PDF, când fereastra PDF e
+  // suprafața activă — are prioritate față de navigarea paginilor tablei.
+  // Fiecare pagină nouă se deschide cu vârful ei vizibil (nu rămâne la
+  // poziția de derulare a paginii anterioare).
+  if (pdfModeActive && activeSurface === 'top' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    const pane = pdfPanes.top;
+    jumpToPdfPage('top', pane.pageNum + (e.key === 'ArrowLeft' ? -1 : 1));
+    return;
+  }
+
   if (e.key === 'ArrowLeft') { e.preventDefault(); prevPage(); return; }
   if (e.key === 'ArrowRight') { e.preventDefault(); nextPage(); return; }
   
@@ -8151,11 +8688,19 @@ btnFs.addEventListener('click', () => {
 });
 
 function refreshCanvasesForViewport() {
+  const wasActive = activeSurface;
   if (pdfModeActive) {
     initPaneDrawCanvas('top');
     renderPdfPane('top');
   }
+  // initCanvas() dimensionează canvas-urile TABLEI, pe baza lui "wrap" —
+  // trebuie să ruleze DOAR cât timp tabla e suprafața activă, altfel
+  // corupe dimensiunile canvas-urilor ferestrei PDF (complet diferite de
+  // ale tablei) cu mărimea greșită. Restaurăm suprafața activă inițială
+  // după aceea.
+  activatePane('board');
   initCanvas();
+  if (wasActive !== 'board') activatePane(wasActive);
 }
 
 document.addEventListener('fullscreenchange', () => {
@@ -8291,6 +8836,12 @@ function buildGeoRuler() {
   g.appendChild(ticks);
   const rotateHandle = geoBuildRotateHandle();
   g.appendChild(rotateHandle);
+  // Al doilea mâner de rotire, identic, dar lângă capătul din STÂNGA — pe
+  // telefoane/ecrane înguste, capătul din dreapta poate ieși din cadru și
+  // deveni inaccesibil; având unul și la celălalt capăt, mereu ai la
+  // îndemână un mâner de rotire, indiferent cum e poziționată rigla.
+  const rotateHandleLeft = geoBuildRotateHandle();
+  g.appendChild(rotateHandleLeft);
   const resizeHandle = geoEl('rect', { class: 'guide-handle', width: 16, height: 16, rx: 3,
     fill: '#e67e00', stroke: '#ffffff', 'stroke-width': 1.5 });
   g.appendChild(resizeHandle);
@@ -8299,7 +8850,7 @@ function buildGeoRuler() {
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
   guidePanGroup.appendChild(g);
-  geoGroups.ruler = { g, body, ticks, rotateHandle, resizeHandle, pencilBtn, closeBtn };
+  geoGroups.ruler = { g, body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn };
   pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
@@ -8309,7 +8860,7 @@ function buildGeoRuler() {
 
 function renderGeoRuler() {
   const st = geoGuides.ruler;
-  const { body, ticks, rotateHandle, resizeHandle, pencilBtn, closeBtn } = geoGroups.ruler;
+  const { body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn } = geoGroups.ruler;
   const L = st.length, T = st.thickness;
   body.setAttribute('x', 0); body.setAttribute('y', 0);
   body.setAttribute('width', L); body.setAttribute('height', T);
@@ -8331,8 +8882,12 @@ function renderGeoRuler() {
   }
   // Mânerul de rotire stă acum lângă pătrățelul de redimensionare (capătul
   // din dreapta), imediat în stânga lui — mai ușor de controlat, fiindcă
-  // ambele mânere sunt la îndemână în aceeași zonă.
+  // ambele mânere sunt la îndemână în aceeași zonă. Al doilea mâner de
+  // rotire stă simetric, lângă capătul din stânga — pe ecrane înguste
+  // rigla poate fi lungă cât toată lățimea ecranului, iar capătul din
+  // dreapta să iasă din cadru; cu mânerul și în stânga, mereu ai unul vizibil.
   rotateHandle.setAttribute('transform', `translate(${L - 34},${T / 2})`);
+  rotateHandleLeft.setAttribute('transform', `translate(34,${T / 2})`);
   resizeHandle.setAttribute('x', L - 8);
   resizeHandle.setAttribute('y', T / 2 - 8);
   // Butonul-creion (pornește un segment de precizie 0→3cm) — în interiorul
@@ -8471,10 +9026,13 @@ function renderGeoSetsquare() {
   // Mânerul de rotire — lângă colțul unghiului drept (diviziunea 0 comună
   // ambelor catete), ca rotația să se simtă "în raport cu diviziunea 0".
   rotateHandle.setAttribute('transform', 'translate(24,-24)');
-  // "Scalare spre dreapta" — la capătul catetei orizontale.
-  resizeHandleW.setAttribute('transform', `translate(${W + 2},0)`);
-  // "Scalare în sus" — la capătul catetei verticale.
-  resizeHandleH.setAttribute('transform', `translate(0,${-H - 2})`);
+  // "Scalare spre dreapta" — mutat în interiorul echerului (poziție
+  // proporțională, rămâne mereu în interior indiferent de proporțiile W:H),
+  // aproape de catetă dar nu chiar în vârful unghiului ascuțit — acolo
+  // acoperea gradațiile.
+  resizeHandleW.setAttribute('transform', `translate(${0.75 * W},${-0.12 * H})`);
+  // "Scalare în sus" — la fel, în interior, aproape de catetă verticală.
+  resizeHandleH.setAttribute('transform', `translate(${0.12 * W},${-0.75 * H})`);
   closeBtn.setAttribute('transform', 'translate(-16,16)');
   rightAngleBox.setAttribute('transform', 'translate(-16,-16)');
   rightAngleCheck.setAttribute('transform', 'translate(-16,-16)');
@@ -8910,9 +9468,10 @@ const GEO_ROTATE_HANDLE_LOCAL_ANGLE = {
 // Mânerul de rotire al riglei stă lângă capătul din dreapta, a cărui
 // poziție depinde de lungimea curentă L (se schimbă la redimensionare) —
 // de-aia unghiul local se calculează dinamic, nu ca o constantă fixă.
-function geoRotateHandleLocalAngle(name) {
+function geoRotateHandleLocalAngle(name, isLeft) {
   if (name === 'ruler') {
     const st = geoGuides.ruler;
+    if (isLeft) return Math.atan2(st.thickness / 2, 34); // mânerul din stânga, la local (34, T/2)
     return Math.atan2(st.thickness / 2, st.length - 34);
   }
   return GEO_ROTATE_HANDLE_LOCAL_ANGLE[name] || 0;
@@ -8941,6 +9500,19 @@ Object.keys(geoGroups).forEach(name => {
     }
     try { grp.rotateHandle.setPointerCapture(e.pointerId); } catch (err) {}
   });
+  if (grp.rotateHandleLeft) {
+    grp.rotateHandleLeft.addEventListener('pointerdown', e => {
+      if (geoSegBuild) confirmGeoSegBuild();
+      e.stopPropagation(); e.preventDefault();
+      geoLastActiveGuide = name;
+      if (e.shiftKey) {
+        geoActiveDrag = { name, mode: 'rotateSnap', lastAngle: geoGuides[name].angle };
+      } else {
+        geoActiveDrag = { name, mode: 'rotate', localOffset: geoRotateHandleLocalAngle(name, true) };
+      }
+      try { grp.rotateHandleLeft.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+  }
   if (grp.resizeHandle) {
     grp.resizeHandle.addEventListener('pointerdown', e => {
       if (geoSegBuild) confirmGeoSegBuild();
@@ -9781,7 +10353,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal, apoi comută între tablă și fișă. La încărcare, se activează automat plimbarea cu degetul în fereastra PDF (bara ei de control — săgeți/zoom/pagini — dispare după 10 secunde și reapare la atingerea barei de separare dintre fișă și tablă), ca fișa să se vadă pe o suprafață mai mare. Pe laptop, cât timp modul plimbare e activ, poți plimba fișa și cu mouse-ul (click stânga + trage), iar Ctrl+rotița mouse-ului (sau pinch pe trackpad) mărește/micșorează fișa, centrat pe poziția cursorului. Ce desenezi peste fișă rămâne lipit de conținutul PDF-ului: își păstrează poziția la panoramare și se scalează odată cu zoom-ul. Pe tabla neagră de jos, creionul rămâne mereu unealta implicită.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat cu creion alb; acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom).</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -9884,7 +10456,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background, then switch between the board and the sheet. On load, finger pan mode turns on automatically in the PDF window (its control bar — arrows/zoom/pages — hides after 10 seconds and comes back when you tap the divider between the sheet and the board), so the sheet gets more screen space. On a laptop, while pan mode is on you can also pan the sheet with the mouse (left-click + drag), and Ctrl+scroll (or a trackpad pinch) zooms in/out centered on the cursor. Anything you draw over the sheet stays attached to the PDF content: it keeps its position when panning and scales with the zoom. On the black board below, the pencil always stays the default tool.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below with a white pencil; there, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet stays attached to the PDF content (keeps its position when panning, scales with zoom).</li>
 </ul>
 
 <h4>File and history</h4>
@@ -9993,7 +10565,16 @@ document.getElementById('btn-pen').classList.add('active');
 tool = 'pen';
 
 updateGeoToolContrast();
-setTimeout(initCanvas, 100);
+// Apel de siguranță, ca tabla să fie corect dimensionată de la început —
+// dar initCanvas() dimensionează canvas-urile TABLEI, deci trebuie să ruleze
+// doar cât timp tabla e suprafața activă (altfel ar corupe dimensiunile
+// ferestrei PDF, dacă aceasta a devenit între timp suprafața activă).
+setTimeout(() => {
+  const wasActive = activeSurface;
+  if (wasActive !== 'board') activatePane('board');
+  initCanvas();
+  if (wasActive !== 'board') activatePane(wasActive);
+}, 100);
 
 const langSelectEl = document.getElementById('lang-select');
 if (langSelectEl) langSelectEl.addEventListener('change', (e) => setLanguage(e.target.value));

@@ -42,10 +42,17 @@
     /* ============== FIȘĂ PDF - FEREASTRĂ SUS + TABLĂ NEAGRĂ JOS ============== */
     .pdf-pane { position: relative; flex: 0 0 50%; min-height: 80px; overflow: hidden; background: #2a2a30; touch-action: none; width: 100%; }
     .pdf-pane canvas { position: absolute; top: 0; left: 0; touch-action: none; }
-    .pdf-pane-bg { background: #fff; z-index: 1; }
+    .pdf-pane-bg { background: #fff; z-index: 1; transition: opacity 0.18s ease; }
+    .pdf-pane-bg-adj { background: #fff; z-index: 1; }
     .pdf-pane-draw { z-index: 2; }
     .pdf-pane-overlay { z-index: 3; pointer-events: none; }
     .pdf-pane-select { z-index: 4; pointer-events: none; }
+    .pdf-pane-images { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; transform-origin: 0 0; }
+    .pdf-pane-images .image-item { pointer-events: auto; touch-action: none; }
+    .pdf-scrollbar-track { position: absolute; top: 4px; right: 2px; bottom: 4px; width: 14px; z-index: 7; opacity: 0; transition: opacity 0.25s ease; cursor: pointer; touch-action: none; }
+    .pdf-pane.has-doc .pdf-scrollbar-track { opacity: 1; }
+    .pdf-scrollbar-thumb { position: absolute; left: 3px; width: 8px; min-height: 24px; background: rgba(130,130,140,0.6); border-radius: 4px; pointer-events: none; }
+    .pdf-scrollbar-track:hover .pdf-scrollbar-thumb, .pdf-scrollbar-track:active .pdf-scrollbar-thumb { background: rgba(90,90,100,0.8); }
     .pdf-pane-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; font-size: 15px; pointer-events: none; z-index: 0; }
     .pdf-pane.has-doc .pdf-pane-empty { display: none; }
     .pdf-pane-divider { height: 20px; flex-shrink: 0; background: #3a3a42; cursor: row-resize; touch-action: none; position: relative; }
@@ -442,9 +449,12 @@
   <div id="workspace">
     <div class="pdf-pane" id="pdf-pane-top" data-pane="top" style="display:none;">
       <canvas class="pdf-pane-bg"></canvas>
+      <canvas class="pdf-pane-bg-adj"></canvas>
       <canvas class="pdf-pane-draw"></canvas>
       <canvas class="pdf-pane-overlay"></canvas>
       <canvas class="pdf-pane-select"></canvas>
+      <div class="pdf-pane-images"></div>
+      <div class="pdf-scrollbar-track"><div class="pdf-scrollbar-thumb"></div></div>
       <div class="pdf-pane-empty">📄 Nicio fișă încărcată</div>
       <div class="pdf-pane-controls">
         <button class="pdf-ctl" data-act="pageprev" title="Pagina anterioară"><i class="ti ti-chevron-left"></i></button>
@@ -603,6 +613,7 @@
     <div class="tool-group">
       <button class="tool" id="btn-load-pdf" title="Încarcă o fișă de lucru/test în format PDF" style="color:#8e44ad; border-color:#8e44ad;"><i class="ti ti-file-type-pdf"></i> Fișă PDF</button>
       <button class="tool" id="btn-toggle-pdf-mode" title="Comută între tabla normală și fișa PDF" disabled><i class="ti ti-columns"></i></button>
+      <button class="tool" id="btn-pdf-split" title="Arată/ascunde tabla dedesubt (împarte ecranul cu fișa PDF)" disabled><i class="ti ti-layout-bottombar"></i></button>
     </div>
     <div class="sep"></div>
     <div class="tool-group">
