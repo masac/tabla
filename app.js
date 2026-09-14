@@ -574,7 +574,7 @@ function getPaneContentTransform(name) {
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
   const rect = els.root.getBoundingClientRect();
-  const w = els.bg.width || 0, h = els.bg.height || 0;
+  const w = pane._liveW || els.bg.width || 0, h = pane._liveH || els.bg.height || 0;
   const centerX = (rect.width - w) / 2;
   const centerY = Math.max(0, (rect.height - h) / 2);
   const scale = pane.finalScale || 1;
@@ -704,6 +704,9 @@ function renderPdfPane(name) {
       els.bg.height = newH;
       els.bg.style.width = scaledViewport.width + 'px';
       els.bg.style.height = scaledViewport.height + 'px';
+      // Rezoluția nativă a canvas-ului acum chiar corespunde mărimii dorite
+      // — nu mai e nevoie de "întinderea" CSS temporară de previzualizare.
+      pane._liveW = null; pane._liveH = null;
       els.bg.getContext('2d').drawImage(off, 0, 0);
       updatePdfPanePosition(name);
       // Dacă schimbarea de pagină a venit din tragerea barei de defilare,
@@ -779,7 +782,7 @@ function updatePdfPanePosition(name) {
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
   const rect = els.root.getBoundingClientRect();
-  const w = els.bg.width, h = els.bg.height;
+  const w = pane._liveW || els.bg.width, h = pane._liveH || els.bg.height;
   const centerX = (rect.width - w) / 2;
   const centerY = Math.max(0, (rect.height - h) / 2);
   els.bg.style.transform = 'translate(' + (centerX + pane.panX) + 'px, ' + (centerY + pane.panY) + 'px)';
@@ -865,11 +868,20 @@ function checkPdfPageBoundaryScroll(name) {
   if (!els.bg || !els.bg.height) return;
   const rect = els.root.getBoundingClientRect();
   const h = els.bg.height;
+  // Dacă pagina (de exemplu la zoom mic) încape întreagă în fereastra
+  // vizibilă, nu are sens nicio verificare de graniță — tot conținutul e
+  // deja vizibil, nu s-a "derulat" nicăieri. Fără garda asta, o pagină mai
+  // mică decât fereastra declanșa mereu fals "ai derulat dincolo de ea".
+  if (h <= rect.height) return;
   const gap = 0;
   const centerY = Math.max(0, (rect.height - h) / 2);
   const topEdge = centerY + pane.panY;
   const bottomEdge = topEdge + h;
-  const margin = 4;
+  // O margine mică (câțiva pixeli) făcea ca, pentru o pagină doar puțin mai
+  // înaltă decât fereastra, orice derulare minimă să declanșeze imediat
+  // schimbarea de pagină — părea o tranziție bruscă, instantă. Cu o margine
+  // mai mare, trebuie o derulare reală, deliberată, înainte de tranziție.
+  const margin = 60;
   if (bottomEdge < rect.height - margin && pane.pageNum < pdfTotalPages) {
     if (pane.adjNum === pane.pageNum + 1 && pane.adjDir === 1) {
       pane.panY += (h + gap);
@@ -1258,6 +1270,53 @@ function attachPanePanZoom(name) {
     }
   }, { passive: true });
 
+  let pinchRafPending = false;
+  // Grupăm actualizările de pinch într-un singur calcul per cadru de
+  // animație — fiecare deget trimite propriul eveniment SEPARAT, deci dacă
+  // am recalcula distanța/mijlocul la fiecare eveniment individual, am
+  // "vedea" tranzitoriu starea în care un deget s-a mișcat dar celălalt
+  // încă nu, ceea ce arată ca un zoom mare fals și "fură" din panoramare.
+  // Așteptând un cadru, folosim poziția FINALĂ a ambelor degete din acel
+  // cadru, împreună.
+  function schedulePinchUpdate() {
+    if (pinchRafPending) return;
+    pinchRafPending = true;
+    requestAnimationFrame(function() {
+      pinchRafPending = false;
+      if (pts.size !== 2) return;
+      const pane = pdfPanes[name];
+      const [a, b] = Array.from(pts.values());
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (lastDist != null && pane) {
+        // Translația (panoramarea) e mereu aditivă, pe baza mișcării
+        // mijlocului.
+        pane.panX += (mid.x - lastMid.x);
+        pane.panY += (mid.y - lastMid.y);
+        // Recentrarea de zoom (care invalidează pagina adiacentă deja
+        // pregătită pentru derulare continuă) se aplică doar dacă distanța
+        // s-a schimbat semnificativ — un prag prea mic (sub ~1%) declanșa
+        // recentrarea și la mici fluctuații naturale de distanță în timpul
+        // unei panorame intenționate, resetând constant pregătirea paginii
+        // următoare și împiedicând derularea continuă să se mai vadă.
+        const scaleDelta = dist / lastDist;
+        if (Math.abs(scaleDelta - 1) > 0.025) {
+          // Zoom real — NU verificăm granița de pagină aici. La micșorare,
+          // pagina randată poate deveni mai mică decât fereastra vizibilă,
+          // ceea ce verificarea de graniță (gândită pentru derulare, nu
+          // pentru zoom) ar interpreta greșit drept "ai derulat dincolo de
+          // pagină", schimbând pagina neintenționat chiar în timp ce
+          // utilizatorul doar mărea/micșora.
+          zoomPaneAtPoint(name, scaleDelta, mid.x, mid.y);
+        } else {
+          updatePdfPanePosition(name);
+          checkPdfPageBoundaryScroll(name);
+        }
+      }
+      lastDist = dist; lastMid = mid;
+    });
+  }
+
   root.addEventListener('pointermove', function(e) {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1273,17 +1332,7 @@ function attachPanePanZoom(name) {
     }
 
     if (pts.size === 2) {
-      const [a, b] = Array.from(pts.values());
-      const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      if (lastDist != null) {
-        const scaleDelta = dist / lastDist;
-        pane.zoom = Math.max(0.2, Math.min(10, pane.zoom * scaleDelta));
-        pane.panX += (mid.x - lastMid.x);
-        pane.panY += (mid.y - lastMid.y);
-        renderPdfPane(name);
-      }
-      lastDist = dist; lastMid = mid;
+      schedulePinchUpdate();
     }
   }, { passive: true });
 
@@ -1393,27 +1442,55 @@ setupPdfScrollbarDrag('top');
 
 // Aplică un factor de zoom pe fișa PDF, păstrând fix punctul de sub cursor
 // (clientX, clientY) — folosită la Ctrl+rotița mouse-ului / pinch trackpad.
-function zoomPaneAtPoint(name, factor, clientX, clientY) {
+function zoomPaneAtPoint(name, factor, fromX, fromY, toX, toY) {
+  if (toX === undefined) { toX = fromX; toY = fromY; }
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
   if (!pane || !els.bg.width) return;
   const rect = els.root.getBoundingClientRect();
-  const localX = clientX - rect.left, localY = clientY - rect.top;
-  const w0 = els.bg.width, h0 = els.bg.height;
+  const localFromX = fromX - rect.left, localFromY = fromY - rect.top;
+  // Folosim lățimea/înălțimea VIZUALĂ curentă (poate fi o "întindere" CSS
+  // temporară de la un zoom anterior încă neconfirmat de randarea reală),
+  // nu neapărat rezoluția nativă a canvas-ului — altfel, la gesturi rapide
+  // (pinch sau rotița ținută), fiecare pas ar porni din starea GREȘITĂ
+  // (veche), stricând centrarea zoom-ului.
+  const w0 = pane._liveW || els.bg.width, h0 = pane._liveH || els.bg.height;
   const centerX0 = (rect.width - w0) / 2;
   const centerY0 = Math.max(0, (rect.height - h0) / 2);
-  const bitmapX = localX - centerX0 - pane.panX;
-  const bitmapY = localY - centerY0 - pane.panY;
+  // Punctul de conținut aflat sub (fromX,fromY) ÎNAINTE de acest pas —
+  // pentru pinch, acesta e mijlocul VECHI al celor două degete, ca să poată
+  // fi apoi repoziționat sub mijlocul NOU (toX,toY), compunând corect
+  // panoramarea (translația degetelor) cu zoom-ul (apropierea/depărtarea
+  // lor), într-un singur calcul — nu două calcule separate care se pot
+  // anula parțial unul pe altul.
+  const bitmapX = localFromX - centerX0 - pane.panX;
+  const bitmapY = localFromY - centerY0 - pane.panY;
   const z0 = pane.zoom;
   const z1 = Math.max(0.2, Math.min(10, z0 * factor));
   const ratio = z1 / z0;
   const w1 = w0 * ratio, h1 = h0 * ratio;
   const centerX1 = (rect.width - w1) / 2;
   const centerY1 = Math.max(0, (rect.height - h1) / 2);
+  const localToX = toX - rect.left, localToY = toY - rect.top;
   pane.zoom = z1;
-  pane.panX = localX - centerX1 - bitmapX * ratio;
-  pane.panY = localY - centerY1 - bitmapY * ratio;
-  renderPdfPane(name);
+  pane.panX = localToX - centerX1 - bitmapX * ratio;
+  pane.panY = localToY - centerY1 - bitmapY * ratio;
+  // Scala de conținut (folosită de desenele de peste fișă) se actualizează
+  // IMEDIAT, proporțional — desenele trebuie să respecte zoom-ul chiar din
+  // acest cadru, nu abia după ce se termină randarea PDF.js (care e lentă).
+  pane.finalScale = (pane.finalScale || 1) * ratio;
+  // "Întindem" vizual bitmap-ul deja randat la noua mărime, ca feedback
+  // instant (fără să rerandăm PDF.js la fiecare pas de pinch/rotiță) — e
+  // doar o aproximare vizuală temporară; randarea reală, la rezoluție
+  // corectă, vine puțin mai târziu (debounced), ca zoom-ul rapid să nu
+  // declanșeze zeci de randări suprapuse care ar strica centrarea.
+  pane._liveW = w1; pane._liveH = h1;
+  els.bg.style.width = w1 + 'px';
+  els.bg.style.height = h1 + 'px';
+  if (els.bgAdj) { pane.adjNum = null; pane.adjDir = 0; els.bgAdj.style.display = 'none'; }
+  updatePdfPanePosition(name);
+  clearTimeout(pane._zoomRenderTimer);
+  pane._zoomRenderTimer = setTimeout(() => { renderPdfPane(name); }, 150);
 }
 
 // ===== Divizor redimensionabil între fereastra PDF și tabla neagră =====
@@ -3357,7 +3434,7 @@ function finalizePolygon() {
 function handlePointerDown(e) {
 
   if (geoSegBuild) {
-    confirmGeoSegBuild();
+    cancelGeoSegBuild();
     return;
   }
 
@@ -8063,13 +8140,27 @@ document.getElementById('btn-snap-grid').onclick = () => {
     showToast(snapToGridEnabled ? '✓ Lipire de rețea activă' : 'Lipire de rețea dezactivată');
   }
 };
-document.getElementById('btn-snap-point').onclick = () => {
+function toggleSnapToPoint() {
   snapToPointEnabled = !snapToPointEnabled;
   document.getElementById('btn-snap-point').classList.toggle('active', snapToPointEnabled);
+  updateAllMagnetButtons();
   showToast(snapToPointEnabled
     ? '✓ Lipire de punct activă — diviziunea 0 a riglei, vârful echerului, centrul raportorului, centrul viitor al cercului la compas'
     : 'Lipire de punct dezactivată');
-};
+}
+document.getElementById('btn-snap-point').onclick = toggleSnapToPoint;
+
+// Ține sincronizate vizual toate butoanele-magnet de pe instrumente cu
+// starea curentă a lipirii de punct (fie că a fost comutată din bara
+// principală, fie de pe un instrument).
+function updateAllMagnetButtons() {
+  Object.keys(geoGroups).forEach(name => {
+    const grp = geoGroups[name];
+    if (grp && grp.magnetBtn && grp.magnetBtn._magnetBg) {
+      grp.magnetBtn._magnetBg.setAttribute('fill', snapToPointEnabled ? '#2d9d4f' : '#ffffff');
+    }
+  });
+}
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
 document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
@@ -8837,6 +8928,22 @@ function geoBuildCloseButton() {
   return g;
 }
 
+// Buton "magnet" — comută aceeași opțiune globală "Lipire de punct" direct
+// de pe instrument, fără să mai fie nevoie să cauți butonul din bara
+// principală. Fundalul devine verde cât timp lipirea e activă.
+function geoBuildMagnetButton() {
+  const g = geoEl('g', { class: 'guide-handle', style: 'cursor:pointer; pointer-events:auto;' });
+  const bg = geoEl('circle', { r: 12, fill: '#ffffff', stroke: '#888888', 'stroke-width': 1.4 });
+  g.appendChild(bg);
+  // Potcoavă (simbol universal de magnet), cu cei doi poli colorați.
+  g.appendChild(geoEl('path', { d: 'M -5 -6 L -5 1.5 A 5 5 0 0 0 5 1.5 L 5 -6',
+    fill: 'none', stroke: '#555555', 'stroke-width': 2.2, 'stroke-linecap': 'round' }));
+  g.appendChild(geoEl('rect', { x: -6.5, y: -8.5, width: 3.4, height: 4, fill: '#d64545' }));
+  g.appendChild(geoEl('rect', { x: 3.1, y: -8.5, width: 3.4, height: 4, fill: '#3a6fd6' }));
+  g._magnetBg = bg;
+  return g;
+}
+
 // Mâner de rotire (cerc albastru cu o mică săgeată circulară), folosit la
 // riglă/echer/raportor — vizual mai clar decât un cerc simplu.
 function geoBuildRotateHandle() {
@@ -8899,18 +9006,22 @@ function buildGeoRuler() {
   g.appendChild(pencilBtn);
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
+  const magnetBtn = geoBuildMagnetButton();
+  g.appendChild(magnetBtn);
   guidePanGroup.appendChild(g);
-  geoGroups.ruler = { g, body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn };
+  geoGroups.ruler = { g, body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn, magnetBtn };
   pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('ruler'); });
+  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
   renderGeoRuler();
 }
 
 function renderGeoRuler() {
   const st = geoGuides.ruler;
-  const { body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn } = geoGroups.ruler;
+  const { body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn, magnetBtn } = geoGroups.ruler;
   const L = st.length, T = st.thickness;
   body.setAttribute('x', 0); body.setAttribute('y', 0);
   body.setAttribute('width', L); body.setAttribute('height', T);
@@ -8945,6 +9056,7 @@ function renderGeoRuler() {
   // (care ies acum în exterior, cu linie-indicator, la desenul de precizie).
   pencilBtn.setAttribute('transform', `translate(${L / 2},${T / 2})`);
   closeBtn.setAttribute('transform', `translate(-16,${T / 2})`);
+  magnetBtn.setAttribute('transform', `translate(${L / 2},${T + 18})`);
 }
 
 // ---------------- ECHER ----------------
@@ -8989,11 +9101,16 @@ function buildGeoSetsquare() {
   rightAngleBox.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   rightAngleBox.addEventListener('click', ev => { ev.stopPropagation(); toggleSetsquareRightAngleMark(); });
 
+  const magnetBtn = geoBuildMagnetButton();
+  g.appendChild(magnetBtn);
+  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+
   guidePanGroup.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck, magnetBtn };
 
   resizeHandleW.addEventListener('pointerdown', e => {
-    if (geoSegBuild) confirmGeoSegBuild();
+    if (geoSegBuild) cancelGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = 'setsquare';
     const st = geoGuides.setsquare;
@@ -9004,7 +9121,7 @@ function buildGeoSetsquare() {
     try { resizeHandleW.setPointerCapture(e.pointerId); } catch (err) {}
   });
   resizeHandleH.addEventListener('pointerdown', e => {
-    if (geoSegBuild) confirmGeoSegBuild();
+    if (geoSegBuild) cancelGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = 'setsquare';
     const st = geoGuides.setsquare;
@@ -9022,7 +9139,7 @@ function buildGeoSetsquare() {
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck } = geoGroups.setsquare;
+  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck, magnetBtn } = geoGroups.setsquare;
   const W = st.width, H = st.height;
   body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
 
@@ -9093,6 +9210,7 @@ function renderGeoSetsquare() {
   resizeHandleH.setAttribute('transform', `translate(${0.12 * W},${-0.75 * H})`);
   closeBtn.setAttribute('transform', 'translate(-16,16)');
   rightAngleBox.setAttribute('transform', 'translate(-16,-16)');
+  magnetBtn.setAttribute('transform', 'translate(-40,0)');
   rightAngleCheck.setAttribute('transform', 'translate(-16,-16)');
   // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în
   // interiorul triunghiului (pe direcția normalei spre interior) — nu în
@@ -9198,8 +9316,13 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
+  const magnetBtn = geoBuildMagnetButton();
+  g.appendChild(magnetBtn);
+  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck, magnetBtn };
   renderGeoProtractor();
 }
 
@@ -9263,7 +9386,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
+  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, magnetBtn } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
 
@@ -9319,6 +9442,7 @@ function renderGeoProtractor() {
   resizeHandle.setAttribute('y', -8);
   resetHorizBtn.setAttribute('transform', `translate(${-R + 20},18)`);
   closeBtn.setAttribute('transform', `translate(${-R - 4},0)`);
+  magnetBtn.setAttribute('transform', `translate(${-R - 4},28)`);
   // Grupul căsuță+bifă — la mijlocul distanței dintre mânerul de rotire și
   // centrul (pivotul) raportorului.
   const rotateY = -R + 34;
@@ -9401,14 +9525,19 @@ function buildGeoCompass() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('compass'); });
 
+  const magnetBtn = geoBuildMagnetButton();
+  g.appendChild(magnetBtn);
+  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+
   guidePanGroup.appendChild(g);
-  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn };
+  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn, magnetBtn };
   renderGeoCompass();
 }
 
 function renderGeoCompass() {
   const st = geoGuides.compass;
-  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, closeBtn } = geoGroups.compass;
+  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, closeBtn, magnetBtn } = geoGroups.compass;
   const cosA = Math.cos(st.angle), sinA = Math.sin(st.angle);
   const tipX = st.x + st.radius * cosA;
   const tipY = st.y + st.radius * sinA;
@@ -9433,6 +9562,10 @@ function renderGeoCompass() {
   // Butonul X — dincolo de pivot, în partea opusă vârfului de desenare
   // (ca acul unui compas real, care iese puțin în spatele balamalei).
   closeBtn.setAttribute('transform', `translate(${st.x - 22 * cosA},${st.y - 22 * sinA})`);
+  // Magnetul stă lângă pivot, dar perpendicular pe brațul compasului (nu în
+  // spatele acului, unde e deja butonul X) — rămâne la îndemână indiferent
+  // de unghiul la care e rotit compasul.
+  magnetBtn.setAttribute('transform', `translate(${st.x - 22 * -sinA},${st.y - 22 * cosA})`);
 
   const perp = st.angle + Math.PI / 2;
   radiusLabel.setAttribute('x', midX + 18 * Math.cos(perp));
@@ -9540,7 +9673,7 @@ Object.keys(geoGroups).forEach(name => {
   if (name === 'compass') return;
   const grp = geoGroups[name];
   grp.body.addEventListener('pointerdown', e => {
-    if (geoSegBuild) confirmGeoSegBuild();
+    if (geoSegBuild) cancelGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = name;
     const p = pos(e);
@@ -9548,7 +9681,7 @@ Object.keys(geoGroups).forEach(name => {
     try { grp.body.setPointerCapture(e.pointerId); } catch (err) {}
   });
   grp.rotateHandle.addEventListener('pointerdown', e => {
-    if (geoSegBuild) confirmGeoSegBuild();
+    if (geoSegBuild) cancelGeoSegBuild();
     e.stopPropagation(); e.preventDefault();
     geoLastActiveGuide = name;
     if (e.shiftKey) {
@@ -9560,7 +9693,7 @@ Object.keys(geoGroups).forEach(name => {
   });
   if (grp.rotateHandleLeft) {
     grp.rotateHandleLeft.addEventListener('pointerdown', e => {
-      if (geoSegBuild) confirmGeoSegBuild();
+      if (geoSegBuild) cancelGeoSegBuild();
       e.stopPropagation(); e.preventDefault();
       geoLastActiveGuide = name;
       if (e.shiftKey) {
@@ -9573,7 +9706,7 @@ Object.keys(geoGroups).forEach(name => {
   }
   if (grp.resizeHandle) {
     grp.resizeHandle.addEventListener('pointerdown', e => {
-      if (geoSegBuild) confirmGeoSegBuild();
+      if (geoSegBuild) cancelGeoSegBuild();
       e.stopPropagation(); e.preventDefault();
       geoLastActiveGuide = name;
       geoActiveDrag = { name, mode: 'resize' };
