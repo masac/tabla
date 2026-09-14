@@ -2347,6 +2347,13 @@ function drawStrokeOn(c, stroke) {
     c.beginPath();
     c.arc(stroke.cx, stroke.cy, stroke.radius, 0, Math.PI * 2);
     c.stroke();
+    // Mic X permanent la centru, ca reper — cât mai mic, ca să nu distragă
+    // atenția de la desen.
+    c.beginPath();
+    c.lineWidth = 1;
+    c.moveTo(stroke.cx - 3, stroke.cy - 3); c.lineTo(stroke.cx + 3, stroke.cy + 3);
+    c.moveTo(stroke.cx + 3, stroke.cy - 3); c.lineTo(stroke.cx - 3, stroke.cy + 3);
+    c.stroke();
     c.restore();
     return;
   }
@@ -2568,7 +2575,9 @@ function snapGuideMoveToStrokePoint(name) {
   else if (name === 'compass') zeroWorld = { x: st.x, y: st.y };
   else return;
 
-  const pts = getStrokeEndpointsList(getCurrentPage());
+  const page = getCurrentPage();
+  const pts = getStrokeEndpointsList(page);
+  pts.push(...getStrokeIntersectionPoints(page));
   let best = null, bestD = 18;
   pts.forEach(pt => {
     const d = Math.hypot(zeroWorld.x - pt.x, zeroWorld.y - pt.y);
@@ -2601,25 +2610,70 @@ function getGeoSnapPoints() {
   return pts;
 }
 
-// Segmentele "drepte" din desenele existente (linie/linie întreruptă/
-// săgeată cu 2 puncte, plus fiecare latură a poligoanelor) — folosite doar
-// pentru calculul intersecțiilor; desenul liber (creion) nu are laturi
-// drepte relevante și e ignorat aici (rămâne inclus doar prin capetele lui,
-// via getStrokeEndpointsList).
+// Segmentele "drepte" din desenele existente — folosite doar pentru
+// calculul intersecțiilor. Include: liniile simple (linie/linie
+// întreruptă/săgeată, cu 2 puncte), laturile poligoanelor, laturile
+// dreptunghiurilor, ȘI desenul liber (creion) — tratat ca o succesiune de
+// mici segmente între puncte consecutive, ca un "X" trasat cu mâna (nu
+// neapărat cu unealta Linie) să fie detectat corect. Stroke-urile foarte
+// lungi (multe puncte, o mâzgălitură complexă) sunt ignorate pentru
+// intersecții, ca să nu explodeze numărul de calcule.
 function getStrokeSegmentsForIntersection(page) {
   const segs = [];
   if (!page) return segs;
   page.strokes.forEach(s => {
-    if (!s.points || s.points.length < 2) return;
+    if (s.type === 'rect') {
+      const x0 = s.x, y0 = s.y, x1 = s.x + s.w, y1 = s.y + s.h;
+      segs.push([{ x: x0, y: y0 }, { x: x1, y: y0 }]);
+      segs.push([{ x: x1, y: y0 }, { x: x1, y: y1 }]);
+      segs.push([{ x: x1, y: y1 }, { x: x0, y: y1 }]);
+      segs.push([{ x: x0, y: y1 }, { x: x0, y: y0 }]);
+      return;
+    }
+    if (!s.points || s.points.length < 2 || s.erase) return;
     if (s.type === 'polygon') {
       for (let i = 0; i < s.points.length; i++) {
         segs.push([s.points[i], s.points[(i + 1) % s.points.length]]);
       }
-    } else if ((!s.type || s.type === 'arrow') && s.points.length === 2) {
+    } else if (s.points.length === 2) {
       segs.push([s.points[0], s.points[1]]);
+    } else if (s.points.length <= 60) {
+      for (let i = 0; i < s.points.length - 1; i++) {
+        segs.push([s.points[i], s.points[i + 1]]);
+      }
     }
   });
   return segs;
+}
+
+// Cercurile existente pe pagină, pentru calculul intersecțiilor linie-cerc
+// (o curbă, nu un segment drept — se tratează separat).
+function getStrokeCirclesForIntersection(page) {
+  const circles = [];
+  if (!page) return circles;
+  page.strokes.forEach(s => {
+    if (s.type === 'circle') circles.push({ cx: s.cx, cy: s.cy, r: s.radius });
+  });
+  return circles;
+}
+
+// Punctele (0, 1 sau 2) unde segmentul a1-a2 taie efectiv cercul (cx,cy,r)
+// — doar punctele aflate pe segment, nu pe prelungirea lui.
+function segCircleIntersection(a1, a2, cx, cy, r) {
+  const dx = a2.x - a1.x, dy = a2.y - a1.y;
+  const fx = a1.x - cx, fy = a1.y - cy;
+  const a = dx * dx + dy * dy;
+  if (a < 1e-9) return [];
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - r * r;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return [];
+  const sqrtDisc = Math.sqrt(disc);
+  const pts = [];
+  [(-b - sqrtDisc) / (2 * a), (-b + sqrtDisc) / (2 * a)].forEach(t => {
+    if (t >= -0.01 && t <= 1.01) pts.push({ x: a1.x + dx * t, y: a1.y + dy * t });
+  });
+  return pts;
 }
 
 // Punctul de intersecție a două segmente (a1-a2 și b1-b2), sau null dacă
@@ -2635,10 +2689,11 @@ function segIntersection(a1, a2, b1, b2) {
   return { x: a1.x + d1x * t, y: a1.y + d1y * t };
 }
 
-// Toate punctele de intersecție dintre perechile de segmente existente pe
-// pagina curentă.
+// Toate punctele de intersecție existente pe pagina curentă: între perechi
+// de segmente (linii/poligoane/dreptunghiuri) și între segmente și cercuri.
 function getStrokeIntersectionPoints(page) {
   const segs = getStrokeSegmentsForIntersection(page);
+  const circles = getStrokeCirclesForIntersection(page);
   const pts = [];
   for (let i = 0; i < segs.length; i++) {
     for (let j = i + 1; j < segs.length; j++) {
@@ -2646,6 +2701,11 @@ function getStrokeIntersectionPoints(page) {
       if (ip) pts.push(ip);
     }
   }
+  segs.forEach(seg => {
+    circles.forEach(circ => {
+      pts.push(...segCircleIntersection(seg[0], seg[1], circ.cx, circ.cy, circ.r));
+    });
+  });
   return pts;
 }
 
@@ -4009,6 +4069,15 @@ function handlePointerMove(e) {
     ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
     ctx.strokeStyle = color; ctx.lineWidth = size;
     ctx.stroke();
+    // Un mic X la centru, cât timp tragi cercul — ca să vezi exact de unde
+    // a pornit — și rămâne vizibil permanent și după ce cercul e desenat
+    // (vezi drawStrokeOn). Cât mai mic, ca să nu distragă atenția.
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, cy - 3); ctx.lineTo(cx + 3, cy + 3);
+    ctx.moveTo(cx + 3, cy - 3); ctx.lineTo(cx - 3, cy + 3);
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.stroke();
+    showMathInfo('◯ Rază: ' + (radius / PX_PER_CM).toFixed(1) + ' cm');
   } else if (tool === 'line' || tool === 'arrow' || tool === 'dashed') {
     clearCanvas(ctx, drawC);
     redrawStrokes();
@@ -4035,6 +4104,10 @@ function handlePointerMove(e) {
         ctx.stroke();
       }
     }
+    const segDx = endPoint.x - currentStroke[0].x, segDy = endPoint.y - currentStroke[0].y;
+    const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+    const icon = tool === 'dashed' ? '┄' : (tool === 'arrow' ? '→' : '—');
+    showMathInfo(icon + ' Lungime: ' + (segLen / PX_PER_CM).toFixed(1) + ' cm');
   } else {
     currentStroke.push(tool === 'pen' ? snapToGuides(p) : p);
     clearCanvas(ctx, drawC);
@@ -8143,24 +8216,11 @@ document.getElementById('btn-snap-grid').onclick = () => {
 function toggleSnapToPoint() {
   snapToPointEnabled = !snapToPointEnabled;
   document.getElementById('btn-snap-point').classList.toggle('active', snapToPointEnabled);
-  updateAllMagnetButtons();
   showToast(snapToPointEnabled
     ? '✓ Lipire de punct activă — diviziunea 0 a riglei, vârful echerului, centrul raportorului, centrul viitor al cercului la compas'
     : 'Lipire de punct dezactivată');
 }
 document.getElementById('btn-snap-point').onclick = toggleSnapToPoint;
-
-// Ține sincronizate vizual toate butoanele-magnet de pe instrumente cu
-// starea curentă a lipirii de punct (fie că a fost comutată din bara
-// principală, fie de pe un instrument).
-function updateAllMagnetButtons() {
-  Object.keys(geoGroups).forEach(name => {
-    const grp = geoGroups[name];
-    if (grp && grp.magnetBtn && grp.magnetBtn._magnetBg) {
-      grp.magnetBtn._magnetBg.setAttribute('fill', snapToPointEnabled ? '#2d9d4f' : '#ffffff');
-    }
-  });
-}
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
 document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
@@ -8782,8 +8842,20 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  if (e.key === 'ArrowLeft') { e.preventDefault(); prevPage(); return; }
-  if (e.key === 'ArrowRight') { e.preventDefault(); nextPage(); return; }
+  // Pe tablă (nu pe fișa PDF), săgețile panoramează tabla neagră în toate
+  // cele 4 direcții — nu mai schimbă pagina caietului; trecerea de la o
+  // pagină la alta cu stânga/dreapta rămâne doar pe fișa PDF (mai sus).
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const step = e.shiftKey ? 120 : 40;
+    let dx = 0, dy = 0;
+    if (e.key === 'ArrowLeft') dx = -step;
+    else if (e.key === 'ArrowRight') dx = step;
+    else if (e.key === 'ArrowUp') dy = -step;
+    else if (e.key === 'ArrowDown') dy = step;
+    panBoardBy(dx, dy);
+    return;
+  }
   
   if (e.key === 'Escape') {
     selectedStrokes.clear();
@@ -8928,22 +9000,6 @@ function geoBuildCloseButton() {
   return g;
 }
 
-// Buton "magnet" — comută aceeași opțiune globală "Lipire de punct" direct
-// de pe instrument, fără să mai fie nevoie să cauți butonul din bara
-// principală. Fundalul devine verde cât timp lipirea e activă.
-function geoBuildMagnetButton() {
-  const g = geoEl('g', { class: 'guide-handle', style: 'cursor:pointer; pointer-events:auto;' });
-  const bg = geoEl('circle', { r: 12, fill: '#ffffff', stroke: '#888888', 'stroke-width': 1.4 });
-  g.appendChild(bg);
-  // Potcoavă (simbol universal de magnet), cu cei doi poli colorați.
-  g.appendChild(geoEl('path', { d: 'M -5 -6 L -5 1.5 A 5 5 0 0 0 5 1.5 L 5 -6',
-    fill: 'none', stroke: '#555555', 'stroke-width': 2.2, 'stroke-linecap': 'round' }));
-  g.appendChild(geoEl('rect', { x: -6.5, y: -8.5, width: 3.4, height: 4, fill: '#d64545' }));
-  g.appendChild(geoEl('rect', { x: 3.1, y: -8.5, width: 3.4, height: 4, fill: '#3a6fd6' }));
-  g._magnetBg = bg;
-  return g;
-}
-
 // Mâner de rotire (cerc albastru cu o mică săgeată circulară), folosit la
 // riglă/echer/raportor — vizual mai clar decât un cerc simplu.
 function geoBuildRotateHandle() {
@@ -9006,22 +9062,21 @@ function buildGeoRuler() {
   g.appendChild(pencilBtn);
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
-  const magnetBtn = geoBuildMagnetButton();
-  g.appendChild(magnetBtn);
   guidePanGroup.appendChild(g);
-  geoGroups.ruler = { g, body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn, magnetBtn };
+  geoGroups.ruler = { g, body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn };
   pencilBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   pencilBtn.addEventListener('click', ev => { ev.stopPropagation(); startRulerPencilSeg(); });
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('ruler'); });
-  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+  // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
+  // dublu-click direct pe corpul riglei, nu printr-un buton dedicat.
+  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
   renderGeoRuler();
 }
 
 function renderGeoRuler() {
   const st = geoGuides.ruler;
-  const { body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn, magnetBtn } = geoGroups.ruler;
+  const { body, ticks, rotateHandle, rotateHandleLeft, resizeHandle, pencilBtn, closeBtn } = geoGroups.ruler;
   const L = st.length, T = st.thickness;
   body.setAttribute('x', 0); body.setAttribute('y', 0);
   body.setAttribute('width', L); body.setAttribute('height', T);
@@ -9056,7 +9111,6 @@ function renderGeoRuler() {
   // (care ies acum în exterior, cu linie-indicator, la desenul de precizie).
   pencilBtn.setAttribute('transform', `translate(${L / 2},${T / 2})`);
   closeBtn.setAttribute('transform', `translate(-16,${T / 2})`);
-  magnetBtn.setAttribute('transform', `translate(${L / 2},${T + 18})`);
 }
 
 // ---------------- ECHER ----------------
@@ -9101,13 +9155,11 @@ function buildGeoSetsquare() {
   rightAngleBox.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   rightAngleBox.addEventListener('click', ev => { ev.stopPropagation(); toggleSetsquareRightAngleMark(); });
 
-  const magnetBtn = geoBuildMagnetButton();
-  g.appendChild(magnetBtn);
-  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
-
   guidePanGroup.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck, magnetBtn };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck };
+  // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
+  // dublu-click direct pe corpul echerului, nu printr-un buton dedicat.
+  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
 
   resizeHandleW.addEventListener('pointerdown', e => {
     if (geoSegBuild) cancelGeoSegBuild();
@@ -9139,7 +9191,7 @@ function buildGeoSetsquare() {
 
 function renderGeoSetsquare() {
   const st = geoGuides.setsquare;
-  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck, magnetBtn } = geoGroups.setsquare;
+  const { body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck } = geoGroups.setsquare;
   const W = st.width, H = st.height;
   body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
 
@@ -9209,9 +9261,17 @@ function renderGeoSetsquare() {
   // "Scalare în sus" — la fel, în interior, aproape de catetă verticală.
   resizeHandleH.setAttribute('transform', `translate(${0.12 * W},${-0.75 * H})`);
   closeBtn.setAttribute('transform', 'translate(-16,16)');
-  rightAngleBox.setAttribute('transform', 'translate(-16,-16)');
-  magnetBtn.setAttribute('transform', 'translate(-40,0)');
-  rightAngleCheck.setAttribute('transform', 'translate(-16,-16)');
+  // Căsuța de bifat pentru evidențierea unghiului drept — pe aceeași
+  // diagonală ca mânerul de rotire (translate(24,-24)), dar mai departe
+  // spre interior, la exact 1cm (PX_PER_CM) distanță de el, ca să nu se
+  // mai suprapună cu el.
+  {
+    const rotDist = 24 * Math.SQRT2; // distanța mânerului de rotire față de vârful unghiului drept
+    const boxDist = rotDist + PX_PER_CM;
+    const bx = boxDist * Math.SQRT1_2, by = -boxDist * Math.SQRT1_2;
+    rightAngleBox.setAttribute('transform', `translate(${bx},${by})`);
+    rightAngleCheck.setAttribute('transform', `translate(${bx},${by})`);
+  }
   // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în
   // interiorul triunghiului (pe direcția normalei spre interior) — nu în
   // exterior, ca să nu se mai suprapună cu mânerele de reglaj (care ies ele
@@ -9316,13 +9376,11 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
-  const magnetBtn = geoBuildMagnetButton();
-  g.appendChild(magnetBtn);
-  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
-
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck, magnetBtn };
+  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
+  // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
+  // dublu-click direct pe corpul raportorului, nu printr-un buton dedicat.
+  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
   renderGeoProtractor();
 }
 
@@ -9386,7 +9444,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, magnetBtn } = geoGroups.protractor;
+  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
 
@@ -9442,7 +9500,6 @@ function renderGeoProtractor() {
   resizeHandle.setAttribute('y', -8);
   resetHorizBtn.setAttribute('transform', `translate(${-R + 20},18)`);
   closeBtn.setAttribute('transform', `translate(${-R - 4},0)`);
-  magnetBtn.setAttribute('transform', `translate(${-R - 4},28)`);
   // Grupul căsuță+bifă — la mijlocul distanței dintre mânerul de rotire și
   // centrul (pivotul) raportorului.
   const rotateY = -R + 34;
@@ -9525,19 +9582,14 @@ function buildGeoCompass() {
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('compass'); });
 
-  const magnetBtn = geoBuildMagnetButton();
-  g.appendChild(magnetBtn);
-  magnetBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  magnetBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
-
   guidePanGroup.appendChild(g);
-  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn, magnetBtn };
+  geoGroups.compass = { g, armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, arcLabel, closeBtn };
   renderGeoCompass();
 }
 
 function renderGeoCompass() {
   const st = geoGuides.compass;
-  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, closeBtn, magnetBtn } = geoGroups.compass;
+  const { armLine, radiusLabel, centerHandle, midHandle, resizeHandle, tipHandle, closeBtn } = geoGroups.compass;
   const cosA = Math.cos(st.angle), sinA = Math.sin(st.angle);
   const tipX = st.x + st.radius * cosA;
   const tipY = st.y + st.radius * sinA;
@@ -9562,10 +9614,6 @@ function renderGeoCompass() {
   // Butonul X — dincolo de pivot, în partea opusă vârfului de desenare
   // (ca acul unui compas real, care iese puțin în spatele balamalei).
   closeBtn.setAttribute('transform', `translate(${st.x - 22 * cosA},${st.y - 22 * sinA})`);
-  // Magnetul stă lângă pivot, dar perpendicular pe brațul compasului (nu în
-  // spatele acului, unde e deja butonul X) — rămâne la îndemână indiferent
-  // de unghiul la care e rotit compasul.
-  magnetBtn.setAttribute('transform', `translate(${st.x - 22 * -sinA},${st.y - 22 * cosA})`);
 
   const perp = st.angle + Math.PI / 2;
   radiusLabel.setAttribute('x', midX + 18 * Math.cos(perp));
