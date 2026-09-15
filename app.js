@@ -267,6 +267,8 @@ function applyStaticUI() {
   setBtnText('btn-load-pdf', 'Fișă PDF', 'PDF Sheet');
   setBtnText('btn-help', 'Ajutor', 'Help');
   setBtnText('btn-license', 'Licență', 'License');
+  setElText('calc-header-title', '🧮 Calculator', '🧮 Calculator');
+  setBtnText('calc-insert', '↳ Inserează pe tablă', '↳ Insert on the board');
 
   setElText('gros-label', 'Gros.', 'Thick.');
   setElText('txt-colors-label', 'Culori:', 'Colors:');
@@ -1141,7 +1143,7 @@ pdfFileInput.addEventListener('change', function(e) {
       document.getElementById('btn-toggle-pdf-mode').disabled = false;
       document.getElementById('btn-pdf-split').disabled = false;
       setCurrentSize(2);
-      showToast('✓ Fișă PDF încărcată (' + pdfTotalPages + ' pagini)');
+      showToast((LANG === 'en' ? '✓ PDF sheet loaded (' : '✓ Fișă PDF încărcată (') + pdfTotalPages + (LANG === 'en' ? ' pages)' : ' pagini)'));
       setBoardMode(true);
     }).catch(function(err) {
       alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
@@ -1158,9 +1160,17 @@ document.getElementById('btn-toggle-pdf-mode').addEventListener('click', () => {
 // Decide dacă un eveniment de pointer trebuie să panoreze fișa PDF (nu să
 // deseneze): fie modul plimbare e activ (deget sau mouse), fie se ține
 // apăsat Ctrl cu mouse-ul (funcționează indiferent de modul plimbare).
+// Id-ul pointerului stylus (pen) activ pe fiecare fișă PDF, cât timp
+// desenează — la fel ca boardActivePenId, dar pentru fișă: ignorăm
+// atingerile noi cu degetul apărute cât timp un stylus scrie deja pe ea.
+let paneActivePenId = {};
+
 function paneShouldPanInsteadOfDraw(name, e) {
   const pane = pdfPanes[name];
-  if (e.pointerType === 'touch') return !!(pane && pane.panMode);
+  if (e.pointerType === 'touch') {
+    if (paneActivePenId[name] != null && paneActivePenId[name] !== e.pointerId) return true;
+    return !!(pane && pane.panMode);
+  }
   if (e.pointerType === 'mouse') return !!((pane && pane.panMode) || e.ctrlKey);
   return false;
 }
@@ -1207,6 +1217,7 @@ let pdfRightClickPrevTool = null;
       return;
     }
     if (paneShouldPanInsteadOfDraw(name, e)) return;
+    if (e.pointerType === 'pen') paneActivePenId[name] = e.pointerId;
     activatePane(name); handlePointerDown(e);
   });
   els.draw.addEventListener('pointermove', function(e) {
@@ -1215,6 +1226,7 @@ let pdfRightClickPrevTool = null;
     handlePointerMove(e);
   });
   function endPdfDrawPointer(e) {
+    if (paneActivePenId[name] === e.pointerId) paneActivePenId[name] = null;
     handlePointerUp(e);
     if (pdfRightClickErasing) {
       pdfRightClickErasing = false;
@@ -1725,7 +1737,7 @@ function renderImages() {
       e.stopPropagation();
       imgData.locked = !imgData.locked;
       renderImages();
-      showToast(imgData.locked ? '🔒 Imagine blocată' : '🔓 Imagine deblocată');
+      showToast(trMsg(imgData.locked ? '🔒 Imagine blocată' : '🔓 Imagine deblocată'));
     });
     div.appendChild(lockBtn);
     
@@ -1735,8 +1747,8 @@ function renderImages() {
     delBtn.title = 'Șterge imaginea';
     delBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (imgData.locked) { showToast('🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
-      if (await customConfirm('Ștergi această imagine?')) {
+      if (imgData.locked) { showToast(LANG === 'en' ? '🔒 The image is locked — unlock it first' : '🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
+      if (await customConfirm(LANG === 'en' ? 'Delete this image?' : 'Ștergi această imagine?')) {
         const idx = page.images.findIndex(img => img.id === imgData.id);
         if (idx !== -1) {
           undoStack.push({ type: 'imageDelete', page, items: [{ index: idx, img: page.images[idx] }] });
@@ -1887,9 +1899,9 @@ function deleteSelectedImages() {
   updateStatus();
   hideSelectionInfo();
   if (lockedCount > 0) {
-    showToast(`✓ ${deletableIds.length} imagini șterse (${lockedCount} blocate au fost păstrate)`);
+    showToast(trMsg(`✓ ${deletableIds.length} imagini șterse (${lockedCount} blocate au fost păstrate)`));
   } else {
-    showToast(`✓ ${deletableIds.length} imagini șterse`);
+    showToast(trMsg(`✓ ${deletableIds.length} imagini șterse`));
   }
 }
 
@@ -1912,7 +1924,7 @@ function handleImagePointerDown(e) {
   if (e.target.closest('.img-lock-btn')) return;
   
   if (e.target.closest('.resizer')) {
-    if (imgData.locked) { showToast('🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
+    if (imgData.locked) { showToast(LANG === 'en' ? '🔒 The image is locked — unlock it first' : '🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
     isImageResize = true;
     resizeImageId = imageId;
     resizeStartX = e.clientX;
@@ -2412,6 +2424,52 @@ function drawStrokeOn(c, stroke) {
     } else {
       lines.forEach((line, i) => c.fillText(line, stroke.x, stroke.y + i * lineHeight));
     }
+    c.restore();
+    return;
+  }
+  if (stroke.type === 'mathlabel') {
+    c.save();
+    const fs = stroke.fontSize || 20;
+    c.font = stroke.font || ('bold ' + fs + 'px sans-serif');
+    c.fillStyle = stroke.color;
+    // Centrul vertical aproximativ al unei linii normale de text, având
+    // vârful (colțul stânga-sus) la stroke.y — la fel ca la tipul 'text',
+    // care folosește textBaseline 'top'.
+    const midY = stroke.y + fs * 0.65;
+    let cx = stroke.x;
+    c.textBaseline = 'middle';
+    c.textAlign = 'left';
+    if (stroke.prefix) {
+      c.fillText(stroke.prefix, cx, midY);
+      cx += c.measureText(stroke.prefix).width;
+    }
+    (stroke.parts || []).forEach(part => {
+      if (part.text) {
+        c.fillText(part.text, cx, midY);
+        cx += c.measureText(part.text).width;
+      } else if (part.frac) {
+        // Fracție reală: numărător deasupra unei linii orizontale, numitor
+        // dedesubt — puțin mai mici decât textul normal, ca la o fracție
+        // scrisă de mână.
+        const fracFs = Math.round(fs * 0.8);
+        c.font = 'bold ' + fracFs + 'px sans-serif';
+        const numW = c.measureText(part.frac.num).width;
+        const denW = c.measureText(part.frac.den).width;
+        const w = Math.max(numW, denW) + 8;
+        c.textAlign = 'center';
+        c.fillText(part.frac.num, cx + w / 2, midY - fracFs * 0.62);
+        c.fillText(part.frac.den, cx + w / 2, midY + fracFs * 0.62);
+        c.textAlign = 'left';
+        c.font = 'bold ' + fs + 'px sans-serif';
+        c.beginPath();
+        c.moveTo(cx, midY);
+        c.lineTo(cx + w, midY);
+        c.lineWidth = Math.max(1.2, fs * 0.06);
+        c.strokeStyle = stroke.color;
+        c.stroke();
+        cx += w;
+      }
+    });
     c.restore();
     return;
   }
@@ -3173,6 +3231,21 @@ function getStrokeBoundingBox(stroke) {
     const h = lines.length * fs * 1.3;
     return { x: stroke.x, y: stroke.y, w: maxW, h: h };
   }
+  if (stroke.type === 'mathlabel') {
+    const fs = stroke.fontSize || 20;
+    let w = (stroke.prefix || '').length * fs * 0.6;
+    let maxH = fs * 1.3; // înălțime normală, un singur rând de text
+    (stroke.parts || []).forEach(part => {
+      if (part.text) {
+        w += part.text.length * fs * 0.6;
+      } else {
+        const fracFs = fs * 0.8;
+        w += Math.max(part.frac.num.length, part.frac.den.length) * fracFs * 0.6 + 8;
+        maxH = Math.max(maxH, fracFs * 2.6); // numărător + linie + numitor
+      }
+    });
+    return { x: stroke.x, y: stroke.y - (maxH - fs * 1.3) * 0.5, w, h: maxH };
+  }
   if (stroke.type === 'rect') {
     return { x: stroke.x, y: stroke.y, w: stroke.w, h: stroke.h };
   }
@@ -3549,7 +3622,7 @@ function deleteSelectedStrokes() {
   hideSelectionInfo();
   redrawStrokes();
   updateStatus();
-    showToast(`✓ ${sorted.length} stroke-uri șterse`);
+    showToast(trMsg(`✓ ${sorted.length} stroke-uri șterse`));
 }
 
 // Translatează în loc geometria unui stroke cu (dx, dy) — aceeași logică
@@ -3608,13 +3681,14 @@ function duplicateSelectedStroke(idx) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast('✓ Copiat');
+  showToast(LANG === 'en' ? '✓ Copied' : '✓ Copiat');
 }
 
 function snapshotStrokePosition(stroke) {
   if (!stroke) return null;
   if (stroke.type === 'midpoint') return { x: stroke.x, y: stroke.y, p1: { ...stroke.p1 }, p2: { ...stroke.p2 } };
   if (stroke.type === 'text') return { x: stroke.x, y: stroke.y, textAlign: stroke.textAlign };
+  if (stroke.type === 'mathlabel') return { x: stroke.x, y: stroke.y };
   if (stroke.type === 'rect') return { x: stroke.x, y: stroke.y, w: stroke.w, h: stroke.h };
   if (stroke.type === 'polygon') return { points: stroke.points.map(p => ({ x: p.x, y: p.y })) };
   if (stroke.type === 'circle' || stroke.type === 'arc') return { cx: stroke.cx, cy: stroke.cy };
@@ -3652,6 +3726,8 @@ function restoreStrokePosition(stroke, snap) {
   } else if (stroke.type === 'text') {
     stroke.x = snap.x; stroke.y = snap.y;
     if (snap.textAlign) stroke.textAlign = snap.textAlign;
+  } else if (stroke.type === 'mathlabel') {
+    stroke.x = snap.x; stroke.y = snap.y;
   } else if (stroke.type === 'rect') {
     stroke.x = snap.x; stroke.y = snap.y; stroke.w = snap.w; stroke.h = snap.h;
   } else if (stroke.type === 'polygon' && snap.points) {
@@ -3688,6 +3764,8 @@ function applyStrokePositionOffset(stroke, snap, dx, dy) {
     if (snap.p1) stroke.p1 = { x: snap.p1.x + dx, y: snap.p1.y + dy };
     if (snap.p2) stroke.p2 = { x: snap.p2.x + dx, y: snap.p2.y + dy };
   } else if (stroke.type === 'text') {
+    stroke.x = snap.x + dx; stroke.y = snap.y + dy;
+  } else if (stroke.type === 'mathlabel') {
     stroke.x = snap.x + dx; stroke.y = snap.y + dy;
   } else if (stroke.type === 'rect') {
     stroke.x = snap.x + dx; stroke.y = snap.y + dy;
@@ -3738,7 +3816,7 @@ function finalizePolygon() {
   drawing = false;
   redrawStrokes();
   updateStatus();
-  showToast(`✓ Poligon desenat (${stroke.points.length} laturi)`);
+  showToast(trMsg(`✓ Poligon desenat (${stroke.points.length} laturi)`));
   return true;
 }
 
@@ -3791,9 +3869,9 @@ function handlePointerDown(e) {
       pushStroke(page, { type: 'midpoint', x: mid.x, y: mid.y, p1, p2, color: s.color || color, size: s.size || lastPenSize });
       redrawStrokes();
       updateStatus();
-      showToast('✓ Mijlocul segmentului a fost adăugat');
+      showToast(LANG === 'en' ? '✓ Segment midpoint added' : '✓ Mijlocul segmentului a fost adăugat');
     } else {
-      showToast('⚠ Dă click chiar pe un segment (linie dreaptă)');
+      showToast(LANG === 'en' ? '⚠ Click exactly on a segment (straight line)' : '⚠ Dă click chiar pe un segment (linie dreaptă)');
     }
     return;
   }
@@ -3826,7 +3904,7 @@ function handlePointerDown(e) {
           rotatePolyStartX = p.x;
           drawC.setPointerCapture(e.pointerId);
           e.preventDefault();
-          showToast('↻ Trage stânga/dreapta pentru a roti');
+          showToast(LANG === 'en' ? '↻ Drag left/right to rotate' : '↻ Trage stânga/dreapta pentru a roti');
           return;
         } else if (stroke) {
           isRotatingSolid = true;
@@ -3836,7 +3914,7 @@ function handlePointerDown(e) {
           rotateStartRotationY = stroke.rotationY || 0;
           drawC.setPointerCapture(e.pointerId);
           e.preventDefault();
-          showToast('↻ Trage stânga/dreapta pentru a roti');
+          showToast(LANG === 'en' ? '↻ Drag left/right to rotate' : '↻ Trage stânga/dreapta pentru a roti');
           return;
         }
       }
@@ -3867,7 +3945,7 @@ function handlePointerDown(e) {
           resizeStartDist = Math.max(1, Math.sqrt(ddx * ddx + ddy * ddy));
           drawC.setPointerCapture(e.pointerId);
           e.preventDefault();
-          showToast('↔ Trage pentru a scala');
+          showToast(LANG === 'en' ? '↔ Drag to scale' : '↔ Trage pentru a scala');
           return;
         }
       }
@@ -3937,7 +4015,7 @@ function handlePointerDown(e) {
           }
         }
         drawC.setPointerCapture(e.pointerId);
-        showToast(`📦 ${selectedStrokes.size} elemente selectate - trage pentru a muta`);
+        showToast(trMsg(`📦 ${selectedStrokes.size} elemente selectate - trage pentru a muta`));
       }
     } else {
       isSelecting = true;
@@ -3964,7 +4042,7 @@ function handlePointerDown(e) {
     if (!drawing) {
       drawing = true;
       currentStroke = [p];
-      showToast(`🟨 Poligon: punctul 1 (${Math.round(p.x)}, ${Math.round(p.y)}) - click pentru următorul punct`);
+      showToast(trMsg(`🟨 Poligon: punctul 1 (${Math.round(p.x)}, ${Math.round(p.y)}) - click pentru următorul punct`));
       clearCanvas(ctx, drawC);
       redrawStrokes();
       ctx.save();
@@ -3982,7 +4060,7 @@ function handlePointerDown(e) {
       const last = currentStroke[currentStroke.length - 1];
       if (Math.hypot(p.x - last.x, p.y - last.y) > 5) {
         currentStroke.push(p);
-        showToast(`🟨 Poligon: punctul ${currentStroke.length} (${Math.round(p.x)}, ${Math.round(p.y)}) - dublu-click pentru finalizare`);
+        showToast(trMsg(`🟨 Poligon: punctul ${currentStroke.length} (${Math.round(p.x)}, ${Math.round(p.y)}) - dublu-click pentru finalizare`));
         clearCanvas(ctx, drawC);
         redrawStrokes();
         ctx.save();
@@ -4022,7 +4100,7 @@ function handlePointerDown(e) {
     if (idx >= 0 && page.strokes[idx].type === 'text') {
       const s = page.strokes[idx];
       showTextOverlay(s.x, s.y, idx);
-      showToast('✏️ Editare text - Enter pentru a salva');
+      showToast(LANG === 'en' ? '✏️ Editing text - press Enter to save' : '✏️ Editare text - Enter pentru a salva');
     } else {
       showTextOverlay(p.x, p.y);
     }
@@ -4249,7 +4327,7 @@ function handlePointerMove(e) {
       const angle = Math.atan2(ey - mathStartPoint.y, ex - mathStartPoint.x);
       let trigDeg = -angle * 180 / Math.PI;
       trigDeg = ((trigDeg % 360) + 360) % 360;
-      showMathInfo('📏 ' + (dist/50).toFixed(2) + ' cm  |  ' + trigDeg.toFixed(snapping?0:1) + '°' + (snapping ? '  (snap activ)' : '  |  Shift = snap unghi'));
+      showMathInfo('📏 ' + (dist/50).toFixed(2) + ' cm  |  ' + trigDeg.toFixed(snapping?0:1) + '°' + (snapping ? (LANG === 'en' ? '  (snap active)' : '  (snap activ)') : (LANG === 'en' ? '  |  Shift = angle snap' : '  |  Shift = snap unghi')));
     }
     return;
   }
@@ -4330,7 +4408,7 @@ function handlePointerMove(e) {
     ctx.moveTo(cx + 3, cy - 3); ctx.lineTo(cx - 3, cy + 3);
     ctx.strokeStyle = color; ctx.lineWidth = 1;
     ctx.stroke();
-    showMathInfo('◯ Rază: ' + (radius / PX_PER_CM).toFixed(1) + ' cm');
+    showMathInfo((LANG === 'en' ? '◯ Radius: ' : '◯ Rază: ') + (radius / PX_PER_CM).toFixed(1) + ' cm');
   } else if (tool === 'line' || tool === 'arrow' || tool === 'dashed') {
     clearCanvas(ctx, drawC);
     redrawStrokes();
@@ -4360,7 +4438,7 @@ function handlePointerMove(e) {
     const segDx = endPoint.x - currentStroke[0].x, segDy = endPoint.y - currentStroke[0].y;
     const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
     const icon = tool === 'dashed' ? '┄' : (tool === 'arrow' ? '→' : '—');
-    showMathInfo(icon + ' Lungime: ' + (segLen / PX_PER_CM).toFixed(1) + ' cm');
+    showMathInfo(icon + (LANG === 'en' ? ' Length: ' : ' Lungime: ') + (segLen / PX_PER_CM).toFixed(1) + ' cm');
   } else {
     currentStroke.push(tool === 'pen' ? snapToGuides(p) : p);
     clearCanvas(ctx, drawC);
@@ -4394,7 +4472,7 @@ function handlePointerUp(e) {
       if (imageItems.length > 0) undoStack.push({ type: 'imageMove', page, items: imageItems });
       if (strokeItems.length > 0 || imageItems.length > 0) {
         redoStack = [];
-        showToast('✓ Spațiu vertical aplicat');
+        showToast(LANG === 'en' ? '✓ Vertical space applied' : '✓ Spațiu vertical aplicat');
       }
     }
     vspaceAffectedStrokes = [];
@@ -4412,7 +4490,7 @@ function handlePointerUp(e) {
       if (JSON.stringify(after) !== JSON.stringify(rotatePolyOriginalStroke)) {
         undoStack.push({ type: 'resizeStroke', page, stroke, before: rotatePolyOriginalStroke, after });
         redoStack = [];
-        showToast('✓ Rotit');
+        showToast(LANG === 'en' ? '✓ Rotated' : '✓ Rotit');
       }
     }
     hideAngleReadout(5000);
@@ -4433,7 +4511,7 @@ function handlePointerUp(e) {
         redoStack = [];
         let deg = ((stroke.rotationY || 0) * 180 / Math.PI) % 360;
         if (deg < 0) deg += 360;
-        showToast(`✓ Rotit (${deg.toFixed(1)}°)`);
+        showToast(trMsg(`✓ Rotit (${deg.toFixed(1)}°)`));
       }
     }
     hideAngleReadout(5000);
@@ -4452,7 +4530,7 @@ function handlePointerUp(e) {
       if (JSON.stringify(after) !== JSON.stringify(resizeOriginalStroke)) {
         undoStack.push({ type: 'resizeStroke', page, stroke, before: resizeOriginalStroke, after });
         redoStack = [];
-        showToast('✓ Stroke scalat');
+        showToast(LANG === 'en' ? '✓ Stroke scaled' : '✓ Stroke scalat');
       }
     }
     resizeOriginalStroke = null;
@@ -4510,7 +4588,7 @@ function handlePointerUp(e) {
     }
     moveUndoSnapshots.clear();
     dragStartPositions.clear();
-    showToast(`✓ ${selectedStrokes.size} stroke-uri mutate`);
+    showToast(trMsg(`✓ ${selectedStrokes.size} stroke-uri mutate`));
     updateStatus();
     return;
   }
@@ -4545,7 +4623,7 @@ function handlePointerUp(e) {
           erase: false,
           ruler: true
         });
-        showToast('✓ Riglă: ' + (dist/50).toFixed(2) + ' cm');
+        showToast((LANG === 'en' ? '✓ Ruler: ' : '✓ Riglă: ') + (dist/50).toFixed(2) + ' cm');
       }
     }
     
@@ -4601,7 +4679,7 @@ function handlePointerUp(e) {
         color: color,
         size: size
       });
-      showToast('✓ Unghi desenat: ' + (diff * 180 / Math.PI).toFixed(1) + '°');
+      showToast((LANG === 'en' ? '✓ Angle drawn: ' : '✓ Unghi desenat: ') + (diff * 180 / Math.PI).toFixed(1) + '°');
     }
     
     mathStartPoint = null;
@@ -4617,7 +4695,7 @@ function handlePointerUp(e) {
     const p = pos(e);
     mathEndPoint = p;
     protractorPhase = 2;
-    showMathInfo('🔄 Trage pentru a roti a doua latură  |  Shift = snap 5°');
+    showMathInfo(LANG === 'en' ? '🔄 Drag to rotate the second side  |  Shift = snap 5°' : '🔄 Trage pentru a roti a doua latură  |  Shift = snap 5°');
     return;
   }
   
@@ -4645,7 +4723,7 @@ function handlePointerUp(e) {
         size: lastPenSize
       };
       pushStroke(page, rect);
-      showToast(e.shiftKey ? `✓ Pătrat desenat (${Math.round(Math.abs(w))}×${Math.round(Math.abs(h))})` : `✓ Dreptunghi desenat (${Math.round(Math.abs(w))}×${Math.round(Math.abs(h))})`);
+      showToast(trMsg(e.shiftKey ? `✓ Pătrat desenat (${Math.round(Math.abs(w))}×${Math.round(Math.abs(h))})` : `✓ Dreptunghi desenat (${Math.round(Math.abs(w))}×${Math.round(Math.abs(h))})`));
     }
     currentStroke = [];
     redrawStrokes();
@@ -4712,7 +4790,7 @@ function handleDblClick(e) {
       const s = page.strokes[idx];
       setTool('text');
       showTextOverlay(s.x, s.y, idx);
-      showToast('✏️ Editare text - Enter pentru a salva');
+      showToast(LANG === 'en' ? '✏️ Editing text - press Enter to save' : '✏️ Editare text - Enter pentru a salva');
       return;
     }
   }
@@ -4725,6 +4803,12 @@ let boardCtrlPanActive = false;
 // simultană a întregii table), independent de modul "Deget" (panoramare).
 let boardTouchPts = new Map();
 let boardPinchLastDist = null, boardPinchLastMid = null;
+// Id-ul pointerului stylus (pen) activ, cât timp desenează — folosit pentru
+// a ignora atingerile noi cu degetul apărute în timp ce se scrie cu
+// stylus-ul (foarte probabil palma sprijinită pe ecran) — relevant mai ales
+// pe table interactive mari (ex. Horizon), unde utilizatorul își sprijină
+// mâna pe suprafață în timp ce scrie.
+let boardActivePenId = null;
 // Radieră temporară cu click dreapta / butonul lateral al stylus-ului.
 let boardRightClickErasing = false;
 let boardRightClickPrevTool = null;
@@ -4732,6 +4816,17 @@ let boardRightClickPrevTool = null;
 boardDrawC.addEventListener('contextmenu', e => e.preventDefault());
 
 boardDrawC.addEventListener('pointerdown', function(e) {
+  // Respingerea palmei: cât timp un stylus (pen) desenează activ pe tablă,
+  // orice atingere NOUĂ cu degetul e foarte probabil palma sprijinită pe
+  // ecran, nu o intenție reală de a atinge tabla — o ignorăm complet, ca să
+  // nu întrerupă/deformeze desenul în curs. Nu afectează folosirea normală,
+  // doar cu degetul (fără stylus activ).
+  if (e.pointerType === 'touch' && boardActivePenId !== null && boardActivePenId !== e.pointerId) {
+    e.preventDefault();
+    return;
+  }
+  if (e.pointerType === 'pen') boardActivePenId = e.pointerId;
+
   activatePane('board');
 
   if (isEraserButtonEvent(e)) {
@@ -4828,6 +4923,7 @@ boardDrawC.addEventListener('pointermove', function(e) {
   handlePointerMove(e);
 });
 function endBoardPanDrag(e) {
+  if (e.pointerId === boardActivePenId) boardActivePenId = null;
   if (boardRightClickErasing) {
     handlePointerUp(e);
     boardRightClickErasing = false;
@@ -4883,11 +4979,11 @@ document.addEventListener('keydown', e => {
       drawing = false;
       currentStroke = [];
       redrawStrokes();
-      showToast('❌ Poligon anulat');
+      showToast(LANG === 'en' ? '❌ Polygon canceled' : '❌ Poligon anulat');
     }
     if (geoSegBuild) {
       cancelGeoSegBuild();
-      showToast('❌ Segment anulat');
+      showToast(LANG === 'en' ? '❌ Segment canceled' : '❌ Segment anulat');
     }
     if (protractorPhase > 0) {
       protractorPhase = 0;
@@ -4924,7 +5020,7 @@ document.addEventListener('keydown', e => {
     hideSelectionInfo();
     updateStatus();
     drawSelectionHighlights();
-        showToast('❌ Selecție anulată');
+        showToast(LANG === 'en' ? '❌ Selection canceled' : '❌ Selecție anulată');
   }
 
   if (e.key === 'Escape' && isSelecting) {
@@ -5007,13 +5103,13 @@ function setTool(t) {
   }
   
   if (t === 'select') {
-    showMathInfo('🖱️ Click pe stroke sau imagine pentru a selecta | Trage pentru a muta | Shift = selecție multiplă | Delete pentru ștergere');
+    showMathInfo(LANG === 'en' ? '🖱️ Click a stroke or image to select | Drag to move | Shift = multi-select | Delete to remove' : '🖱️ Click pe stroke sau imagine pentru a selecta | Trage pentru a muta | Shift = selecție multiplă | Delete pentru ștergere');
   } else if (t === 'polygon') {
-    showMathInfo('🟨 Clickuri pentru puncte, dublu-click sau Enter pentru finalizare | Esc pentru anulare');
+    showMathInfo(LANG === 'en' ? '🟨 Click for points, double-click or Enter to finish | Esc to cancel' : '🟨 Clickuri pentru puncte, dublu-click sau Enter pentru finalizare | Esc pentru anulare');
   } else if (t === 'rect') {
-    showMathInfo('▭ Trage pentru a desena un dreptunghi/patrat  |  Shift = pătrat');
+    showMathInfo(LANG === 'en' ? '▭ Drag to draw a rectangle/square  |  Shift = square' : '▭ Trage pentru a desena un dreptunghi/patrat  |  Shift = pătrat');
   } else if (t === 'vspace') {
-    showMathInfo('↕️ Trage în sus/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu');
+    showMathInfo(LANG === 'en' ? '↕️ Drag up/down: everything below the start point moves with you, inserting or removing space' : '↕️ Trage în sus/jos: tot ce e sub punctul de start se deplasează cu tine, inserând sau eliminând spațiu');
   }
 }
 
@@ -5062,11 +5158,11 @@ function nextPage() {
 
 async function deletePage() {
   if (pages.length <= 1) {
-    if (!(await customConfirm('Aceasta este singura pagină. Ștergerea îi va goli tot conținutul (linii, imagini). Continui?'))) return;
+    if (!(await customConfirm(LANG === 'en' ? 'This is the only page. Clearing it will empty all its content (lines, images). Continue?' : 'Aceasta este singura pagină. Ștergerea îi va goli tot conținutul (linii, imagini). Continui?'))) return;
     pages[0] = { strokes: [], images: [] };
     currentPageIdx = 0;
   } else {
-    if (!(await customConfirm(`Ștergi pagina ${currentPageIdx + 1} din ${pages.length}? Acțiunea nu poate fi anulată.`))) return;
+    if (!(await customConfirm(LANG === 'en' ? `Delete page ${currentPageIdx + 1} of ${pages.length}? This action cannot be undone.` : `Ștergi pagina ${currentPageIdx + 1} din ${pages.length}? Acțiunea nu poate fi anulată.`))) return;
     pages.splice(currentPageIdx, 1);
     if (currentPageIdx >= pages.length) currentPageIdx = pages.length - 1;
   }
@@ -5080,7 +5176,7 @@ async function deletePage() {
   redrawStrokes();
   renderImages();
   updateStatus();
-  showToast('✓ Pagina ștearsă');
+  showToast(LANG === 'en' ? '✓ Page cleared' : '✓ Pagina ștearsă');
 }
 
 // ================================================================
@@ -5123,14 +5219,14 @@ function loadMultipleImages(files) {
         selectedImages.clear();
         selectedImages.add(id);
         updateImageSelection();
-        showToast(`✓ ${total} imagini încărcate (câte una pe pagină)`);
+        showToast(trMsg(`✓ ${total} imagini încărcate (câte una pe pagină)`));
         updateStatus();
       }
     };
     img.onerror = () => {
       loaded++;
       if (loaded === total) {
-        showToast(`⚠ ${total - files.length + loaded} imagini încărcate, unele au eșuat`);
+        showToast(trMsg(`⚠ ${total - files.length + loaded} imagini încărcate, unele au eșuat`));
       }
     };
     img.src = URL.createObjectURL(file);
@@ -5553,7 +5649,7 @@ function drawCompassRadiusPreview(ctx2, center, currentPoint, color, size) {
   ctx2.fillText(txt, lx, ly);
 
   ctx2.restore();
-  showMathInfo('⭕ Rază: ' + (radius/50).toFixed(2) + ' cm  |  Click stânga = confirmare rază  |  Dublu-click = cerc complet');
+  showMathInfo((LANG === 'en' ? '⭕ Radius: ' : '⭕ Rază: ') + (radius/50).toFixed(2) + (LANG === 'en' ? ' cm  |  Left click = confirm radius  |  Double-click = full circle' : ' cm  |  Click stânga = confirmare rază  |  Dublu-click = cerc complet'));
 }
 
 function drawCompassArcPreview(ctx2, center, radiusPoint, currentPoint, color, size) {
@@ -5637,7 +5733,7 @@ function drawCompassArcPreview(ctx2, center, radiusPoint, currentPoint, color, s
   ctx2.textAlign = 'left'; ctx2.textBaseline = 'bottom';
   ctx2.fillText(rtxt, rxl + 4, ryl - 2);
 
-  showMathInfo('⭕ Rază: ' + (radius/50).toFixed(2) + ' cm  |  Arc: ' + deg.toFixed(1) + '°  |  Dublu-click = cerc complet');
+  showMathInfo((LANG === 'en' ? '⭕ Radius: ' : '⭕ Rază: ') + (radius/50).toFixed(2) + (LANG === 'en' ? ' cm  |  Arc: ' : ' cm  |  Arc: ') + deg.toFixed(1) + (LANG === 'en' ? '°  |  Double-click = full circle' : '°  |  Dublu-click = cerc complet'));
 
   ctx2.restore();
 }
@@ -6022,6 +6118,45 @@ document.addEventListener('pointerup', () => {
 // ================================================================
 
 // Convertește o expresie scrisă (opțional în LaTeX) într-o expresie JS evaluabilă.
+// Înlocuiește \frac{a}{b} cu rezultatul lui `wrap(a, b)` — printr-o
+// potrivire manuală a acoladelor (nu regex simplu), ca să funcționeze
+// corect și când numărătorul/numitorul conțin ele însele acolade imbricate
+// (ex. un exponent: \frac{1}{x^{2}}). Recursiv, ca să gestioneze și fracții
+// imbricate una în alta.
+function replaceLatexFrac(s, wrap) {
+  let result = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s.startsWith('\\frac{', i)) {
+      i += 6;
+      let depth = 1, num = '';
+      while (i < s.length && depth > 0) {
+        if (s[i] === '{') depth++;
+        else if (s[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+        num += s[i];
+        i++;
+      }
+      if (s[i] === '{') {
+        i++;
+        let depth2 = 1, den = '';
+        while (i < s.length && depth2 > 0) {
+          if (s[i] === '{') depth2++;
+          else if (s[i] === '}') { depth2--; if (depth2 === 0) { i++; break; } }
+          den += s[i];
+          i++;
+        }
+        result += wrap(replaceLatexFrac(num, wrap), replaceLatexFrac(den, wrap));
+      } else {
+        result += '\\frac{' + num + '}';
+      }
+    } else {
+      result += s[i];
+      i++;
+    }
+  }
+  return result;
+}
+
 function parseMathExpression(raw) {
   let expr = (raw || '').trim();
   if (!expr) return '';
@@ -6033,12 +6168,10 @@ function parseMathExpression(raw) {
   expr = expr.replace(/\\left/g, '').replace(/\\right/g, '');
   expr = expr.replace(/\\cdot/g, '*').replace(/\\times/g, '*');
 
-  // \frac{a}{b} -> ((a)/(b)), aplicat repetat pentru fracții imbricate simplu
+  // \frac{a}{b} -> ((a)/(b)), cu suport pentru acolade imbricate în interior
+  // (ex. un exponent: \frac{1}{x^{2}}).
+  expr = replaceLatexFrac(expr, (a, b) => `((${a})/(${b}))`);
   let prev;
-  do {
-    prev = expr;
-    expr = expr.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))');
-  } while (expr !== prev);
 
   // \sqrt[n]{a} -> ((a)**(1/(n)))
   expr = expr.replace(/\\sqrt\[([^\[\]]*)\]\{([^{}]*)\}/g, '(($2)**(1/($1)))');
@@ -6094,13 +6227,13 @@ function parseMathExpression(raw) {
 function compileFunctionExpr(raw) {
   const jsExpr = parseMathExpression(raw);
   if (!jsExpr || !/^[0-9a-zA-Z_.+\-*/%(),\s]*$/.test(jsExpr)) {
-    throw new Error('Expresie invalidă. Verifică sintaxa.');
+    throw new Error(LANG === 'en' ? 'Invalid expression. Check the syntax.' : 'Expresie invalidă. Verifică sintaxa.');
   }
   let fn;
   try {
     fn = new Function('x', 'return (' + jsExpr + ');');
   } catch (err) {
-    throw new Error('Nu am putut interpreta funcția.');
+    throw new Error(LANG === 'en' ? 'Could not interpret the function.' : 'Nu am putut interpreta funcția.');
   }
   return fn;
 }
@@ -6164,19 +6297,152 @@ function formatPiLabel(val) {
   return formatNumber(val);
 }
 
+// Convertește o expresie matematică (ex. "x^2 + 3*x - 1") din notația
+// "de tastatură" (folosită la introducere) în notația matematică obișnuită,
+// scrisă de mână — ex. "x² + 3·x − 1". Nu e text LaTeX (cod), ci simboluri
+// afișate direct, ca într-un manual. Nu e nici o traducere în cuvinte —
+// rămâne notație matematică propriu-zisă. Aceeași formă, indiferent de
+// limbă (simbolurile matematice sunt universale).
+const SUPERSCRIPT_DIGITS = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻' };
+function toSuperscript(numStr) {
+  return numStr.split('').map(ch => SUPERSCRIPT_DIGITS[ch] || ch).join('');
+}
+// Înlocuiește "abs(...)" cu "|...|" — trebuie găsită paranteza de închidere
+// CORESPUNZĂTOARE (nu doar prima ")" întâlnită), ca să funcționeze corect și
+// cu paranteze imbricate în interior (ex. "abs(x*(x-1))").
+function replaceAbsWithBars(s) {
+  let result = '';
+  let i = 0;
+  while (i < s.length) {
+    const m = /^abs\(/i.exec(s.slice(i));
+    if (m) {
+      i += m[0].length;
+      let depth = 1, inner = '';
+      while (i < s.length && depth > 0) {
+        if (s[i] === '(') depth++;
+        else if (s[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+        inner += s[i];
+        i++;
+      }
+      result += '|' + inner + '|';
+    } else {
+      result += s[i];
+      i++;
+    }
+  }
+  return result;
+}
+
+// Aplică toate conversiile spre notație matematică, ÎN AFARA lui \frac (care
+// se tratează separat, ca să poată fi randat ca fracție reală, cu linie
+// orizontală — vezi buildMathLabelParts). Reutilizabilă atât pentru cazul
+// simplu (fără nicio fracție), cât și pentru numărătorul/numitorul unei
+// fracții deja extrase.
+function applyNonFracNatural(expr) {
+  let s = expr;
+  let prev;
+  s = s.replace(/\\left/g, '').replace(/\\right/g, '');
+  s = s.replace(/\\cdot/g, '·').replace(/\\times/g, '·');
+  s = s.replace(/\\sqrt\[([^\[\]]*)\]\{([^{}]*)\}/g, '$1√($2)');
+  do {
+    prev = s;
+    s = s.replace(/\\sqrt\{([^{}]*)\}/g, '√($1)');
+  } while (s !== prev);
+  do {
+    prev = s;
+    s = s.replace(/\^\{(-?\d+)\}/g, (m, n) => toSuperscript(n));
+    s = s.replace(/\^\{([^{}]*)\}/g, '^($1)');
+  } while (s !== prev);
+  s = s.replace(/\\pi\b/g, 'π');
+  s = s.replace(/\\arcsin/g, 'arcsin').replace(/\\arccos/g, 'arccos').replace(/\\arctan/g, 'arctan');
+  s = s.replace(/\\ln\b/g, 'ln');
+  s = s.replace(/\\(sin|cos|tan|sinh|cosh|tanh|log|exp|min|max|abs|floor|ceil|round|sign)\b/g, '$1');
+  s = s.replace(/\\[,;:!]/g, '');
+  s = s.replace(/\\([a-zA-Z]+)/g, '$1'); // orice altă comandă LaTeX necunoscută — păstrează doar litera
+  s = s.replace(/\{/g, '(').replace(/\}/g, ')'); // acolade rămase -> paranteze
+  s = s.replace(/\^(-?\d+)/g, (m, n) => toSuperscript(n));
+  s = s.replace(/sqrt\(/g, '√(');
+  s = replaceAbsWithBars(s);
+  s = s.replace(/\*/g, '·');
+  s = s.replace(/\bPI\b/gi, 'π');
+  return s;
+}
+
+// Formă inline (pe un singur rând) — folosită pentru mesajele toast sau alte
+// locuri unde nu se poate desena o fracție cu bară orizontală.
+function expressionToNatural(expr) {
+  const s = replaceLatexFrac(expr, (a, b) => `(${applyNonFracNatural(a)})/(${applyNonFracNatural(b)})`);
+  return applyNonFracNatural(s);
+}
+
+// Împarte expresia în segmente pentru randare ca "etichetă matematică": text
+// simplu, sau fracții adevărate (cu bară orizontală, numărător deasupra,
+// numitor dedesubt) — vezi tipul de stroke 'mathlabel' din drawStrokeOn.
+// Dacă expresia nu conține nicio fracție, întoarce un singur segment text.
+function buildMathLabelParts(expr) {
+  const parts = [];
+  let i = 0, textBuf = '';
+  function flushText() {
+    if (textBuf) { parts.push({ text: applyNonFracNatural(textBuf) }); textBuf = ''; }
+  }
+  while (i < expr.length) {
+    if (expr.startsWith('\\frac{', i)) {
+      flushText();
+      i += 6;
+      let depth = 1, num = '';
+      while (i < expr.length && depth > 0) {
+        if (expr[i] === '{') depth++;
+        else if (expr[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+        num += expr[i]; i++;
+      }
+      let den = '';
+      if (expr[i] === '{') {
+        i++;
+        let depth2 = 1;
+        while (i < expr.length && depth2 > 0) {
+          if (expr[i] === '{') depth2++;
+          else if (expr[i] === '}') { depth2--; if (depth2 === 0) { i++; break; } }
+          den += expr[i]; i++;
+        }
+      }
+      parts.push({ frac: { num: applyNonFracNatural(num), den: applyNonFracNatural(den) } });
+    } else {
+      textBuf += expr[i];
+      i++;
+    }
+  }
+  flushText();
+  return parts;
+}
+
 function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   const fn = compileFunctionExpr(rawExpr);
   const page = getCurrentPage();
-  if (!page) throw new Error('Nu există o pagină activă.');
-  if (!(xMax > xMin)) throw new Error('Intervalul de x este invalid.');
+  if (!page) throw new Error(LANG === 'en' ? 'No active page.' : 'Nu există o pagină activă.');
+  if (!(xMax > xMin)) throw new Error(LANG === 'en' ? 'The x interval is invalid.' : 'Intervalul de x este invalid.');
 
   const rect = drawC.getBoundingClientRect();
-  const W = rect.width, H = rect.height;
-  const marginX = W * 0.10, marginY = H * 0.10;
+  // Măsură defensivă: dacă dreptunghiul suprafeței active vine cu
+  // dimensiune zero sau nerezonabil de mică (ex. un canvas rămas ascuns
+  // dintr-un mod anterior, nesincronizat încă), revenim la dimensiunea
+  // containerului tablei — mai bine o dimensiune rezonabilă decât un grafic
+  // calculat pentru o suprafață de 0×0.
+  const W = rect.width > 50 ? rect.width : wrap.clientWidth;
+  const H = rect.height > 50 ? rect.height : wrap.clientHeight;
+  // Graficul apare implicit FOARTE MIC (25% din suprafață) — mai simplu și
+  // mai sigur decât să încercăm să-l facem "cât mai mare posibil": rămâne
+  // loc din belșug de mărit cu mânerul de redimensionare, dacă e nevoie,
+  // fără riscul ca selecția să iasă din ecran.
+  const marginX = W * 0.375, marginY = H * 0.375;
   const plotW = Math.max(W - marginX * 2, 50);
   const plotH = Math.max(H - marginY * 2, 50);
   const originX = marginX + plotW / 2;
   const originY = marginY + plotH / 2;
+  // Zonă de siguranță suplimentară — căsuța de selecție adaugă un padding
+  // (34px) în jurul conturului graficului, plus mânerele de redimensionare;
+  // fără această rezervă, un punct clampat exact pe marginea ecranului ar
+  // împinge selecția puțin în afara suprafeței vizibile.
+  const SELECTION_SAFE_PAD = 50;
 
   const N = 500;
   const xRange = xMax - xMin;
@@ -6189,7 +6455,7 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   }
 
   const finiteYs = rawPoints.map(p => p.y).filter(y => isFinite(y)).sort((a, b) => a - b);
-  if (finiteYs.length === 0) throw new Error('Funcția nu produce valori numerice reale în acest interval.');
+  if (finiteYs.length === 0) throw new Error(LANG === 'en' ? 'The function does not produce real numeric values in this interval.' : 'Funcția nu produce valori numerice reale în acest interval.');
 
   const lo = finiteYs[Math.max(0, Math.floor(finiteYs.length * 0.02))];
   const hi = finiteYs[Math.min(finiteYs.length - 1, Math.ceil(finiteYs.length * 0.98) - 1)];
@@ -6203,8 +6469,34 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   const scaleY = plotH / (yMax - yMin);
   const xMid = (xMin + xMax) / 2, yMid = (yMin + yMax) / 2;
 
+  // Convertește un pixel de ecran (relativ la drawC) în coordonate de
+  // conținut ale suprafeței active — la fel ca pos(), dar pentru un punct
+  // simplu, nu un eveniment de pointer. Fără această conversie, pe fișa PDF
+  // (unde scala de conținut e de obicei diferită de 1) graficul apărea
+  // amplificat greșit, mult prea mare.
+  function canvasPxToContent(px, py) {
+    if (activeSurface === 'board') {
+      const z = boardZoom || 1;
+      return { x: (px - boardPanX) / z, y: (py - boardPanY) / z };
+    }
+    if (pdfPanes[activeSurface]) {
+      const t = getPaneContentTransform(activeSurface);
+      return { x: (px - t.offX) / t.scale, y: (py - t.offY) / t.scale };
+    }
+    return { x: px, y: py };
+  }
+
   function toCanvas(xVal, yVal) {
-    return { x: originX + (xVal - xMid) * scaleX, y: originY - (yVal - yMid) * scaleY };
+    let px = originX + (xVal - xMid) * scaleX;
+    let py = originY - (yVal - yMid) * scaleY;
+    // Limităm la zona de siguranță (nu chiar marginea ecranului) — o funcție
+    // cu asimptotă (ex. x/(x+1), aproape de x=-1) poate produce valori y
+    // extreme, care altfel ar "zbura" mult dincolo de ecran; iar dacă un
+    // punct ar ajunge EXACT pe marginea ecranului, padding-ul căsuței de
+    // selecție (plus mânerele) ar ieși puțin în afară.
+    px = Math.max(SELECTION_SAFE_PAD, Math.min(W - SELECTION_SAFE_PAD, px));
+    py = Math.max(SELECTION_SAFE_PAD, Math.min(H - SELECTION_SAFE_PAD, py));
+    return canvasPxToContent(px, py);
   }
 
   const hardMin = yMin - (yMax - yMin) * 3;
@@ -6220,7 +6512,7 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     current.push(toCanvas(p.x, p.y));
   }
   if (current.length > 1) segments.push(current);
-  if (segments.length === 0) throw new Error('Funcția nu produce un grafic vizibil în acest interval.');
+  if (segments.length === 0) throw new Error(LANG === 'en' ? 'The function does not produce a visible graph in this interval.' : 'Funcția nu produce un grafic vizibil în acest interval.');
 
   // Poziția reală a axelor Ox (y=0) și Oy (x=0), sau cea mai apropiată margine dacă 0 nu e în interval
   const oxY = (0 >= yMin && 0 <= yMax) ? 0 : (yMin > 0 ? yMin : yMax);
@@ -6279,9 +6571,35 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   };
 
   pushStroke(page, stroke);
+  const graphIdx = page.strokes.length - 1;
+
+  // Eticheta cu formula funcției, SUB grafic (sub marginea de jos a zonei
+  // de desenare), în notație matematică reală — inclusiv fracție cu bară
+  // orizontală, dacă expresia conține \frac{}{}.
+  const labelPos = canvasPxToContent(marginX, H - marginY + 30);
+  const labelParts = buildMathLabelParts(rawExpr);
+  pushStroke(page, {
+    type: 'mathlabel',
+    prefix: 'f(x) = ',
+    parts: labelParts,
+    x: labelPos.x,
+    y: labelPos.y,
+    font: 'bold 20px sans-serif',
+    color: strokeColor,
+    fontSize: 20
+  });
+
+  // Selectăm implicit graficul (nu și eticheta), gata de redimensionat cu
+  // mânerul, dacă dimensiunea implicită (puțin mai mică) nu e potrivită.
+  setTool('select');
+  selectedStrokes.clear();
+  selectedImages.clear();
+  selectedStrokes.add(graphIdx);
+
   redrawStrokes();
+  drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ Grafic desenat: f(x) = ${rawExpr}`);
+  showToast(trMsg(`✓ Grafic desenat: f(x) = ${rawExpr}`));
 }
 
 const fnModalBackdrop = document.getElementById('function-modal-backdrop');
@@ -6292,6 +6610,18 @@ const fnColorInput = document.getElementById('fn-color-input');
 const fnErrorMsg = document.getElementById('fn-error-msg');
 
 function openFunctionModal() {
+  // Ne asigurăm că suprafața activă (și deci drawC) e cea EFECTIV vizibilă
+  // acum, nu una rămasă din urmă dintr-un mod anterior — altfel dimensiunile
+  // calculate pentru grafic ar fi greșite (un canvas ascuns are dimensiune
+  // 0) sau graficul ar ținti suprafața greșită.
+  if (!pdfModeActive) {
+    activatePane('board');
+  } else if (!pdfSplitMode) {
+    activatePane('top');
+  }
+  // În mod split, ambele suprafețe sunt vizibile — păstrăm suprafața activă
+  // curentă, corespunzătoare ultimei interacțiuni a utilizatorului.
+
   fnErrorMsg.textContent = '';
   fnModalBackdrop.classList.add('show');
   setTimeout(() => fnExprInput.focus(), 50);
@@ -6305,7 +6635,7 @@ function submitFunctionModal() {
   fnErrorMsg.textContent = '';
   const rawExpr = fnExprInput.value.trim();
   if (!rawExpr) {
-    fnErrorMsg.textContent = 'Scrie o funcție, ex: x^2 - 3x + 2';
+    fnErrorMsg.textContent = LANG === 'en' ? 'Write a function, e.g.: x^2 - 3x + 2' : 'Scrie o funcție, ex: x^2 - 3x + 2';
     return;
   }
   const xMin = parseFloat(fnXMinInput.value);
@@ -6314,7 +6644,7 @@ function submitFunctionModal() {
     plotFunctionOnCanvas(rawExpr, xMin, xMax, fnColorInput.value);
     closeFunctionModal();
   } catch (err) {
-    fnErrorMsg.textContent = err.message || 'A apărut o eroare la reprezentarea funcției.';
+    fnErrorMsg.textContent = err.message || (LANG === 'en' ? 'An error occurred while plotting the function.' : 'A apărut o eroare la reprezentarea funcției.');
   }
 }
 
@@ -6646,7 +6976,7 @@ function insertSolidShape(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
+  showToast(trMsg(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`));
 }
 
 // Reconstruiește un corp 3D la un nou unghi de rotație, păstrând poziția curentă pe ecran
@@ -7445,7 +7775,7 @@ async function insertSolidNet(shapeKey) {
     }
   }
   clearCanvas(overlayCtx, overlayC);
-  if (!confirmed) { showToast('Desfășurare anulată'); return; }
+  if (!confirmed) { showToast(LANG === 'en' ? 'Unfolding canceled' : 'Desfășurare anulată'); return; }
 
   const stroke = {
     type: 'solidNet',
@@ -7464,7 +7794,7 @@ async function insertSolidNet(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
+  showToast(trMsg(`✓ ${shapeLabel(spec)} — selectat(ă), trage pentru a muta sau scala`));
 }
 
 // Dialog de confirmare propriu — window.confirm() nativ forțează browserul să iasă din
@@ -7651,7 +7981,7 @@ function insertFigureShape(shapeKey) {
   redrawStrokes();
   drawSelectionHighlights();
   updateStatus();
-  showToast(`✓ ${figureLabel(spec)} — selectat(ă), trage pentru a muta sau scala`);
+  showToast(trMsg(`✓ ${figureLabel(spec)} — selectat(ă), trage pentru a muta sau scala`));
 }
 
 const figuresMenuEl = document.getElementById('figures-menu');
@@ -8435,7 +8765,7 @@ document.getElementById('btn-select').onclick = () => setTool('select');
 document.getElementById('btn-multiselect').onclick = () => {
   multiSelectMode = !multiSelectMode;
   document.getElementById('btn-multiselect').classList.toggle('active', multiSelectMode);
-  showToast(multiSelectMode ? '✓ Selecție multiplă activă (fiecare atingere adaugă la selecție)' : 'Selecție multiplă dezactivată');
+  showToast(trMsg(multiSelectMode ? '✓ Selecție multiplă activă (fiecare atingere adaugă la selecție)' : 'Selecție multiplă dezactivată'));
 };
 document.getElementById('btn-panmode').onclick = () => {
   boardPanMode = !boardPanMode;
@@ -8481,17 +8811,17 @@ document.getElementById('btn-snap-grid').onclick = () => {
   document.getElementById('btn-snap-grid').classList.toggle('active', snapToGridEnabled);
   if (snapToGridEnabled && boardRuling !== 'grid') {
     setBoardRuling('grid', 'ruling-grid');
-    showToast('✓ Lipire de rețea activă — s-a activat și caroiajul, ca să vezi nodurile');
+    showToast(LANG === 'en' ? '✓ Snap to grid active — the grid was also turned on so you can see the nodes' : '✓ Lipire de rețea activă — s-a activat și caroiajul, ca să vezi nodurile');
   } else {
-    showToast(snapToGridEnabled ? '✓ Lipire de rețea activă' : 'Lipire de rețea dezactivată');
+    showToast(trMsg(snapToGridEnabled ? '✓ Lipire de rețea activă' : 'Lipire de rețea dezactivată'));
   }
 };
 function toggleSnapToPoint() {
   snapToPointEnabled = !snapToPointEnabled;
   document.getElementById('btn-snap-point').classList.toggle('active', snapToPointEnabled);
-  showToast(snapToPointEnabled
+  showToast(trMsg(snapToPointEnabled
     ? '✓ Lipire de punct activă — diviziunea 0 a riglei, vârful echerului, centrul raportorului, centrul viitor al cercului la compas'
-    : 'Lipire de punct dezactivată');
+    : 'Lipire de punct dezactivată'));
 }
 document.getElementById('btn-snap-point').onclick = toggleSnapToPoint;
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
@@ -8565,7 +8895,7 @@ document.getElementById('file-input').onchange = e => {
     updateImageSelection();
     updateStatus();
     showSelectionInfo('🖼 Imagine încărcată - trage colțul pentru redimensionare (Delete pentru ștergere)');
-    showToast('✓ Imagine încărcată');
+    showToast(LANG === 'en' ? '✓ Image loaded' : '✓ Imagine încărcată');
   };
   img.src = URL.createObjectURL(f);
   e.target.value = '';
@@ -8600,7 +8930,7 @@ function calcUpdateUI() {
 }
 
 function calcFormatNum(n) {
-  if (!isFinite(n)) return 'Eroare';
+  if (!isFinite(n)) return LANG === 'en' ? 'Error' : 'Eroare';
   if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
   let s = n.toPrecision(12);
   if (s.includes('e')) return String(n);
@@ -8926,7 +9256,7 @@ document.getElementById('calc-insert').onclick = () => {
   drawSelectionHighlights();
   updateStatus();
   closeCalculator();
-  showToast('✓ Calcul adăugat pe tablă');
+  showToast(LANG === 'en' ? '✓ Calculation added to the board' : '✓ Calcul adăugat pe tablă');
 };
 
 let pasteOffsetCount = 0;
@@ -9003,7 +9333,7 @@ document.addEventListener('paste', (e) => {
     updateImageSelection();
     updateStatus();
     showSelectionInfo('🖼 Imagine lipită - trage colțul pentru redimensionare (Delete pentru ștergere)');
-    showToast('✓ Imagine din clipboard adăugată');
+    showToast(LANG === 'en' ? '✓ Image from clipboard added' : '✓ Imagine din clipboard adăugată');
   };
   img.src = URL.createObjectURL(imageFile);
 });
@@ -9228,7 +9558,7 @@ async function saveSession() {
   a.download = `whiteboard_${ts}.wbs`;
   a.click();
   URL.revokeObjectURL(a.href);
-  showToast('✓ Sesiunea a fost salvată!');
+  showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiunea a fost salvată!');
 }
 
 async function restoreSessionData(data, opts) {
@@ -10002,7 +10332,7 @@ function buildGeoProtractor() {
     ev.stopPropagation();
     geoGuides.protractor.angle = 0;
     updateGeoTransform('protractor');
-    showToast('↺ Raportor resetat la orizontală');
+    showToast(LANG === 'en' ? '↺ Protractor reset to horizontal' : '↺ Raportor resetat la orizontală');
   });
   closeBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
@@ -10029,7 +10359,7 @@ function finalizeSetsquareRightAngleMark() {
   pushStroke(page, { type: 'polygon', points, color, size: lastPenSize, closed: true });
   if (targetSurf === activeSurface) redrawStrokes();
   updateStatus();
-  showToast('✓ Unghi drept evidențiat');
+  showToast(LANG === 'en' ? '✓ Right angle highlighted' : '✓ Unghi drept evidențiat');
 }
 
 function toggleSetsquareRightAngleMark() {
@@ -10062,7 +10392,7 @@ function toggleProtractorArcCheckbox() {
     arcBuildCheck.setAttribute('d', '');
     return;
   }
-  if (!st.arcAngle || st.arcAngle < 1) { showToast('⚠ Setați mai întâi un unghi pe raportor'); return; }
+  if (!st.arcAngle || st.arcAngle < 1) { showToast(LANG === 'en' ? '⚠ First set an angle on the protractor' : '⚠ Setați mai întâi un unghi pe raportor'); return; }
   arcBuildBox.setAttribute('data-checked', '1');
   arcBuildBox.setAttribute('fill', '#2d9d4f');
   arcBuildCheck.setAttribute('d', 'M -4 0 L -1 4 L 5 -5');
@@ -10321,7 +10651,7 @@ function compassRenderLivePreview() {
   const deg = angleDiff * 180 / Math.PI;
   arcLabel.textContent = (angleDiff >= 2 * Math.PI - 0.1 ? '360°' : deg.toFixed(1) + '°');
 
-  showMathInfo('🔄 Rază: ' + (st.radius / 50).toFixed(2) + ' cm  |  Arc: ' + arcLabel.textContent);
+  showMathInfo((LANG === 'en' ? '🔄 Radius: ' : '🔄 Rază: ') + (st.radius / 50).toFixed(2) + ' cm  |  Arc: ' + arcLabel.textContent);
 }
 
 function compassFinalizeDraw() {
@@ -10345,10 +10675,10 @@ function compassFinalizeDraw() {
     const radiusContent = geoScreenLengthToContent(st.radius, targetSurf);
     if (angleDiff >= 2 * Math.PI - 0.1) {
       pushStroke(page, { type: 'circle', cx: centerContent.x, cy: centerContent.y, radius: radiusContent, color: color, size: size, startAngle: compassDraw.startAngle, dir });
-      showToast('✓ Cerc complet desenat: raza ' + (st.radius / 50).toFixed(1) + ' cm');
+      showToast((LANG === 'en' ? '✓ Full circle drawn: radius ' : '✓ Cerc complet desenat: raza ') + (st.radius / 50).toFixed(1) + ' cm');
     } else {
       pushStroke(page, { type: 'arc', cx: centerContent.x, cy: centerContent.y, radius: radiusContent, startAngle: displayStart, endAngle: displayEnd, color: color, size: size, dir });
-      showToast('✓ Arc desenat: ' + (angleDiff * 180 / Math.PI).toFixed(1) + '°  |  rază ' + (st.radius / 50).toFixed(1) + ' cm');
+      showToast((LANG === 'en' ? '✓ Arc drawn: ' : '✓ Arc desenat: ') + (angleDiff * 180 / Math.PI).toFixed(1) + (LANG === 'en' ? '°  |  radius ' : '°  |  rază ') + (st.radius / 50).toFixed(1) + ' cm');
     }
     if (targetSurf === activeSurface) redrawStrokes();
     updateStatus();
@@ -10706,7 +11036,7 @@ function finalizeProtractorArc(skipUsageRecord) {
   });
   if (targetSurf === activeSurface) redrawStrokes();
 
-  showToast('✓ Arc construit: ' + Math.round(st.arcAngle) + '°');
+  showToast((LANG === 'en' ? '✓ Arc built: ' : '✓ Arc construit: ') + Math.round(st.arcAngle) + '°');
   redrawStrokes();
   updateStatus();
   }
@@ -10810,10 +11140,10 @@ function toggleGeoGuide(name, btnId) {
   geoGroups[name].g.classList.toggle('visible', geoGuides[name].visible);
   document.getElementById(btnId).classList.toggle('active', geoGuides[name].visible);
   if (name === 'compass' && geoGuides.compass.visible) {
-    showMathInfo('⭕ Albastru = centru (trage pentru a muta)  |  Pătrățel gri = trage liber pentru a roti / a mări-micșora raza, fără să deseneze  |  Roșu = trage pentru a desena cercul/arcul');
+    showMathInfo(LANG === 'en' ? '⭕ Blue = center (drag to move)  |  Gray square = drag freely to rotate / grow-shrink the radius, without drawing  |  Red = drag to draw the circle/arc' : '⭕ Albastru = centru (trage pentru a muta)  |  Pătrățel gri = trage liber pentru a roti / a mări-micșora raza, fără să deseneze  |  Roșu = trage pentru a desena cercul/arcul');
   }
   if (name === 'protractor' && geoGuides.protractor.visible) {
-    showMathInfo('📐 Mânerul verde: trage-l de-a lungul raportorului pentru a seta unghiul  |  Bifează căsuța pentru a construi arcul');
+    showMathInfo(LANG === 'en' ? '📐 Green handle: drag it along the protractor to set the angle  |  Check the box to build the arc' : '📐 Mânerul verde: trage-l de-a lungul raportorului pentru a seta unghiul  |  Bifează căsuța pentru a construi arcul');
   }
 }
 document.getElementById('btn-ruler').onclick = () => toggleGeoGuide('ruler', 'btn-ruler');
@@ -11140,10 +11470,10 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
   okBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   okBtn.addEventListener('click', ev => { ev.stopPropagation(); confirmGeoSegBuild(); });
   cancelBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
-  cancelBtn.addEventListener('click', ev => { ev.stopPropagation(); cancelGeoSegBuild(); showToast('❌ Segment anulat'); });
+  cancelBtn.addEventListener('click', ev => { ev.stopPropagation(); cancelGeoSegBuild(); showToast(LANG === 'en' ? '❌ Segment canceled' : '❌ Segment anulat'); });
 
   renderGeoSegBuild();
-  showToast('↔️ Trage cele două puncte ca să reglezi, apoi atinge ✓ (sau oriunde pe tablă)');
+  showToast(LANG === 'en' ? '↔️ Drag the two points to adjust, then tap ✓ (or anywhere on the board)' : '↔️ Trage cele două puncte ca să reglezi, apoi atinge ✓ (sau oriunde pe tablă)');
 }
 
 function renderGeoSegBuild() {
@@ -11241,7 +11571,7 @@ function confirmGeoSegBuild() {
       }
       if (targetSurf === activeSurface) redrawStrokes();
       updateStatus();
-      showToast('✓ Segment desenat (' + cmLen + ' cm)');
+      showToast((LANG === 'en' ? '✓ Segment drawn (' : '✓ Segment desenat (') + cmLen + ' cm)');
     }, c0, c1, targetSurf);
   }
   cancelGeoSegBuild();
@@ -11406,7 +11736,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
   <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
-  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic. Fiecare are un buton X pentru închidere rapidă, o cruce pentru mutare și un mâner albastru pentru rotire (lângă diviziunea 0). Raportorul are și un buton de resetare la orizontală. Echerul are două mânere de scalare independente (unul pentru fiecare catetă), ca să poți face un triunghi nu neapărat isoscel. Pe calculator, tastele săgeți deplasează fin instrumentul cu care ai interacționat ultima dată.</li>
+  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic, utilizabile atât pe tablă cât și peste o fișă PDF (rămân la aceeași mărime, fixe pe ecran — nu se scalează/deplasează cu zoom-ul sau derularea fișei; la deschidere apar centrate pe zona pe care lucrezi). Fiecare are un buton X pentru închidere rapidă, o cruce pentru mutare și un mâner albastru pentru rotire (lângă diviziunea 0). Raportorul are și un buton de resetare la orizontală. Echerul are două mânere de scalare independente (unul pentru fiecare catetă), ca să poți face un triunghi nu neapărat isoscel. Rigla și echerul au o mică margine (2mm) fără nicio gradație chiar la început, ca la instrumentele fizice reale. Dublu-click pe riglă, echer sau raportor comută lipirea de punct, fără să mai fie nevoie de un buton separat. Diviziunile sunt colorate pentru contrast: albastru (ca instrumentul) pe tablă, verde deschis pe fișa PDF. Pe calculator, tastele săgeți deplasează fin instrumentul cu care ai interacționat ultima dată (dacă niciunul nu a fost folosit recent, săgețile panoramează tabla).</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
   <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent și distanța totală afișate lângă puncte (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). Echerul are câte un creion lângă fiecare dintre cele 3 muchii (bază, catetă, ipotenuză) — atingi direct pe cel de care ai nevoie. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
 </ul>
@@ -11437,7 +11767,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat cu creion alb; acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom).</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 2 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -11452,7 +11782,10 @@ const HELP_CONTENT_HTML = `
 <p>Navighează între pagini cu săgețile din colț, adaugă sau șterge pagini, și schimbă culoarea fundalului tablei din paleta din dreapta jos a barei de instrumente.</p>
 <p>Din grupul alăturat de butoane poți alege și o liniatură pentru tablă: <b>caroiaj</b> (ca în caietul de matematică), <b>dictando</b> (linii ca în caietul de scriere/dictando) sau <b>portativ</b> (ca în caietul de muzică). Cu butoanele −/+ reglezi mărimea pătratelor/liniilor și opacitatea lor, iar cu selectorul de culoare alegi manual culoarea liniaturii — implicit e alb, la 50% opacitate, potrivit fundalului negru al tablei.</p>
 <p><b>Lipire de rețea</b> — butonul de lângă liniatură activează lipirea de nodurile caroiajului: capetele liniei/liniei întrerupte/săgeții, colțurile dreptunghiului, centrul cercului și vârfurile poligonului "sar" automat la cel mai apropiat nod, la pasul curent al caroiajului (reglabil cu −/+). Nu afectează desenul liber (creion/radieră) și nici mutarea/redimensionarea elementelor deja existente. Dacă activezi lipirea fără caroiaj vizibil, acesta se activează automat, ca să vezi nodurile.</p>
-<p><b>Lipire de punct</b> — butonul de lângă lipirea de rețea face ca desenele să se lipească exact de: punctele speciale ale instrumentelor geometrice vizibile (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas), <b>capătul oricărui desen existent</b> (linie, poligon, cerc etc.), <b>vârfurile unui dreptunghi/pătrat</b> deja desenat și <b>intersecția dintre două segmente</b> deja desenate — util, de exemplu, ca să continui exact dintr-un capăt de segment sau să pornești chiar din punctul unde se taie două linii. Funcționează indiferent dacă rețeaua (caroiajul) e activată sau nu. Funcționează și invers: dacă muți rigla/echerul/raportorul/compasul, punctul lui de referință se lipește de capătul celui mai apropiat desen deja existent.</p>
+<p><b>Lipire de punct</b> — butonul de lângă lipirea de rețea face ca desenele să se lipească exact de: punctele speciale ale instrumentelor geometrice vizibile (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas), <b>capătul oricărui desen existent</b> (linie, poligon, cerc etc.), <b>vârfurile unui dreptunghi/pătrat</b> deja desenat, <b>intersecția dintre două segmente</b>, <b>intersecția dintre un segment și un cerc</b> și <b>intersecția dintre două cercuri</b> — util, de exemplu, ca să continui exact dintr-un capăt de segment sau să pornești chiar din punctul unde se taie două forme. Funcționează indiferent dacă rețeaua (caroiajul) e activată sau nu, atât pe tablă cât și peste o fișă PDF (pragul de lipire se adaptează automat la zoom-ul fișei, ca să rămână la fel de "strâns" ca pe tablă). Funcționează și invers: dacă muți rigla/echerul/raportorul/compasul, punctul lui de referință se lipește de capătul celui mai apropiat desen deja existent.</p>
+
+<h4>Calculator</h4>
+<p>Butonul de calculator (🧮) deschide o fereastră flotantă, care poate fi mutată trăgând de antet. Suportă expresii complete, cu precedența corectă a operațiilor (înmulțirea/împărțirea înaintea adunării/scăderii), constantele π și e, procent (aplicat corect la adunare/scădere, ca procent din operandul anterior) și funcțiile sin/cos/tan/cot (în grade) și radical — apăsate ca prefix matematic normal (ex. „√2+√3", cu paranteza închisă automat la operator sau la egal). Butonul verde „Inserează pe tablă" adaugă calculul curent ca text în centrul zonei vizibile și îl selectează automat, gata de mutat sau redimensionat.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -11509,7 +11842,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
   <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
   <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
-  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools. Each has an X button to close it quickly, a cross for moving it, and a blue handle for rotating it (near the 0 mark). The protractor also has a reset-to-horizontal button. The set square has two independent scale handles (one per leg), so it doesn't have to stay isosceles. On a computer, arrow keys nudge the tool you last interacted with.</li>
+  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools, usable both on the board and over a PDF sheet (they stay the same size, fixed on screen — not scaled/moved by the sheet's zoom or scrolling; they appear centered on whichever area you're working on when opened). Each has an X button to close it quickly, a cross for moving it, and a blue handle for rotating it (near the 0 mark). The protractor also has a reset-to-horizontal button. The set square has two independent scale handles (one per leg), so it doesn't have to stay isosceles. The ruler and set square have a small blank margin (2mm) with no graduation right at the start, like on real physical tools. Double-clicking the ruler, set square, or protractor toggles snap-to-point, no separate button needed. Graduations are colored for contrast: blue (matching the tool) on the board, light green on a PDF sheet. On a computer, arrow keys nudge the tool you last interacted with (if none was used recently, the arrows pan the board instead).</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
   <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number plus total distance shown next to the points (it can go below 0, negative, if you drag a point past the 0 mark). The set square has one pencil next to each of its 3 edges (base, leg, hypotenuse) — just tap the one you need. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
 </ul>
@@ -11540,7 +11873,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below with a white pencil; there, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet stays attached to the PDF content (keeps its position when panning, scales with zoom).</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the pencil thickness automatically set to 2 and the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. The color switches automatically between white (on the board) and red (on the sheet) every time you move from one surface to the other — but if you manually pick a color from the panel, it stays fixed on both surfaces instead of switching automatically. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below. In split mode, you can freely drag the ruler/set square/protractor/compass from one area to the other — the resulting drawing always goes onto whichever surface the tool is actually over at that moment, regardless of where it was first opened. There, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet (including with the geometric tools) stays attached to the PDF content (keeps its position when panning, scales with zoom), and the line thickness stays visually identical to the board's.</li>
 </ul>
 
 <h4>File and history</h4>
@@ -11555,7 +11888,10 @@ const HELP_CONTENT_HTML_EN = `
 <p>Navigate between pages with the corner arrows, add or delete pages, and change the board's background color from the palette at the bottom right of the toolbar.</p>
 <p>From the nearby button group you can also pick a ruling for the board: <b>grid</b> (like a math notebook), <b>ruled lines</b> (like a writing notebook) or <b>staff lines</b> (like a music notebook). Use the −/+ buttons to adjust the size of the squares/lines and their opacity, and use the color picker to manually choose the ruling color — it defaults to white at 50% opacity, suited to the board's black background.</p>
 <p><b>Snap to grid</b> — the button next to the ruling turns on snapping to the grid nodes: the ends of a line/dashed line/arrow, the corners of a rectangle, the center of a circle, and polygon vertices automatically "jump" to the nearest node, at the current grid spacing (adjustable with −/+). It doesn't affect freehand drawing (pencil/eraser) or moving/resizing already-placed elements. If you turn snapping on without the grid visible, the grid turns on automatically so you can see the nodes.</p>
-<p><b>Snap to point</b> — the button next to snap-to-grid makes drawings snap exactly to: special points on the visible geometric tools (the ruler's 0 mark, the set square's right-angle vertex, the protractor's center, the compass's future circle center), <b>the endpoint of any existing drawing</b> (line, polygon, circle, etc.), <b>the corners of an already-drawn rectangle/square</b>, and <b>the intersection of two already-drawn segments</b> — handy for continuing exactly from a segment's end, or starting right where two lines cross. Works whether the grid is on or not. It also works the other way: moving the ruler/set square/protractor/compass snaps its own reference point to the nearest existing drawing's endpoint.</p>
+<p><b>Snap to point</b> — the button next to snap-to-grid makes drawings snap exactly to: special points on the visible geometric tools (the ruler's 0 mark, the set square's right-angle vertex, the protractor's center, the compass's future circle center), <b>the endpoint of any existing drawing</b> (line, polygon, circle, etc.), <b>the corners of an already-drawn rectangle/square</b>, <b>the intersection of two segments</b>, <b>the intersection of a segment and a circle</b>, and <b>the intersection of two circles</b> — handy for continuing exactly from a segment's end, or starting right where two shapes cross. Works whether the grid is on or not, both on the board and over a PDF sheet (the snap threshold adapts automatically to the sheet's zoom, staying just as "tight" as on the board). It also works the other way: moving the ruler/set square/protractor/compass snaps its own reference point to the nearest existing drawing's endpoint.</p>
+
+<h4>Calculator</h4>
+<p>The calculator button (🧮) opens a floating window, which can be moved by dragging its header. It supports full expressions with correct operator precedence (multiplication/division before addition/subtraction), the constants π and e, percent (correctly applied for addition/subtraction, as a percentage of the previous operand), and the sin/cos/tan/cot (in degrees) and square root functions — pressed as a normal math prefix (e.g. "√2+√3", with the parenthesis closing automatically at the next operator or at equals). The green "Insert on board" button adds the current calculation as text in the center of the visible area and selects it automatically, ready to move or resize.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `
