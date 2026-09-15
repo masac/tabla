@@ -474,21 +474,21 @@ function panBoardBy(dx, dy) {
 function updateGuideSvgPan() {
   const el = document.getElementById('guide-pan-group');
   if (!el) return;
-  if (activeSurface === 'board') {
-    // În mod normal (tabla ocupă tot spațiul de lucru), tabla și
-    // containerul comun (workspace) au același colț stânga-sus. Dar în
-    // modul split (tablă + fișă PDF vizibile simultan), tabla e doar o
-    // parte din workspace (sub fișă) — adăugăm și acest decalaj, altfel
-    // instrumentele ar apărea deplasate greșit (suprapuse peste fișa PDF).
+  if (activeSurface === 'board' && !pdfSplitMode) {
+    // Tabla ocupă tot spațiul de lucru (nu suntem în mod split) —
+    // instrumentele urmăresc panoramarea/zoom-ul tablei, ca înainte.
     const wrapRect = wrap.getBoundingClientRect();
     const wsRect = document.getElementById('workspace').getBoundingClientRect();
     const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
     el.setAttribute('transform', `translate(${boardPanX + dx},${boardPanY + dy}) scale(${boardZoom})`);
   } else {
-    // Peste o fișă PDF, instrumentele (riglă/echer/raportor/compas) rămân
+    // Peste o fișă PDF, SAU în modul split (tablă + fișă vizibile
+    // simultan), instrumentele (riglă/echer/raportor/compas) rămân
     // relative la ECRAN, ca un obiect fizic așezat deasupra — nu se
-    // deplasează o dată cu derularea PDF-ului (spre deosebire de
-    // stroke-uri) și nu li se schimbă dimensiunea la zoom-ul fișei.
+    // deplasează o dată cu derularea conținutului de dedesubt și nu li se
+    // schimbă dimensiunea la zoom. În modul split, asta permite mutarea
+    // liberă a instrumentului dintr-o zonă în alta (vezi
+    // geoDetectSurfaceForScreenPoint pentru suprafața-țintă efectivă).
     el.setAttribute('transform', 'translate(0,0)');
   }
 }
@@ -887,6 +887,7 @@ function updatePdfPanePosition(name) {
   // PDF-ului (poziție păstrată la pan, mărime adaptată la zoom).
   if (activeSurface === name) {
     applyCanvasPanTransform();
+    applyImagesPanTransform();
     redrawStrokes();
     drawSelectionHighlights();
     renderImages();
@@ -2663,11 +2664,15 @@ function snapGuideMoveToStrokePoint(name) {
   else if (name === 'compass') zeroWorld = { x: st.x, y: st.y };
   else return;
 
+  // Suprafața-țintă se detectează după poziția CURENTĂ pe ecran a
+  // instrumentului — esențial în modul split, unde poate fi mutat liber
+  // între tablă și fișa PDF.
+  const targetSurf = geoDetectSurfaceForScreenPoint(zeroWorld);
   // Desenele existente (capete, intersecții) sunt stocate în coordonate de
   // conținut — convertim punctul instrumentului în același sistem pentru
   // comparație corectă, apoi convertim rezultatul găsit înapoi în ecran.
-  const zeroContent = geoScreenToContent(zeroWorld);
-  const page = getCurrentPage();
+  const zeroContent = geoScreenToContent(zeroWorld, targetSurf);
+  const page = getPageForSurface(targetSurf);
   const pts = getStrokeEndpointsList(page);
   pts.push(...getStrokeIntersectionPoints(page));
   let best = null, bestD = 18;
@@ -2676,7 +2681,7 @@ function snapGuideMoveToStrokePoint(name) {
     if (d < bestD) { bestD = d; best = pt; }
   });
   if (best) {
-    const bestScreen = geoContentToScreen(best);
+    const bestScreen = geoContentToScreen(best, targetSurf);
     st.x += bestScreen.x - zeroWorld.x;
     st.y += bestScreen.y - zeroWorld.y;
   }
@@ -2685,25 +2690,30 @@ function snapGuideMoveToStrokePoint(name) {
 // Punctele speciale ale instrumentelor geometrice vizibile, pentru "lipire
 // de punct": diviziunea 0 a riglei, vârful unghiului drept al echerului,
 // centrul (pivotul) raportorului și centrul viitor al cercului la compas.
+// Incluse doar dacă instrumentul se află EFECTIV pe suprafața activă curentă
+// (unde se desenează acum) — altfel s-ar compara coordonate din sisteme
+// diferite (relevant în modul split, unde un instrument poate fi mutat pe
+// cealaltă suprafață).
 function getGeoSnapPoints() {
   const pts = [];
   if (typeof geoGuides === 'undefined') return pts;
-  // Punctele instrumentelor sunt calculate în coordonate "ecran" (vezi
-  // geoPos/geoScreenToContent) — pe fișa PDF trebuie convertite în
-  // coordonate de conținut, ca să se compare corect cu poziția cursorului
-  // (pos() lucrează mereu în coordonate de conținut pentru desenare).
-  const conv = (p) => geoScreenToContent(p);
+  const conv = (p) => {
+    const surf = geoDetectSurfaceForScreenPoint(p);
+    if (surf !== activeSurface) return null;
+    return geoScreenToContent(p, surf);
+  };
+  const add = (p) => { const c = conv(p); if (c) pts.push(c); };
   if (geoGuides.ruler && geoGuides.ruler.visible) {
-    pts.push(conv(geoLocalToWorld(geoGuides.ruler, 0, 0)));
+    add(geoLocalToWorld(geoGuides.ruler, 0, 0));
   }
   if (geoGuides.setsquare && geoGuides.setsquare.visible) {
-    pts.push(conv(geoLocalToWorld(geoGuides.setsquare, 0, 0)));
+    add(geoLocalToWorld(geoGuides.setsquare, 0, 0));
   }
   if (geoGuides.protractor && geoGuides.protractor.visible) {
-    pts.push(conv(geoLocalToWorld(geoGuides.protractor, 0, 0)));
+    add(geoLocalToWorld(geoGuides.protractor, 0, 0));
   }
   if (geoGuides.compass && geoGuides.compass.visible) {
-    pts.push(conv({ x: geoGuides.compass.x, y: geoGuides.compass.y }));
+    add({ x: geoGuides.compass.x, y: geoGuides.compass.y });
   }
   return pts;
 }
@@ -2903,50 +2913,114 @@ const pos = e => {
 };
 
 function geoPos(e) {
-  if (activeSurface === 'board') return pos(e);
-  // Peste o fișă PDF, instrumentele rămân relative la ECRAN — nu se
-  // deplasează o dată cu conținutul PDF-ului (ca stroke-urile) și nu li se
-  // schimbă dimensiunea la zoom-ul fișei. Coordonatele sunt simple pixeli,
-  // relativi la colțul containerului comun (workspace) — aceleași folosite
-  // de updateGuideSvgPan() la randare, deci auto-consistente.
+  if (activeSurface === 'board' && !pdfSplitMode) return pos(e);
+  // Peste o fișă PDF, SAU în modul split (tablă + fișă vizibile simultan),
+  // instrumentele rămân relative la ECRAN — nu se deplasează o dată cu
+  // conținutul de dedesubt (ca stroke-urile) și nu li se schimbă
+  // dimensiunea la zoom. Coordonatele sunt simple pixeli, relativi la
+  // colțul containerului comun (workspace) — aceleași folosite de
+  // updateGuideSvgPan() la randare, deci auto-consistente. În modul split,
+  // asta permite ca ACELAȘI instrument să poată fi mutat liber între tablă
+  // și fișă — suprafața-țintă efectivă se detectează dinamic (vezi
+  // geoDetectSurfaceForScreenPoint), nu e fixată la deschidere.
   const wsRect = document.getElementById('workspace').getBoundingClientRect();
   return { x: e.clientX - wsRect.left, y: e.clientY - wsRect.top };
 }
 
+// Detectează sub care suprafață (tablă sau o anumită fișă PDF) se află
+// EFECTIV un punct dat în coordonate "ecran" (workspace-relative) — folosit
+// în modul split, unde un instrument poate fi mutat liber dintr-o zonă în
+// alta, ca desenul rezultat să meargă pe suprafața CORECTĂ (unde se află
+// instrumentul chiar acum), nu pe cea activă la un moment dat anterior.
+function geoDetectSurfaceForScreenPoint(p) {
+  if (!pdfSplitMode) return activeSurface;
+  const wsRect = document.getElementById('workspace').getBoundingClientRect();
+  const absX = wsRect.left + p.x, absY = wsRect.top + p.y;
+  if (pdfModeActive && pdfPanes.top) {
+    const paneRect = getPaneEls('top').root.getBoundingClientRect();
+    if (absX >= paneRect.left && absX < paneRect.right && absY >= paneRect.top && absY < paneRect.bottom) return 'top';
+  }
+  const wrapRect = wrap.getBoundingClientRect();
+  if (absX >= wrapRect.left && absX < wrapRect.right && absY >= wrapRect.top && absY < wrapRect.bottom) return 'board';
+  return activeSurface;
+}
+
+// Punctul de referință al unui instrument (folosit pentru detecția
+// suprafeței) — vârful/diviziunea 0 pentru riglă/echer/raportor, centrul
+// pentru compas.
+function geoGuideReferencePoint(name) {
+  const st = geoGuides[name];
+  if (name === 'compass') return { x: st.x, y: st.y };
+  return geoLocalToWorld(st, 0, 0);
+}
+
 // Convertește un punct din coordonatele "ecran" ale instrumentului (vezi
-// geoPos) în coordonatele "conținut PDF" în care trebuie STOCAT desenul —
-// altfel segmentul ar apărea într-un loc complet greșit (chiar pe altă
-// "pagină" vizuală), fiindcă stroke-urile de pe fișă se randează prin
-// transformarea curentă de conținut (scală + panoramare), nu ca pixeli ficși
-// de ecran. Pe tablă, punctul rămâne neschimbat (coordonatele "ecran" ale
-// instrumentului SUNT deja coordonatele de conținut ale tablei).
-function geoScreenToContent(p) {
-  if (activeSurface === 'board' || !pdfPanes[activeSurface]) return { x: p.x, y: p.y };
-  const t = getPaneContentTransform(activeSurface);
-  const paneRect = getPaneEls(activeSurface).root.getBoundingClientRect();
+// geoPos) în coordonatele "conținut" ale suprafeței ȚINTĂ (tablă sau o fișă
+// PDF anume) — altfel segmentul ar apărea într-un loc complet greșit,
+// fiindcă fiecare suprafață se randează prin propria transformare de
+// conținut (scală + panoramare), nu ca pixeli ficși de ecran. Dacă
+// `targetSurface` nu e dat explicit, se detectează automat (în modul split)
+// sau se ia suprafața activă curentă (altfel).
+function geoScreenToContent(p, targetSurface) {
+  const surf = targetSurface || (pdfSplitMode ? geoDetectSurfaceForScreenPoint(p) : activeSurface);
+  if (surf === 'board') {
+    if (!pdfSplitMode) return { x: p.x, y: p.y }; // mod normal: p e deja conținut de tablă
+    const wrapRect = wrap.getBoundingClientRect();
+    const wsRect = document.getElementById('workspace').getBoundingClientRect();
+    const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
+    const z = boardZoom || 1;
+    return { x: (p.x - dx - boardPanX) / z, y: (p.y - dy - boardPanY) / z };
+  }
+  if (!pdfPanes[surf]) return { x: p.x, y: p.y };
+  const t = getPaneContentTransform(surf);
+  const paneRect = getPaneEls(surf).root.getBoundingClientRect();
   const wsRect = document.getElementById('workspace').getBoundingClientRect();
   const dx = paneRect.left - wsRect.left, dy = paneRect.top - wsRect.top;
   return { x: (p.x - dx - t.offX) / t.scale, y: (p.y - dy - t.offY) / t.scale };
 }
 
 // Inversul lui geoScreenToContent — dintr-un punct în coordonate de conținut
-// PDF (ex. un capăt de stroke existent), calculează unde se află acel punct
-// în coordonatele "ecran" ale instrumentelor.
-function geoContentToScreen(p) {
-  if (activeSurface === 'board' || !pdfPanes[activeSurface]) return { x: p.x, y: p.y };
-  const t = getPaneContentTransform(activeSurface);
-  const paneRect = getPaneEls(activeSurface).root.getBoundingClientRect();
+// ale unei suprafețe anume, calculează unde se află acel punct în
+// coordonatele "ecran" ale instrumentelor.
+function geoContentToScreen(p, targetSurface) {
+  const surf = targetSurface || activeSurface;
+  if (surf === 'board') {
+    if (!pdfSplitMode) return { x: p.x, y: p.y };
+    const wrapRect = wrap.getBoundingClientRect();
+    const wsRect = document.getElementById('workspace').getBoundingClientRect();
+    const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
+    const z = boardZoom || 1;
+    return { x: p.x * z + boardPanX + dx, y: p.y * z + boardPanY + dy };
+  }
+  if (!pdfPanes[surf]) return { x: p.x, y: p.y };
+  const t = getPaneContentTransform(surf);
+  const paneRect = getPaneEls(surf).root.getBoundingClientRect();
   const wsRect = document.getElementById('workspace').getBoundingClientRect();
   const dx = paneRect.left - wsRect.left, dy = paneRect.top - wsRect.top;
   return { x: p.x * t.scale + t.offX + dx, y: p.y * t.scale + t.offY + dy };
 }
 
-// Convertește o LUNGIME (nu un punct — ex. o rază) din coordonate "ecran"
-// în "conținut" PDF — fără nicio translație, doar scala.
-function geoScreenLengthToContent(len) {
-  if (activeSurface === 'board' || !pdfPanes[activeSurface]) return len;
-  const t = getPaneContentTransform(activeSurface);
+// Convertește o LUNGIME (nu un punct — ex. o rază) din coordonate "ecran" în
+// coordonate de conținut ale suprafeței țintă — fără nicio translație, doar
+// scala.
+function geoScreenLengthToContent(len, targetSurface) {
+  const surf = targetSurface || activeSurface;
+  if (surf === 'board') {
+    return pdfSplitMode ? len / (boardZoom || 1) : len;
+  }
+  if (!pdfPanes[surf]) return len;
+  const t = getPaneContentTransform(surf);
   return len / (t.scale || 1);
+}
+
+// Pagina (setul de stroke-uri) corespunzătoare unei suprafețe anume — la fel
+// ca getCurrentPage(), dar pentru o suprafață EXPLICITĂ, nu neapărat cea
+// activă curent (necesar în modul split, unde instrumentul poate ținti o
+// suprafață diferită de cea activă).
+function getPageForSurface(surf) {
+  if (surf === 'board') return pages[currentPageIdx];
+  if (pdfPanes[surf]) return getPdfPageData(pdfPanes[surf], pdfPanes[surf].pageNum);
+  return getCurrentPage();
 }
 
 function snapPointToAngle(start, end) {
@@ -9529,9 +9603,15 @@ function geoClear(node) { while (node.firstChild) node.removeChild(node.firstChi
 
 // Culoarea diviziunilor (gradațiilor) riglei/echerului/raportorului — verde
 // deschis peste fișa PDF (fundal alb), verde închis pe tablă, pentru
-// contrast mai bun pe fiecare fundal în parte.
-function geoTickColor() {
-  return (activeSurface === 'board') ? 'rgba(0,85,204,0.85)' : 'rgba(144,238,144,0.9)';
+// contrast mai bun pe fiecare fundal în parte. În modul split, se
+// detectează suprafața EFECTIVĂ a fiecărui instrument (poate diferi de cea
+// activă global, dacă a fost mutat pe cealaltă suprafață).
+function geoTickColor(st) {
+  let surf = activeSurface;
+  if (pdfSplitMode && st) {
+    surf = geoDetectSurfaceForScreenPoint(geoLocalToWorld(st, 0, 0));
+  }
+  return (surf === 'board') ? 'rgba(0,85,204,0.85)' : 'rgba(144,238,144,0.9)';
 }
 
 const geoGroups = {};
@@ -9656,9 +9736,9 @@ function renderGeoRuler() {
     const isHalf = mm % 5 === 0;
     const tickH = isCM ? T * 0.55 : (isHalf ? T * 0.38 : T * 0.2);
     ticks.appendChild(geoEl('line', { x1: x, y1: 0, x2: x, y2: tickH,
-      stroke: geoTickColor(), 'stroke-width': isCM ? 1.6 : (isHalf ? 1.1 : 0.7) }));
+      stroke: geoTickColor(st), 'stroke-width': isCM ? 1.6 : (isHalf ? 1.1 : 0.7) }));
     if (isCM && mm > 0) {
-      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(), x: x - 4, y: T - 8 });
+      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: x - 4, y: T - 8 });
       t.textContent = mm / 10;
       ticks.appendChild(t);
     }
@@ -9781,9 +9861,9 @@ function renderGeoSetsquare() {
     const isHalf = mm % 5 === 0;
     const tickLen = isCM ? 16 : (isHalf ? 11 : 6);
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
-    ticks.appendChild(geoEl('line', { x1: d, y1: 0, x2: d, y2: -tickLen, stroke: geoTickColor(), 'stroke-width': sw }));
+    ticks.appendChild(geoEl('line', { x1: d, y1: 0, x2: d, y2: -tickLen, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(), x: d - 4, y: -6 });
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: d - 4, y: -6 });
       t1.textContent = mm / 10;
       ticks.appendChild(t1);
     }
@@ -9795,9 +9875,9 @@ function renderGeoSetsquare() {
     const isHalf = mm % 5 === 0;
     const tickLen = isCM ? 16 : (isHalf ? 11 : 6);
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
-    ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: geoTickColor(), 'stroke-width': sw }));
+    ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(), x: 4, y: -d - 3 });
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: 4, y: -d - 3 });
       t2.textContent = mm / 10;
       ticks.appendChild(t2);
     }
@@ -9940,13 +10020,14 @@ function buildGeoProtractor() {
 // pentru a evidenția un unghi de 90°.
 function finalizeSetsquareRightAngleMark() {
   const st = geoGuides.setsquare;
-  const page = getCurrentPage();
+  const targetSurf = geoDetectSurfaceForScreenPoint(geoGuideReferencePoint('setsquare'));
+  const page = getPageForSurface(targetSurf);
   if (!page) return;
   const s = 20; // latura pătrățelului, în pixeli
   const localPts = [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: -s }, { x: 0, y: -s }];
-  const points = localPts.map(p => geoScreenToContent(geoLocalToWorld(st, p.x, p.y)));
+  const points = localPts.map(p => geoScreenToContent(geoLocalToWorld(st, p.x, p.y), targetSurf));
   pushStroke(page, { type: 'polygon', points, color, size: lastPenSize, closed: true });
-  redrawStrokes();
+  if (targetSurf === activeSurface) redrawStrokes();
   updateStatus();
   showToast('✓ Unghi drept evidențiat');
 }
@@ -10033,14 +10114,14 @@ function renderGeoProtractor() {
     const x1 = R * cx, y1 = R * sy;
     const x2 = (R - tickLen) * cx, y2 = (R - tickLen) * sy;
     ticks.appendChild(geoEl('line', { x1, y1, x2, y2,
-      stroke: geoTickColor(), 'stroke-width': big ? 1.7 : (med ? 1.1 : 0.6) }));
+      stroke: geoTickColor(st), 'stroke-width': big ? 1.7 : (med ? 1.1 : 0.6) }));
     if (big) {
-      const rt1 = R - 40;
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(), x: rt1 * cx - 8, y: rt1 * sy + 4 });
+      const rt1 = R - 38;
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: rt1 * cx - 8, y: rt1 * sy + 4 });
       t1.textContent = deg;
       ticks.appendChild(t1);
-      const rt2 = R - 58;
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(), x: rt2 * cx - 8, y: rt2 * sy + 4 });
+      const rt2 = R - 64;
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: rt2 * cx - 8, y: rt2 * sy + 4 });
       t2.textContent = 180 - deg;
       ticks.appendChild(t2);
     }
@@ -10191,27 +10272,46 @@ function compassArcFromAccumulated(startAngle, accumulated) {
 function compassRenderLivePreview() {
   if (!compassDraw) return;
   const st = geoGuides.compass;
-  clearCanvas(overlayCtx, overlayC);
+  const targetSurf = geoDetectSurfaceForScreenPoint({ x: st.x, y: st.y });
+  const isActiveTarget = (targetSurf === activeSurface);
+  // Suprafața pe care se desenează efectiv previzualizarea — de obicei cea
+  // activă, dar în modul split poate fi alta (compasul a fost mutat pe ea).
+  let ovCtx, ovCanvas;
+  if (isActiveTarget) {
+    ovCtx = overlayCtx; ovCanvas = overlayC;
+  } else if (targetSurf === 'board') {
+    ovCanvas = document.getElementById('overlay-canvas');
+    ovCtx = ovCanvas.getContext('2d');
+    ovCtx.setTransform((boardZoom || 1) * DPR, 0, 0, (boardZoom || 1) * DPR, boardPanX * DPR, boardPanY * DPR);
+  } else if (pdfPanes[targetSurf]) {
+    const els = getPaneEls(targetSurf);
+    ovCanvas = els.overlay; ovCtx = ovCanvas.getContext('2d');
+    const t = getPaneContentTransform(targetSurf);
+    ovCtx.setTransform(t.scale * DPR, 0, 0, t.scale * DPR, t.offX * DPR, t.offY * DPR);
+  } else {
+    ovCtx = overlayCtx; ovCanvas = overlayC;
+  }
+  clearCanvas(ovCtx, ovCanvas);
   const { angleDiff, displayStart, displayEnd } = compassArcFromAccumulated(compassDraw.startAngle, compassDraw.accumulated);
   // Centrul și raza sunt calculate în coordonate "ecran" (unde stă vizual
   // compasul) — canvas-ul de previzualizare are însă transformarea de
-  // conținut a fișei PDF aplicată (ca toate desenele de pe fișă), deci
+  // conținut a suprafeței țintă aplicată (ca toate desenele de acolo), deci
   // convertim înainte de desenare, altfel previzualizarea ar apărea într-un
   // loc complet greșit (sau invizibil).
-  const centerContent = geoScreenToContent({ x: st.x, y: st.y });
-  const radiusContent = geoScreenLengthToContent(st.radius);
-  overlayCtx.save();
-  overlayCtx.strokeStyle = color;
-  overlayCtx.lineWidth = (lastPenSize || 2) + 1;
-  overlayCtx.lineCap = 'round';
-  overlayCtx.beginPath();
+  const centerContent = geoScreenToContent({ x: st.x, y: st.y }, targetSurf);
+  const radiusContent = geoScreenLengthToContent(st.radius, targetSurf);
+  ovCtx.save();
+  ovCtx.strokeStyle = color;
+  ovCtx.lineWidth = (lastPenSize || 2) + 1;
+  ovCtx.lineCap = 'round';
+  ovCtx.beginPath();
   if (angleDiff >= 2 * Math.PI - 0.1) {
-    overlayCtx.arc(centerContent.x, centerContent.y, radiusContent, 0, 2 * Math.PI);
+    ovCtx.arc(centerContent.x, centerContent.y, radiusContent, 0, 2 * Math.PI);
   } else {
-    overlayCtx.arc(centerContent.x, centerContent.y, radiusContent, displayStart, displayEnd);
+    ovCtx.arc(centerContent.x, centerContent.y, radiusContent, displayStart, displayEnd);
   }
-  overlayCtx.stroke();
-  overlayCtx.restore();
+  ovCtx.stroke();
+  ovCtx.restore();
 
   const { arcLabel } = geoGroups.compass;
   const tipX = st.x + st.radius * Math.cos(st.angle);
@@ -10227,7 +10327,8 @@ function compassRenderLivePreview() {
 function compassFinalizeDraw() {
   if (!compassDraw) return;
   const st = geoGuides.compass;
-  const page = getCurrentPage();
+  const targetSurf = geoDetectSurfaceForScreenPoint({ x: st.x, y: st.y });
+  const page = getPageForSurface(targetSurf);
   const size = lastPenSize;
   const { angleDiff, displayStart, displayEnd } = compassArcFromAccumulated(compassDraw.startAngle, compassDraw.accumulated);
 
@@ -10237,10 +10338,11 @@ function compassFinalizeDraw() {
   if (angleDiff > 0.05) {
     const dir = compassDraw.accumulated >= 0 ? 1 : -1;
     // Centrul și raza sunt calculate în coordonate "ecran" (unde stă vizual
-    // compasul) — le convertim în coordonate de conținut PDF chiar înainte
-    // de stocare, ca desenul să apară exact la locul corect pe pagină.
-    const centerContent = geoScreenToContent({ x: st.x, y: st.y });
-    const radiusContent = geoScreenLengthToContent(st.radius);
+    // compasul) — le convertim în coordonate de conținut ale suprafeței
+    // țintă chiar înainte de stocare, ca desenul să apară exact la locul
+    // corect pe pagină.
+    const centerContent = geoScreenToContent({ x: st.x, y: st.y }, targetSurf);
+    const radiusContent = geoScreenLengthToContent(st.radius, targetSurf);
     if (angleDiff >= 2 * Math.PI - 0.1) {
       pushStroke(page, { type: 'circle', cx: centerContent.x, cy: centerContent.y, radius: radiusContent, color: color, size: size, startAngle: compassDraw.startAngle, dir });
       showToast('✓ Cerc complet desenat: raza ' + (st.radius / 50).toFixed(1) + ' cm');
@@ -10248,7 +10350,7 @@ function compassFinalizeDraw() {
       pushStroke(page, { type: 'arc', cx: centerContent.x, cy: centerContent.y, radius: radiusContent, startAngle: displayStart, endAngle: displayEnd, color: color, size: size, dir });
       showToast('✓ Arc desenat: ' + (angleDiff * 180 / Math.PI).toFixed(1) + '°  |  rază ' + (st.radius / 50).toFixed(1) + ' cm');
     }
-    redrawStrokes();
+    if (targetSurf === activeSurface) redrawStrokes();
     updateStatus();
   }
   compassDraw = null;
@@ -10556,15 +10658,17 @@ function finalizeProtractorArc(skipUsageRecord) {
   
   const finalAngleDiff = Math.abs(endAngle - startAngle);
   if (finalAngleDiff < 0.01) return;
-  
-  const page = getCurrentPage();
+
+  const targetSurf = geoDetectSurfaceForScreenPoint(geoGuideReferencePoint('protractor'));
+  const page = getPageForSurface(targetSurf);
 
   // Centrul și raza sunt calculate în coordonate "ecran" (unde stă vizual
-  // raportorul) — le convertim în coordonate de conținut PDF chiar înainte
-  // de stocare, ca arcul să apară exact la locul corect pe pagină. Unghiurile
-  // rămân neschimbate (nu sunt afectate de o scalare/translatare uniformă).
-  const centerContent = geoScreenToContent({ x: st.x, y: st.y });
-  const radiusContent = geoScreenLengthToContent(arcR);
+  // raportorul) — le convertim în coordonate de conținut ale suprafeței
+  // țintă chiar înainte de stocare, ca arcul să apară exact la locul corect
+  // pe pagină. Unghiurile rămân neschimbate (nu sunt afectate de o
+  // scalare/translatare uniformă).
+  const centerContent = geoScreenToContent({ x: st.x, y: st.y }, targetSurf);
+  const radiusContent = geoScreenLengthToContent(arcR, targetSurf);
 
   // Desenăm arcul
   pushStroke(page, { 
@@ -10582,12 +10686,12 @@ function finalizeProtractorArc(skipUsageRecord) {
   // Adăugăm eticheta cu valoarea unghiului
   const labelR = arcR + 16;
   const midRad = (st.arcAngle / 2) * Math.PI / 180;
-  const labelPos = geoScreenToContent(geoLocalToWorld(st, labelR * Math.cos(midRad), -labelR * Math.sin(midRad)));
+  const labelPos = geoScreenToContent(geoLocalToWorld(st, labelR * Math.cos(midRad), -labelR * Math.sin(midRad)), targetSurf);
   // Compensăm cu scala automată de potrivire a fișei (nu cu zoom-ul manual
   // al utilizatorului) — la fel ca la grosimea liniei — ca eticheta să aibă
   // implicit aceeași mărime ca pe tablă, dar să rămână scalabilă dacă
   // utilizatorul mărește manual fișa.
-  const protractorPane = pdfPanes[activeSurface];
+  const protractorPane = pdfPanes[targetSurf];
   const protractorScaleComp = protractorPane ? (protractorPane.baseScale || protractorPane.finalScale || 1) : 1;
   const labelFontSize = 16 / protractorScaleComp;
   pushStroke(page, {
@@ -10600,7 +10704,8 @@ function finalizeProtractorArc(skipUsageRecord) {
     fontSize: labelFontSize,
     textAlign: 'left'
   });
-  
+  if (targetSurf === activeSurface) redrawStrokes();
+
   showToast('✓ Arc construit: ' + Math.round(st.arcAngle) + '°');
   redrawStrokes();
   updateStatus();
@@ -10613,10 +10718,19 @@ function finalizeProtractorArc(skipUsageRecord) {
 function fitGeoGuideToViewport(name) {
   const st = geoGuides[name];
   let vw, vh, viewLeft, viewTop, zoom;
-  if (activeSurface === 'board') {
+  if (activeSurface === 'board' && !pdfSplitMode) {
     zoom = boardZoom || 1;
     vw = wrap.clientWidth / zoom; vh = wrap.clientHeight / zoom;
     viewLeft = -boardPanX / zoom; viewTop = -boardPanY / zoom;
+  } else if (activeSurface === 'board' && pdfSplitMode) {
+    // În mod split, instrumentul deschis pe tablă e tot relativ la ecran
+    // (ca să poată fi mutat liber între tablă și fișă) — centrăm pe zona
+    // vizibilă a tablei, în coordonate "workspace".
+    zoom = 1;
+    const wrapRect = wrap.getBoundingClientRect();
+    const wsRect = document.getElementById('workspace').getBoundingClientRect();
+    vw = wrapRect.width; vh = wrapRect.height;
+    viewLeft = wrapRect.left - wsRect.left; viewTop = wrapRect.top - wsRect.top;
   } else {
     // Peste o fișă PDF, instrumentele sunt relative la ECRAN, cu mărime
     // fixă (neafectată de zoom-ul fișei) — centrul se calculează pe zona
@@ -11096,7 +11210,12 @@ function confirmGeoSegBuild() {
   if (!geoSegBuild) return;
   const { kind, p0, p1, color: strokeColor, size, axis } = geoSegBuild;
   const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-  const page = getCurrentPage();
+  // Suprafața-țintă se detectează după poziția CURENTĂ pe ecran a
+  // instrumentului (p0), nu după suprafața activă la un moment dat anterior
+  // — esențial în modul split, unde instrumentul poate fi mutat liber între
+  // tablă și fișa PDF.
+  const targetSurf = geoDetectSurfaceForScreenPoint(p0);
+  const page = getPageForSurface(targetSurf);
   if (dist > 4 && page) {
     // Decalăm segmentul foarte puțin în afara riglei/echerului (pe direcția
     // "spre exterior" a muchiei folosite) — nu se mai suprapune exact cu
@@ -11109,7 +11228,7 @@ function confirmGeoSegBuild() {
     // Pentru cerneală/stocare, pe fișa PDF trebuie convertite în coordonate
     // de conținut, ca desenul să apară exact acolo unde e instrumentul, nu
     // "aiurea" pe pagină (vezi geoScreenToContent).
-    const c0 = geoScreenToContent(q0), c1 = geoScreenToContent(q1);
+    const c0 = geoScreenToContent(q0, targetSurf), c1 = geoScreenToContent(q1, targetSurf);
     const cmLen = (dist / PX_PER_CM).toFixed(1);
     // Segmentul NU mai apare instant — se desenează abia la finalul
     // animației, gradual, exact în ritmul vârfului creionului (vezi
@@ -11120,10 +11239,10 @@ function confirmGeoSegBuild() {
       } else {
         pushStroke(page, { points: [{ x: c0.x, y: c0.y }, { x: c1.x, y: c1.y }], color: strokeColor, size, erase: false, dashed: kind === 'dashed' });
       }
-      redrawStrokes();
+      if (targetSurf === activeSurface) redrawStrokes();
       updateStatus();
       showToast('✓ Segment desenat (' + cmLen + ' cm)');
-    }, c0, c1);
+    }, c0, c1, targetSurf);
   }
   cancelGeoSegBuild();
   redrawStrokes();
@@ -11138,7 +11257,28 @@ function confirmGeoSegBuild() {
 // folosite), nu chiar pe linia trasă — altfel creionul se suprapunea vizual
 // cu corpul instrumentului și părea că se mișcă "în interiorul" lui, nu
 // de-a lungul segmentului desenat.
-function animateGeoPencilDraw(p0, p1, normal, strokeColor, strokeSize, dashed, onComplete, contentP0, contentP1) {
+// Redesenează cerneala unei suprafețe anume (tablă sau o fișă PDF), cu
+// transformarea ei corectă aplicată, și întoarce contextul de canvas — la
+// fel ca redrawPdfPaneInk, dar generalizat și pentru tablă. Folosit când
+// instrumentul (în modul split) țintește o suprafață DIFERITĂ de cea
+// activă curent.
+function redrawInkForSurface(surf) {
+  if (surf === 'board') {
+    const bctx = boardDrawC.getContext('2d');
+    bctx.setTransform((boardZoom || 1) * DPR, 0, 0, (boardZoom || 1) * DPR, boardPanX * DPR, boardPanY * DPR);
+    clearCanvas(bctx, boardDrawC);
+    const page = pages[currentPageIdx];
+    if (page) page.strokes.forEach(s => drawStrokeOn(bctx, s));
+    return bctx;
+  }
+  if (pdfPanes[surf]) {
+    redrawPdfPaneInk(surf);
+    return getPaneEls(surf).draw.getContext('2d');
+  }
+  return ctx;
+}
+
+function animateGeoPencilDraw(p0, p1, normal, strokeColor, strokeSize, dashed, onComplete, contentP0, contentP1, targetSurf) {
   // p0/p1 sunt coordonate "ecran" (unde stă vizual instrumentul) — folosite
   // pentru poziția/unghiul creionașului animat. contentP0/contentP1 (dacă
   // sunt date — cazul fișei PDF) sunt coordonatele "de conținut" în care
@@ -11146,6 +11286,11 @@ function animateGeoPencilDraw(p0, p1, normal, strokeColor, strokeSize, dashed, o
   // acolo unde e instrumentul pe ecran, nu decalată. Pe tablă, cele două
   // coincid (nu sunt date explicit, se folosesc p0/p1 și pentru cerneală).
   const c0 = contentP0 || p0, c1 = contentP1 || p1;
+  // Suprafața pe care se desenează efectiv cerneala — de obicei cea activă
+  // curent, dar în modul split poate fi ALTA (instrumentul a fost mutat pe
+  // ea), caz în care desenăm direct pe canvas-ul EI, nu pe cel activ.
+  const surf = targetSurf || activeSurface;
+  const isActiveTarget = (surf === activeSurface);
   // Direcția de deplasare (de-a lungul segmentului) e diferită de unghiul de
   // ținere al creionului: un creion real se ține înclinat cam la 135° față
   // de linia trasă, nu paralel cu ea. Sunt două variante posibile (+135°
@@ -11190,23 +11335,22 @@ function animateGeoPencilDraw(p0, p1, normal, strokeColor, strokeSize, dashed, o
     const targetX = p0.x + (p1.x - p0.x) * t;
     const targetY = p0.y + (p1.y - p0.y) * t;
     // Cerneala se desenează în coordonate de CONȚINUT (c0→c1), ca să apară
-    // corect plasată pe pagina PDF — canvas-ul are deja transformarea de
-    // conținut aplicată (scală + panoramare), la fel ca toate celelalte
-    // desene de pe fișă.
+    // corect plasată pe pagina țintă — canvas-ul respectiv are deja (sau
+    // primește chiar aici) transformarea lui de conținut aplicată.
     const targetContentX = c0.x + (c1.x - c0.x) * t;
     const targetContentY = c0.y + (c1.y - c0.y) * t;
-    clearCanvas(ctx, drawC);
-    redrawStrokes();
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(c0.x, c0.y);
-    ctx.lineTo(targetContentX, targetContentY);
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
-    if (dashed) ctx.setLineDash([Math.max(4, strokeSize * 2.5), Math.max(3, strokeSize * 1.8)]);
-    ctx.stroke();
-    ctx.restore();
+    const inkCtx = isActiveTarget ? ctx : redrawInkForSurface(surf);
+    if (isActiveTarget) { clearCanvas(ctx, drawC); redrawStrokes(); }
+    inkCtx.save();
+    inkCtx.beginPath();
+    inkCtx.moveTo(c0.x, c0.y);
+    inkCtx.lineTo(targetContentX, targetContentY);
+    inkCtx.strokeStyle = strokeColor;
+    inkCtx.lineWidth = lineWidth;
+    inkCtx.lineCap = 'round';
+    if (dashed) inkCtx.setLineDash([Math.max(4, strokeSize * 2.5), Math.max(3, strokeSize * 1.8)]);
+    inkCtx.stroke();
+    inkCtx.restore();
 
     const x = targetX - tipDx, y = targetY - tipDy;
     pencil.setAttribute('transform', `translate(${x},${y}) rotate(${angle})`);
@@ -11214,7 +11358,7 @@ function animateGeoPencilDraw(p0, p1, normal, strokeColor, strokeSize, dashed, o
       requestAnimationFrame(step);
     } else {
       if (pencil.parentNode) pencil.parentNode.removeChild(pencil);
-      clearCanvas(ctx, drawC);
+      if (isActiveTarget) { clearCanvas(ctx, drawC); } else { redrawInkForSurface(surf); }
       if (onComplete) onComplete();
     }
   }
