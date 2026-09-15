@@ -114,6 +114,7 @@ const UI_TEXT = {
   'Plimbă tabla cu degetul (suprafață infinită)': 'Pan the board with your finger (infinite surface)',
   'Revino la poziția inițială a tablei': 'Return to the board\'s starting position',
   'Șterge doar ce ai scris pe fișa PDF': 'Clear only what you wrote on the PDF sheet',
+  'Exportă fișa PDF cu adnotațiile tale, ca fișier nou': 'Export the PDF sheet with your annotations, as a new file',
   'Închide': 'Close',
   'ex: x^2 - 3x + 2': 'e.g. x^2 - 3x + 2',
   'Scrie text...': 'Type text...',
@@ -268,6 +269,12 @@ function applyStaticUI() {
   setBtnText('btn-help', 'Ajutor', 'Help');
   setBtnText('btn-license', 'Licență', 'License');
   setElText('calc-header-title', '🧮 Calculator', '🧮 Calculator');
+  setElText('text-header-title', '✎ Text', '✎ Text');
+  setElText('sessions-header-title', '💾 Sesiuni salvate', '💾 Saved sessions');
+  setBtnText('sessions-save-btn', '+ Salvează', '+ Save');
+  setElText('sessions-empty', 'Nicio sesiune salvată încă.', 'No saved sessions yet.');
+  const sessionsNameInput = document.getElementById('sessions-name-input');
+  if (sessionsNameInput) sessionsNameInput.placeholder = LANG === 'en' ? 'New session name...' : 'Nume sesiune nouă...';
   setBtnText('calc-insert', '↳ Inserează pe tablă', '↳ Insert on the board');
 
   setElText('gros-label', 'Gros.', 'Thick.');
@@ -365,7 +372,10 @@ function clearCanvas(cx, canvas) {
 // (finalScale, de obicei diferit de 1) ar face ca aceeași grosime numerică
 // să apară vizual diferit față de tablă (unde scala de bază e 1). Compensăm
 // împărțind grosimea cu finalScale înainte de a o trimite mai departe, ca
-// rezultatul pe ecran să fie identic pe ambele suprafețe.
+// rezultatul pe ecran să fie identic pe ambele suprafețe. NU compensăm și
+// "font" aici — unele etichete (raportor, unghi) își calculează deja
+// explicit propria compensare la creare (stocată direct pe stroke); a
+// compensa din nou aici ar dubla împărțirea, făcând textul mult prea mic.
 function makeWidthScaledContext(cx, scale) {
   if (!scale || scale === 1) return cx;
   return new Proxy(cx, {
@@ -2346,7 +2356,7 @@ function drawStrokeOn(c, stroke) {
     c.strokeStyle = axisColor;
     c.lineWidth = 1;
     c.fillStyle = axisColor;
-    c.font = '12px system-ui, sans-serif';
+    c.font = (stroke.tickFontSize || 12) + 'px system-ui, sans-serif';
     (stroke.xTicks || []).forEach(t => {
       c.beginPath();
       c.moveTo(t.x, t.y - 4);
@@ -2542,7 +2552,7 @@ function drawStrokeOn(c, stroke) {
     const midA = (startA + endA) / 2;
     const labelR = r + 14;
     const deg = (angleDiff * 180 / Math.PI);
-    c.font = '11px sans-serif';
+    c.font = 'bold ' + (stroke.labelFontSize || 16) + 'px sans-serif';
     c.fillStyle = stroke.color;
     c.textAlign = 'center';
     c.textBaseline = 'bottom';
@@ -4439,6 +4449,31 @@ function handlePointerMove(e) {
     const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
     const icon = tool === 'dashed' ? '┄' : (tool === 'arrow' ? '→' : '—');
     showMathInfo(icon + (LANG === 'en' ? ' Length: ' : ' Lungime: ') + (segLen / PX_PER_CM).toFixed(1) + ' cm');
+  } else if (tool === 'pen' || tool === 'erase') {
+    // Optimizare de performanță: NU ștergem și redesenăm tot canvas-ul (toate
+    // stroke-urile paginii + tot traseul de până acum) la fiecare mișcare —
+    // costă din ce în ce mai mult pe pagini cu multe desene sau la trasee
+    // lungi (ar redesena de zeci de ori aceleași puncte). Cerneala existentă
+    // e deja pe canvas dinaintea începerii acestui traseu — desenăm doar
+    // segmentul NOU (de la ultimul punct la cel curent), direct peste ea.
+    const prevPoint = currentStroke[currentStroke.length - 1];
+    const newPoint = snapToGuides(p);
+    currentStroke.push(newPoint);
+    const pane = pdfPanes[activeSurface];
+    const previewCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
+    previewCtx.save();
+    previewCtx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
+    previewCtx.strokeStyle = tool === 'erase' ? 'rgba(0,0,0,1)' : color;
+    // "size" brut (nu "effSize", deja compensat manual) — previewCtx e
+    // contextul ÎNFĂȘURAT, care compensează el însuși grosimea liniei pentru
+    // scala fișei PDF; folosirea lui effSize AICI ar compensa de două ori.
+    previewCtx.lineWidth = size;
+    previewCtx.lineCap = previewCtx.lineJoin = 'round';
+    previewCtx.beginPath();
+    previewCtx.moveTo(prevPoint.x, prevPoint.y);
+    previewCtx.lineTo(newPoint.x, newPoint.y);
+    previewCtx.stroke();
+    previewCtx.restore();
   } else {
     currentStroke.push(tool === 'pen' ? snapToGuides(p) : p);
     clearCanvas(ctx, drawC);
@@ -4671,13 +4706,20 @@ function handlePointerUp(e) {
     if (diff > Math.PI) diff = 2 * Math.PI - diff;
     
     if (diff > 0.05) {
+      // Compensăm explicit dimensiunea fontului cu scala de bază a fișei
+      // PDF (dacă desenăm peste una) — la fel ca la eticheta raportorului —
+      // ca unghiul să aibă vizual aceeași mărime ca pe tablă, indiferent de
+      // zoom-ul fișei.
+      const anglePane = pdfPanes[activeSurface];
+      const angleScaleComp = anglePane ? (anglePane.baseScale || anglePane.finalScale || 1) : 1;
       pushStroke(page, {
         type: 'angle',
         vertex: { x: mathStartPoint.x, y: mathStartPoint.y },
         ray1: { x: ray1.x, y: ray1.y },
         ray2: { x: ray2.x, y: ray2.y },
         color: color,
-        size: size
+        size: size,
+        labelFontSize: 16 / angleScaleComp
       });
       showToast((LANG === 'en' ? '✓ Angle drawn: ' : '✓ Unghi desenat: ') + (diff * 180 / Math.PI).toFixed(1) + '°');
     }
@@ -4803,6 +4845,19 @@ let boardCtrlPanActive = false;
 // simultană a întregii table), independent de modul "Deget" (panoramare).
 let boardTouchPts = new Map();
 let boardPinchLastDist = null, boardPinchLastMid = null;
+// Adevărat doar cât timp gestul curent (de la primul deget jos, până când
+// se ridică toate) A AJUNS să fie un pinch cu 2 degete la un moment dat —
+// distinge acest caz de desenul normal cu UN singur deget, care nu trebuie
+// tratat la fel la ridicare (vezi endBoardPanDrag).
+let boardWasPinching = false;
+// Detecția tap-ului cu 2 degete (= undo) — urmărește gestul curent de 2
+// degete: momentul de pornire, pozițiile inițiale ale celor două degete, și
+// dacă a existat vreo mișcare semnificativă între timp (invalidând tap-ul,
+// devenind un pinch/panoramare normală). Util mai ales pe o tablă
+// interactivă, când mâinile sunt ocupate cu stylus-ul.
+let boardTwoFingerTapState = null; // { startTime, p1, p2, moved } sau null
+const TWO_FINGER_TAP_MAX_MS = 400;
+const TWO_FINGER_TAP_MAX_MOVE = 14; // px
 // Id-ul pointerului stylus (pen) activ, cât timp desenează — folosit pentru
 // a ignora atingerile noi cu degetul apărute în timp ce se scrie cu
 // stylus-ul (foarte probabil palma sprijinită pe ecran) — relevant mai ales
@@ -4847,6 +4902,7 @@ boardDrawC.addEventListener('pointerdown', function(e) {
       // Al doilea deget atinge tabla — pornim pinch (zoom + panoramare),
       // anulând orice linie începută cu primul deget, ca gestul cu 2
       // degete să nu lase o urmă nedorită pe desen.
+      boardWasPinching = true;
       boardPanDragId = null;
       if (drawing) {
         drawing = false;
@@ -4857,6 +4913,7 @@ boardDrawC.addEventListener('pointerdown', function(e) {
       const pts = Array.from(boardTouchPts.values());
       boardPinchLastDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       boardPinchLastMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      boardTwoFingerTapState = { startTime: Date.now(), p1: { ...pts[0] }, p2: { ...pts[1] }, moved: false };
       e.preventDefault();
       return;
     }
@@ -4889,6 +4946,11 @@ boardDrawC.addEventListener('pointermove', function(e) {
       const pts = Array.from(boardTouchPts.values());
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      if (boardTwoFingerTapState && !boardTwoFingerTapState.moved) {
+        const d1 = Math.hypot(pts[0].x - boardTwoFingerTapState.p1.x, pts[0].y - boardTwoFingerTapState.p1.y);
+        const d2 = Math.hypot(pts[1].x - boardTwoFingerTapState.p2.x, pts[1].y - boardTwoFingerTapState.p2.y);
+        if (d1 > TWO_FINGER_TAP_MAX_MOVE || d2 > TWO_FINGER_TAP_MAX_MOVE) boardTwoFingerTapState.moved = true;
+      }
       if (boardPinchLastDist != null) {
         const factor = dist / boardPinchLastDist;
         // Zoom centrat pe mijlocul curent al celor două degete — dacă
@@ -4935,9 +4997,29 @@ function endBoardPanDrag(e) {
   if (e.pointerType === 'touch') {
     boardTouchPts.delete(e.pointerId);
     if (boardTouchPts.size < 2) { boardPinchLastDist = null; boardPinchLastMid = null; }
-    if (boardTouchPts.size === 0 && boardPanDragId === null && !boardPanMode) {
-      // gestul cu 2 degete s-a terminat complet, fără alt mod activ
-      return;
+    if (boardTouchPts.size === 0) {
+      if (boardWasPinching) {
+        // Gestul curent A FOST un pinch cu 2 degete (chiar dacă acum a mai
+        // rămas doar unul, apoi zero) — orice desen fusese deja anulat la
+        // pornirea pinch-ului, deci NU mai apelăm handlePointerUp acum (nu
+        // exista niciun stroke de finalizat).
+        boardWasPinching = false;
+        // Dacă gestul a fost scurt și fără nicio mișcare semnificativă a
+        // degetelor — un "tap" cu 2 degete, nu un pinch/panoramare reală —
+        // îl tratăm ca scurtătură pentru undo. Util mai ales cu o mână
+        // ocupată de stylus: un tap rapid cu 2 degete de pe cealaltă mână
+        // anulează ultima acțiune, fără să mai cauți butonul din bară.
+        if (boardTwoFingerTapState && !boardTwoFingerTapState.moved &&
+            (Date.now() - boardTwoFingerTapState.startTime) < TWO_FINGER_TAP_MAX_MS) {
+          document.getElementById('btn-undo').click();
+        }
+        boardTwoFingerTapState = null;
+        if (boardPanDragId === null && !boardPanMode) return;
+      }
+      // Altfel, a fost desen normal cu UN singur deget — continuăm mai jos,
+      // spre handlePointerUp, ca stroke-ul să fie finalizat și salvat corect
+      // (altfel ar rămâne doar vizual, pe stratul temporar, până la
+      // următoarea redesenare — dispărând complet la al doilea stroke).
     }
   }
   if (boardCtrlPanActive && boardPanDragId === e.pointerId) {
@@ -5836,6 +5918,33 @@ const txtAlignRight = document.getElementById('txt-align-right');
 const txtColorPicker = document.getElementById('txt-color-pick');
 const txtColorPalette = document.getElementById('txt-color-palette');
 
+// Fereastra de text poate fi deplasată trăgând de antet, la fel ca
+// fereastra calculatorului — utilă mai ales dacă bara de instrumente sau
+// textul scris ajung să acopere exact zona în care vrei să continui să
+// scrii sau să vezi desenul de dedesubt.
+(function() {
+  const header = textOverlay.querySelector('.text-drag-header');
+  let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+  header.addEventListener('pointerdown', e => {
+    dragging = true;
+    const rect = textOverlay.getBoundingClientRect();
+    origLeft = rect.left; origTop = rect.top;
+    startX = e.clientX; startY = e.clientY;
+    textOverlay.style.left = origLeft + 'px';
+    textOverlay.style.top = origTop + 'px';
+    try { header.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  header.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    textOverlay.style.left = Math.max(0, origLeft + (e.clientX - startX)) + 'px';
+    textOverlay.style.top = Math.max(0, origTop + (e.clientY - startY)) + 'px';
+  });
+  function endDrag() { dragging = false; }
+  header.addEventListener('pointerup', endDrag);
+  header.addEventListener('pointercancel', endDrag);
+})();
+
 let txtBold = false, txtItalic = false, txtAlign = 'left';
 let txtCanvasX = 0, txtCanvasY = 0;
 let editingStrokeIndex = null;
@@ -6422,6 +6531,12 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   if (!(xMax > xMin)) throw new Error(LANG === 'en' ? 'The x interval is invalid.' : 'Intervalul de x este invalid.');
 
   const rect = drawC.getBoundingClientRect();
+  // Compensarea de scală pentru fișa PDF (dacă desenăm peste una) — folosită
+  // pentru toate elementele de text ale graficului (cifrele de pe axe,
+  // eticheta formulei), ca să aibă vizual aceeași mărime ca pe tablă,
+  // indiferent de zoom-ul fișei.
+  const fnPane = pdfPanes[activeSurface];
+  const fnScaleComp = fnPane ? (fnPane.baseScale || fnPane.finalScale || 1) : 1;
   // Măsură defensivă: dacă dreptunghiul suprafeței active vine cu
   // dimensiune zero sau nerezonabil de mică (ex. un canvas rămas ascuns
   // dintr-un mod anterior, nesincronizat încă), revenim la dimensiunea
@@ -6567,7 +6682,11 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     axisColor: '#7a7a7a',
     xAxis: [toCanvas(xMin, oxY), toCanvas(xMax, oxY)],
     yAxis: [toCanvas(oyX, yMin), toCanvas(oyX, yMax)],
-    xTicks, yTicks, extremes
+    xTicks, yTicks, extremes,
+    // Dimensiunea fontului diviziunilor, compensată explicit cu scala de
+    // bază a fișei PDF (dacă desenăm peste una) — ca cifrele de pe axe să
+    // aibă vizual aceeași mărime ca pe tablă, indiferent de zoom-ul fișei.
+    tickFontSize: 12 / fnScaleComp
   };
 
   pushStroke(page, stroke);
@@ -6578,15 +6697,16 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   // orizontală, dacă expresia conține \frac{}{}.
   const labelPos = canvasPxToContent(marginX, H - marginY + 30);
   const labelParts = buildMathLabelParts(rawExpr);
+  const labelFs = 20 / fnScaleComp;
   pushStroke(page, {
     type: 'mathlabel',
     prefix: 'f(x) = ',
     parts: labelParts,
     x: labelPos.x,
     y: labelPos.y,
-    font: 'bold 20px sans-serif',
+    font: 'bold ' + labelFs + 'px sans-serif',
     color: strokeColor,
-    fontSize: 20
+    fontSize: labelFs
   });
 
   // Selectăm implicit graficul (nu și eticheta), gata de redimensionat cu
@@ -9476,6 +9596,81 @@ document.getElementById('pdf-clear-ink-btn').addEventListener('click', async () 
   }
 });
 
+// Exportă fișa PDF încărcată ÎMPREUNĂ cu adnotațiile scrise peste ea, ca un
+// fișier PDF nou, descărcabil — util pentru a trimite mai departe o fișă
+// rezolvată/corectată. Fișa originală (pdfDoc) nu e niciodată modificată;
+// se generează un document NOU, separat.
+document.getElementById('pdf-export-btn').addEventListener('click', async () => {
+  if (!pdfDoc || !pdfTotalPages) return;
+  const btn = document.getElementById('pdf-export-btn');
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i>';
+  btn.disabled = true;
+  try {
+    const pane = pdfPanes.top;
+    const { jsPDF } = window.jspdf;
+    // Scală fixă de export (calitate bună de tipar), independentă de
+    // zoom-ul curent al ferestrei — ca exportul să arate la fel indiferent
+    // la ce zoom lucrai când ai apăsat butonul.
+    const EXPORT_SCALE = 2.0;
+    let doc = null;
+    for (let pageNum = 1; pageNum <= pdfTotalPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: EXPORT_SCALE });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const pageCtx = canvas.getContext('2d');
+      await page.render({ canvasContext: pageCtx, viewport }).promise;
+
+      // Adnotațiile sunt stocate în coordonate "PDF nativ" (scale 1.0) —
+      // le desenăm peste bitmap-ul paginii, scalate la EXPORT_SCALE.
+      pageCtx.save();
+      pageCtx.scale(EXPORT_SCALE, EXPORT_SCALE);
+      const pageData = pane.pagesData ? pane.pagesData[pageNum] : null;
+      if (pageData) {
+        (pageData.images || []).forEach(imgData => {
+          if (imgData.img) pageCtx.drawImage(imgData.img, imgData.x, imgData.y, imgData.w, imgData.h);
+        });
+        // Grosimea liniei se compensează la fel ca la afișarea pe ecran
+        // (împărțită la scala de bază a fișei) — fonturile etichetelor sunt
+        // deja compensate explicit la momentul creării lor.
+        const drawCtx = makeWidthScaledContext(pageCtx, 1 / (pane.baseScale || pane.finalScale || 1));
+        (pageData.strokes || []).forEach(s => drawStrokeOn(drawCtx, s));
+      }
+      pageCtx.restore();
+
+      // JPEG nu suportă transparență — orice pixel transparent (ex. o zonă
+      // ștearsă cu radiera, care devine transparentă, nu albă) s-ar converti
+      // implicit în NEGRU la export. Compunem totul peste un fundal alb opac
+      // înainte de a converti în JPEG, ca zonele șterse să arate corect albe.
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = canvas.width;
+      finalCanvas.height = canvas.height;
+      const finalCtx = finalCanvas.getContext('2d');
+      finalCtx.fillStyle = '#ffffff';
+      finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+      finalCtx.drawImage(canvas, 0, 0);
+
+      const dataUrl = finalCanvas.toDataURL('image/jpeg', 0.92);
+      const pdfW = viewport.width / EXPORT_SCALE, pdfH = viewport.height / EXPORT_SCALE;
+      if (!doc) {
+        doc = new jsPDF(pdfW > pdfH ? 'l' : 'p', 'pt', [pdfW, pdfH]);
+      } else {
+        doc.addPage([pdfW, pdfH], pdfW > pdfH ? 'l' : 'p');
+      }
+      doc.addImage(dataUrl, 'JPEG', 0, 0, pdfW, pdfH);
+    }
+    doc.save('fisa-adnotata.pdf');
+    showToast(LANG === 'en' ? '✓ Annotated PDF exported' : '✓ Fișă PDF adnotată exportată');
+  } catch (err) {
+    showToast(trMsg('⚠ Fișier invalid sau corupt.'), 4000);
+  } finally {
+    btn.innerHTML = origHtml;
+    btn.disabled = false;
+  }
+});
+
 document.getElementById('btn-pdf').onclick = () => {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF('l', 'px', [bgC.width / DPR, bgC.height / DPR]);
@@ -9734,6 +9929,154 @@ document.getElementById('session-file-input').onchange = e => {
   loadSession(e.target.files[0]);
   e.target.value = '';
 };
+
+// ====================================================================
+// SESIUNI MULTIPLE SALVATE — spre deosebire de autosalvare (un singur
+// "ultima stare") sau exportul/importul de fișiere .wbs (necesită
+// gestionarea manuală a fișierelor), acestea sunt "sloturi" numite,
+// păstrate direct în browser, ușor de văzut și încărcat dintr-o listă.
+// ====================================================================
+const SAVED_SESSIONS_KEY = 'wb-saved-sessions-v1';
+
+function getSavedSessionsList() {
+  try {
+    const raw = localStorage.getItem(SAVED_SESSIONS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function setSavedSessionsList(list) {
+  localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify(list));
+}
+
+async function saveNamedSession(name) {
+  const data = await buildSessionData();
+  const list = getSavedSessionsList();
+  const entry = { id: 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), name, savedAt: Date.now(), data };
+  list.push(entry);
+  setSavedSessionsList(list); // poate arunca eroare (spațiu depășit) — tratată de apelant
+}
+
+function deleteNamedSession(id) {
+  const list = getSavedSessionsList().filter(s => s.id !== id);
+  setSavedSessionsList(list);
+}
+
+function formatSessionDate(ts) {
+  try { return new Date(ts).toLocaleString(LANG === 'en' ? 'en-GB' : 'ro-RO', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  catch (e) { return ''; }
+}
+
+function renderSessionsList() {
+  const list = getSavedSessionsList().slice().sort((a, b) => b.savedAt - a.savedAt);
+  const container = document.getElementById('sessions-list');
+  const emptyEl = document.getElementById('sessions-empty');
+  container.querySelectorAll('.session-item').forEach(el => el.remove());
+  if (list.length === 0) {
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  list.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'session-item';
+    const info = document.createElement('div');
+    info.className = 'session-item-info';
+    info.innerHTML = `<div class="session-item-name"></div><div class="session-item-date"></div>`;
+    info.querySelector('.session-item-name').textContent = entry.name;
+    info.querySelector('.session-item-date').textContent = formatSessionDate(entry.savedAt);
+    info.title = LANG === 'en' ? 'Tap to load this session' : 'Atinge pentru a încărca această sesiune';
+    info.addEventListener('click', async () => {
+      const msg = LANG === 'en'
+        ? `Load "${entry.name}"? Anything unsaved in the current session will be lost.`
+        : `Încarci "${entry.name}"? Ce nu ai salvat din sesiunea curentă se va pierde.`;
+      if (await customConfirm(msg)) {
+        try {
+          await restoreSessionData(entry.data);
+          closeSessionsOverlay();
+          showToast(LANG === 'en' ? '✓ Session loaded!' : '✓ Sesiune încărcată!');
+        } catch (e) {
+          showToast(trMsg('⚠ Fișier invalid sau corupt.'), 4000);
+        }
+      }
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'session-del-btn';
+    delBtn.textContent = '🗑';
+    delBtn.title = LANG === 'en' ? 'Delete this saved session' : 'Șterge această sesiune salvată';
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const msg = LANG === 'en' ? `Delete "${entry.name}"? This cannot be undone.` : `Ștergi "${entry.name}"? Nu se poate anula.`;
+      if (await customConfirm(msg)) {
+        deleteNamedSession(entry.id);
+        renderSessionsList();
+      }
+    });
+    row.appendChild(info);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function openSessionsOverlay() {
+  renderSessionsList();
+  document.getElementById('sessions-overlay').classList.add('show');
+  document.getElementById('sessions-name-input').value = '';
+}
+function closeSessionsOverlay() {
+  document.getElementById('sessions-overlay').classList.remove('show');
+}
+document.getElementById('btn-sessions-list').onclick = openSessionsOverlay;
+document.getElementById('sessions-close').onclick = closeSessionsOverlay;
+document.getElementById('sessions-save-btn').onclick = async () => {
+  const input = document.getElementById('sessions-name-input');
+  let name = input.value.trim();
+  if (!name) name = LANG === 'en' ? 'Untitled session' : 'Sesiune fără nume';
+  try {
+    await saveNamedSession(name);
+    input.value = '';
+    renderSessionsList();
+    showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiune salvată!');
+  } catch (e) {
+    // Cel mai probabil spațiul de stocare al browserului e depășit (sesiuni
+    // cu multe imagini mari) — sugerăm ștergerea unor sesiuni vechi.
+    showToast(LANG === 'en'
+      ? '⚠ Not enough storage space. Delete an old saved session and try again.'
+      : '⚠ Spațiu de stocare insuficient. Șterge o sesiune salvată mai veche și încearcă din nou.', 5000);
+  }
+};
+document.getElementById('sessions-name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('sessions-save-btn').click();
+});
+
+// Fereastra de sesiuni poate fi deplasată trăgând de antet, la fel ca
+// celelalte ferestre flotante (calculator, text).
+(function() {
+  const overlay = document.getElementById('sessions-overlay');
+  const header = overlay.querySelector('.sessions-header');
+  let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+  header.addEventListener('pointerdown', e => {
+    if (e.target.closest('#sessions-close')) return;
+    dragging = true;
+    const rect = overlay.getBoundingClientRect();
+    origLeft = rect.left; origTop = rect.top;
+    startX = e.clientX; startY = e.clientY;
+    overlay.style.left = origLeft + 'px';
+    overlay.style.top = origTop + 'px';
+    overlay.style.transform = 'none';
+    try { header.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  header.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    overlay.style.left = Math.max(0, origLeft + (e.clientX - startX)) + 'px';
+    overlay.style.top = Math.max(0, origTop + (e.clientY - startY)) + 'px';
+  });
+  function endDrag() { dragging = false; }
+  header.addEventListener('pointerup', endDrag);
+  header.addEventListener('pointercancel', endDrag);
+})();
 
 // ================================================================
 // KEYBOARD SHORTCUTS
@@ -11726,7 +12069,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
 </ul>
 
-<p><b>Zoom pe tablă</b> — cu două degete (pinch), tot ce e pe tablă se mărește sau se micșorează, centrat exact pe mijlocul dintre degete (dacă micșorezi ținând degetele în stânga-sus, totul se strânge spre acel punct). Pe calculator: <b>Ctrl + click și trage</b> plimbă tabla, iar <b>Ctrl + rotița mouse-ului</b> (sau pinch pe trackpad) mărește/micșorează, centrat pe poziția cursorului. Butonul de recentrare readuce tabla la poziția și mărimea inițială.</p>
+<p><b>Zoom pe tablă</b> — cu două degete (pinch), tot ce e pe tablă se mărește sau se micșorează, centrat exact pe mijlocul dintre degete (dacă micșorezi ținând degetele în stânga-sus, totul se strânge spre acel punct). Pe calculator: <b>Ctrl + click și trage</b> plimbă tabla, iar <b>Ctrl + rotița mouse-ului</b> (sau pinch pe trackpad) mărește/micșorează, centrat pe poziția cursorului. Butonul de recentrare readuce tabla la poziția și mărimea inițială. Un <b>tap rapid cu 2 degete</b> (fără nicio mișcare) anulează ultima acțiune (undo) — util când o mână e ocupată cu stylus-ul.</p>
 
 <h4>Matematică</h4>
 <ul>
@@ -11767,7 +12110,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 2 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 2 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă. Butonul de descărcare (⬇) din bara fișei exportă un fișier PDF nou, cu fișa originală și tot ce ai scris peste ea îmbinate într-un singur document — util pentru a trimite mai departe o fișă rezolvată; fișa încărcată în aplicație nu se modifică niciodată.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
@@ -11786,6 +12129,9 @@ const HELP_CONTENT_HTML = `
 
 <h4>Calculator</h4>
 <p>Butonul de calculator (🧮) deschide o fereastră flotantă, care poate fi mutată trăgând de antet. Suportă expresii complete, cu precedența corectă a operațiilor (înmulțirea/împărțirea înaintea adunării/scăderii), constantele π și e, procent (aplicat corect la adunare/scădere, ca procent din operandul anterior) și funcțiile sin/cos/tan/cot (în grade) și radical — apăsate ca prefix matematic normal (ex. „√2+√3", cu paranteza închisă automat la operator sau la egal). Butonul verde „Inserează pe tablă" adaugă calculul curent ca text în centrul zonei vizibile și îl selectează automat, gata de mutat sau redimensionat.</p>
+
+<h4>Sesiuni salvate</h4>
+<p>Pe lângă salvarea/încărcarea unui fișier <code>.wbs</code> de pe calculator (butoanele cu dischetă și folder) și salvarea automată periodică (care păstrează doar ultima stare, pentru cazul unei închideri accidentale), butonul cu listă (📋) deschide o fereastră cu <b>sesiuni multiple, numite</b>, păstrate direct în browser — scrii un nume, apeși „+ Salvează", și rămâne acolo separat de celelalte, oricând poți reveni la ea dintr-o listă, fără să suprascrii nimic. Utilă pentru a păstra mai multe lecții/clase separat, fiecare cu numele ei.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -11832,7 +12178,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
 </ul>
 
-<p><b>Board zoom</b> — with two fingers (pinch), everything on the board zooms in or out, centered exactly on the midpoint between your fingers (if you pinch to zoom out while your fingers are at the top-left, everything shrinks toward that point). On a computer: <b>Ctrl + click and drag</b> pans the board, and <b>Ctrl + mouse wheel</b> (or a trackpad pinch) zooms in/out, centered on the cursor position. The recenter button brings the board back to its starting position and zoom level.</p>
+<p><b>Board zoom</b> — with two fingers (pinch), everything on the board zooms in or out, centered exactly on the midpoint between your fingers (if you pinch to zoom out while your fingers are at the top-left, everything shrinks toward that point). On a computer: <b>Ctrl + click and drag</b> pans the board, and <b>Ctrl + mouse wheel</b> (or a trackpad pinch) zooms in/out, centered on the cursor position. The recenter button brings the board back to its starting position and zoom level. A quick <b>2-finger tap</b> (no movement) undoes the last action — handy when one hand is holding the stylus.</p>
 
 <h4>Math</h4>
 <ul>
@@ -11873,7 +12219,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the pencil thickness automatically set to 2 and the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. The color switches automatically between white (on the board) and red (on the sheet) every time you move from one surface to the other — but if you manually pick a color from the panel, it stays fixed on both surfaces instead of switching automatically. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below. In split mode, you can freely drag the ruler/set square/protractor/compass from one area to the other — the resulting drawing always goes onto whichever surface the tool is actually over at that moment, regardless of where it was first opened. There, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet (including with the geometric tools) stays attached to the PDF content (keeps its position when panning, scales with zoom), and the line thickness stays visually identical to the board's.</li>
+  <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the pencil thickness automatically set to 2 and the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. The color switches automatically between white (on the board) and red (on the sheet) every time you move from one surface to the other — but if you manually pick a color from the panel, it stays fixed on both surfaces instead of switching automatically. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below. In split mode, you can freely drag the ruler/set square/protractor/compass from one area to the other — the resulting drawing always goes onto whichever surface the tool is actually over at that moment, regardless of where it was first opened. There, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet (including with the geometric tools) stays attached to the PDF content (keeps its position when panning, scales with zoom), and the line thickness stays visually identical to the board's. The download button (⬇) in the sheet's toolbar exports a new PDF file, combining the original sheet and everything you wrote over it into a single document — handy for sending along a solved worksheet; the sheet loaded in the app is never modified.</li>
 </ul>
 
 <h4>File and history</h4>
@@ -11892,6 +12238,9 @@ const HELP_CONTENT_HTML_EN = `
 
 <h4>Calculator</h4>
 <p>The calculator button (🧮) opens a floating window, which can be moved by dragging its header. It supports full expressions with correct operator precedence (multiplication/division before addition/subtraction), the constants π and e, percent (correctly applied for addition/subtraction, as a percentage of the previous operand), and the sin/cos/tan/cot (in degrees) and square root functions — pressed as a normal math prefix (e.g. "√2+√3", with the parenthesis closing automatically at the next operator or at equals). The green "Insert on board" button adds the current calculation as text in the center of the visible area and selects it automatically, ready to move or resize.</p>
+
+<h4>Saved sessions</h4>
+<p>Besides saving/loading a <code>.wbs</code> file to/from your computer (the floppy disk and folder buttons) and the periodic autosave (which only keeps the latest state, for an accidental close), the list button (📋) opens a window with <b>multiple, named sessions</b> kept right in the browser — type a name, tap "+ Save", and it stays there separately from the others; you can come back to it anytime from a list, without overwriting anything. Handy for keeping several lessons/classes separate, each under its own name.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `

@@ -57,7 +57,7 @@
     .pdf-pane.has-doc .pdf-pane-empty { display: none; }
     .pdf-pane-divider { height: 20px; flex-shrink: 0; background: #3a3a42; cursor: row-resize; touch-action: none; position: relative; }
     .pdf-pane-divider::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 3px; background: #6a6a75; border-radius: 2px; transform: translate(-50%, -50%); }
-    .pdf-pane-controls { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; background: rgba(20,20,24,0.82); padding: 4px 6px; border-radius: 10px; z-index: 6; transition: opacity 0.35s ease, transform 0.35s ease; }
+    .pdf-pane-controls { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; background: rgba(20,20,24,0.82); padding: 4px 6px; border-radius: 10px; z-index: 6; transition: opacity 0.35s ease, transform 0.35s ease; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 16px); }
     .pdf-pane-controls.pdf-pane-controls-hidden { opacity: 0; transform: translateX(-50%) translateY(14px); pointer-events: none; }
     .pdf-pane-pagenum { color: #eee; font-size: 11px; padding: 0 4px; min-width: 30px; text-align: center; }
     .pdf-ctl-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.25); margin: 0 3px; }
@@ -210,6 +210,18 @@
       min-height: 100px;
       overflow: hidden;
     }
+    #text-overlay .text-drag-header {
+      cursor: move;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      margin: -10px -10px 8px -10px;
+      padding: 6px 10px;
+      background: #f3f3fa;
+      border-bottom: 1px solid #e8e8f0;
+      border-radius: 8px 8px 0 0;
+      user-select: none;
+    }
     #text-overlay .text-toolbar {
       display: flex;
       gap: 4px;
@@ -353,7 +365,123 @@
       cursor: pointer;
     }
     #calc-overlay .calc-insert:hover { background: #268545; }
-    
+
+    #sessions-overlay {
+      position: absolute;
+      display: none;
+      z-index: 21;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.98);
+      border: 2px solid #1a5fb4;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+      width: 300px;
+      max-height: 70vh;
+      display: none;
+      flex-direction: column;
+    }
+    #sessions-overlay.show { display: flex; }
+    #sessions-overlay .sessions-header {
+      cursor: move;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e8e8f0;
+      user-select: none;
+    }
+    #sessions-overlay .sessions-header button {
+      border: 1px solid #d0d0d8;
+      background: #fff;
+      border-radius: 5px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #sessions-overlay .sessions-save-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    #sessions-overlay .sessions-save-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      border: 1px solid #d0d0d8;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    #sessions-overlay .sessions-save-row button {
+      padding: 6px 10px;
+      border: 1px solid #1a5fb4;
+      background: #1a5fb4;
+      color: #fff;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #sessions-overlay .sessions-save-row button:hover { background: #144e94; }
+    #sessions-overlay .sessions-list {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #sessions-overlay .sessions-empty {
+      font-size: 12px;
+      color: #999;
+      text-align: center;
+      padding: 16px 0;
+    }
+    #sessions-overlay .session-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 8px;
+      border: 1px solid #e8e8f0;
+      border-radius: 7px;
+      background: #f9f9fc;
+    }
+    #sessions-overlay .session-item-info {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+    }
+    #sessions-overlay .session-item-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #222;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #sessions-overlay .session-item-date {
+      font-size: 10.5px;
+      color: #888;
+    }
+    #sessions-overlay .session-item button {
+      border: 1px solid #d0d0d8;
+      background: #fff;
+      border-radius: 5px;
+      width: 26px;
+      height: 26px;
+      cursor: pointer;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    #sessions-overlay .session-item .session-load-btn:hover { background: #e6f0ff; border-color: #1a5fb4; }
+    #sessions-overlay .session-item .session-del-btn:hover { background: #ffe6e6; border-color: #cc3333; }
+
     #text-overlay .color-palette {
       display: flex;
       gap: 3px;
@@ -559,6 +687,7 @@
         <span class="pdf-ctl-sep"></span>
         <button class="pdf-ctl" id="pdf-panmode-btn" data-act="panmode" title="Plimbă fișa cu degetul (dezactivează desenul temporar)"><i class="ti ti-hand-stop"></i></button>
         <button class="pdf-ctl" id="pdf-clear-ink-btn" title="Șterge doar ce ai scris pe fișa PDF"><i class="ti ti-eraser"></i></button>
+        <button class="pdf-ctl" id="pdf-export-btn" title="Exportă fișa PDF cu adnotațiile tale, ca fișier nou" style="color:#4ade80;"><i class="ti ti-download"></i></button>
         <span class="pdf-ctl-sep"></span>
         <button class="pdf-ctl" data-act="up" title="Mută sus"><i class="ti ti-arrow-up"></i></button>
         <button class="pdf-ctl" data-act="down" title="Mută jos"><i class="ti ti-arrow-down"></i></button>
@@ -577,53 +706,10 @@
       <div id="images-container"></div>
       <div id="images-container-front"></div>
       
-      <div id="calc-overlay">
-        <div class="calc-header">
-          <span id="calc-header-title">🧮 Calculator</span>
-          <button id="calc-close" title="Închide">✕</button>
-        </div>
-        <div class="calc-expr" id="calc-expr">&nbsp;</div>
-        <div class="calc-display" id="calc-display">0</div>
-        <div class="calc-grid calc-grid-trig">
-          <button class="calc-btn calc-trig" data-act="sin">sin</button>
-          <button class="calc-btn calc-trig" data-act="cos">cos</button>
-          <button class="calc-btn calc-trig" data-act="tan">tan</button>
-          <button class="calc-btn calc-trig" data-act="cot">cot</button>
-        </div>
-        <div class="calc-grid calc-grid-trig calc-grid-3col">
-          <button class="calc-btn calc-trig" data-act="sqrt">√</button>
-          <button class="calc-btn calc-trig" data-const="pi">π</button>
-          <button class="calc-btn calc-trig" data-const="e">e</button>
-        </div>
-        <div class="calc-grid">
-          <button class="calc-btn calc-fn" data-act="clear">C</button>
-          <button class="calc-btn calc-fn" data-act="backspace">⌫</button>
-          <button class="calc-btn calc-fn" data-act="percent">%</button>
-          <button class="calc-btn calc-op" data-act="div">÷</button>
-
-          <button class="calc-btn" data-digit="7">7</button>
-          <button class="calc-btn" data-digit="8">8</button>
-          <button class="calc-btn" data-digit="9">9</button>
-          <button class="calc-btn calc-op" data-act="mul">×</button>
-
-          <button class="calc-btn" data-digit="4">4</button>
-          <button class="calc-btn" data-digit="5">5</button>
-          <button class="calc-btn" data-digit="6">6</button>
-          <button class="calc-btn calc-op" data-act="sub">−</button>
-
-          <button class="calc-btn" data-digit="1">1</button>
-          <button class="calc-btn" data-digit="2">2</button>
-          <button class="calc-btn" data-digit="3">3</button>
-          <button class="calc-btn calc-op" data-act="add">+</button>
-
-          <button class="calc-btn" data-act="sign">±</button>
-          <button class="calc-btn" data-digit="0">0</button>
-          <button class="calc-btn" data-act="dot">.</button>
-          <button class="calc-btn calc-eq" data-act="equals">=</button>
-        </div>
-        <button class="calc-insert" id="calc-insert">↳ Inserează pe tablă</button>
-      </div>
       <div id="text-overlay">
+        <div class="text-drag-header">
+          <span id="text-header-title">✎ Text</span>
+        </div>
         <div class="text-toolbar">
           <select id="txt-font">
             <option value="sans-serif">Sans</option>
@@ -667,6 +753,66 @@
     </div>
 
     <svg id="guide-svg"></svg>
+
+    <div id="calc-overlay">
+      <div class="calc-header">
+        <span id="calc-header-title">🧮 Calculator</span>
+        <button id="calc-close" title="Închide">✕</button>
+      </div>
+      <div class="calc-expr" id="calc-expr">&nbsp;</div>
+      <div class="calc-display" id="calc-display">0</div>
+      <div class="calc-grid calc-grid-trig">
+        <button class="calc-btn calc-trig" data-act="sin">sin</button>
+        <button class="calc-btn calc-trig" data-act="cos">cos</button>
+        <button class="calc-btn calc-trig" data-act="tan">tan</button>
+        <button class="calc-btn calc-trig" data-act="cot">cot</button>
+      </div>
+      <div class="calc-grid calc-grid-trig calc-grid-3col">
+        <button class="calc-btn calc-trig" data-act="sqrt">√</button>
+        <button class="calc-btn calc-trig" data-const="pi">π</button>
+        <button class="calc-btn calc-trig" data-const="e">e</button>
+      </div>
+      <div class="calc-grid">
+        <button class="calc-btn calc-fn" data-act="clear">C</button>
+        <button class="calc-btn calc-fn" data-act="backspace">⌫</button>
+        <button class="calc-btn calc-fn" data-act="percent">%</button>
+        <button class="calc-btn calc-op" data-act="div">÷</button>
+
+        <button class="calc-btn" data-digit="7">7</button>
+        <button class="calc-btn" data-digit="8">8</button>
+        <button class="calc-btn" data-digit="9">9</button>
+        <button class="calc-btn calc-op" data-act="mul">×</button>
+
+        <button class="calc-btn" data-digit="4">4</button>
+        <button class="calc-btn" data-digit="5">5</button>
+        <button class="calc-btn" data-digit="6">6</button>
+        <button class="calc-btn calc-op" data-act="sub">−</button>
+
+        <button class="calc-btn" data-digit="1">1</button>
+        <button class="calc-btn" data-digit="2">2</button>
+        <button class="calc-btn" data-digit="3">3</button>
+        <button class="calc-btn calc-op" data-act="add">+</button>
+
+        <button class="calc-btn" data-act="sign">±</button>
+        <button class="calc-btn" data-digit="0">0</button>
+        <button class="calc-btn" data-act="dot">.</button>
+        <button class="calc-btn calc-eq" data-act="equals">=</button>
+      </div>
+      <button class="calc-insert" id="calc-insert">↳ Inserează pe tablă</button>
+    </div>
+    <div id="sessions-overlay">
+      <div class="sessions-header">
+        <span id="sessions-header-title">💾 Sesiuni salvate</span>
+        <button id="sessions-close" title="Închide">✕</button>
+      </div>
+      <div class="sessions-save-row">
+        <input type="text" id="sessions-name-input" placeholder="Nume sesiune nouă..." maxlength="60">
+        <button id="sessions-save-btn" title="Salvează starea curentă sub acest nume">+ Salvează</button>
+      </div>
+      <div class="sessions-list" id="sessions-list">
+        <div class="sessions-empty" id="sessions-empty">Nicio sesiune salvată încă.</div>
+      </div>
+    </div>
   </div>
 
   <input type="file" id="pdf-file-input" accept="application/pdf" style="display:none;">
@@ -761,6 +907,7 @@
       <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
       <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
       <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
+      <button class="tool" id="btn-sessions-list" title="Sesiuni salvate (mai multe, cu nume)" style="color:#1a5fb4; border-color:#1a5fb4;"><i class="ti ti-list-details"></i></button>
       <input type="file" id="session-file-input" accept=".wbs" style="display:none">
     </div>
     <div class="sep"></div>
