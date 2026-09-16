@@ -412,6 +412,9 @@ function redrawPdfPaneInk(name) {
   const pageData = getPdfPageData(pane, pane.pageNum);
   const drawCtx = makeWidthScaledContext(inkCtx, 1 / (pane.baseScale || pane.finalScale || 1));
   pageData.strokes.forEach(s => drawStrokeOn(drawCtx, s));
+  // Graficele de funcție (inclusiv sistemul de axe gol) sunt protejate de
+  // radieră — vezi explicația din redrawStrokes().
+  pageData.strokes.forEach(s => { if (s.type === 'function') drawStrokeOn(drawCtx, s); });
 }
 
 // La fel ca mai sus, dar pentru containerul de imagini lipite pe fișa PDF —
@@ -2671,6 +2674,14 @@ function redrawStrokes(limit) {
   const drawCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
   const n = limit !== undefined ? limit : page.strokes.length;
   for (let i = 0; i < n; i++) drawStrokeOn(drawCtx, page.strokes[i]);
+  // Graficele de funcție (inclusiv sistemul de axe gol) sunt protejate de
+  // radieră — le redesenăm încă o dată, deasupra a tot, cu compunere
+  // normală (nu "destination-out"), ca să "repare" orice ar fi tăiat o
+  // radieră care le suprapune. Rămân ștergibile normal, dar doar explicit,
+  // prin selectare + Delete.
+  for (let i = 0; i < n; i++) {
+    if (page.strokes[i].type === 'function') drawStrokeOn(drawCtx, page.strokes[i]);
+  }
   drawSelectionHighlights();
 }
 
@@ -4523,6 +4534,14 @@ function handlePointerMove(e) {
     previewCtx.lineTo(newPoint.x, newPoint.y);
     previewCtx.stroke();
     previewCtx.restore();
+    if (tool === 'erase') {
+      // Graficele de funcție (inclusiv sistemul de axe gol) sunt protejate
+      // de radieră — le redesenăm imediat deasupra, cât timp tragi, ca
+      // protecția să fie vizibil consecventă pe tot parcursul, nu doar după
+      // eliberare.
+      const page = getCurrentPage();
+      if (page) page.strokes.forEach(s => { if (s.type === 'function') drawStrokeOn(previewCtx, s); });
+    }
   } else {
     currentStroke.push(tool === 'pen' ? snapToGuides(p) : p);
     clearCanvas(ctx, drawC);
@@ -12306,7 +12325,7 @@ const HELP_CONTENT_HTML = `
 <h4>Matematică</h4>
 <ul>
   <li><b>f(x)</b> — reprezintă grafic o funcție. Punctele unde graficul intersectează axa Ox (rădăcinile funcției) sunt marcate automat, cu coordonatele lor exacte.</li>
-  <li><b>Sistem de axe</b> — adaugă direct un sistem de axe xOy gol, cu 20 de diviziuni la fiecare 1 cm pe orizontală și pe verticală (10 de fiecare parte a originii), fără numerotare și fără nicio etichetă — util ca punct de plecare pentru un exercițiu desenat de mână.</li>
+  <li><b>Sistem de axe</b> — adaugă direct un sistem de axe xOy gol, cu 20 de diviziuni la fiecare 1 cm pe orizontală și pe verticală (10 de fiecare parte a originii), fără numerotare și fără nicio etichetă — util ca punct de plecare pentru un exercițiu desenat de mână. La fel ca graficul unei funcții, e protejat de radieră — se poate șterge doar selectându-l și apăsând Delete.</li>
   <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
   <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat; are și buton de rotire (colțul stânga-sus, albastru) și de multiplicare (colțul dreapta-jos, mov).</li>
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
@@ -12416,7 +12435,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Math</h4>
 <ul>
   <li><b>f(x)</b> — plot a function graph. Points where the graph crosses the Ox axis (the function's roots) are marked automatically, with their exact coordinates.</li>
-  <li><b>Coordinate system</b> — directly adds an empty xOy coordinate system, with 20 divisions every 1 cm both horizontally and vertically (10 on each side of the origin), no numbering and no label — handy as a starting point for a hand-drawn exercise.</li>
+  <li><b>Coordinate system</b> — directly adds an empty xOy coordinate system, with 20 divisions every 1 cm both horizontally and vertically (10 on each side of the origin), no numbering and no label — handy as a starting point for a hand-drawn exercise. Like a function graph, it's protected from the eraser — it can only be deleted by selecting it and pressing Delete.</li>
   <li><b>Geometric solids</b> — insert a predefined 3D solid (cube, prism, pyramid, frustum, etc.).</li>
   <li><b>Geometric figures</b> — insert a predefined 2D outline (triangles, parallelogram, rectangle, square, rhombus, trapezoids), centered on the board and ready to move/resize; it also has a rotate button (top-left corner, blue) and a duplicate button (bottom-right corner, purple).</li>
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
