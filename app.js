@@ -411,10 +411,17 @@ function redrawPdfPaneInk(name) {
   clearCanvas(inkCtx, els.draw);
   const pageData = getPdfPageData(pane, pane.pageNum);
   const drawCtx = makeWidthScaledContext(inkCtx, 1 / (pane.baseScale || pane.finalScale || 1));
-  pageData.strokes.forEach(s => drawStrokeOn(drawCtx, s));
-  // Graficele de funcție (inclusiv sistemul de axe gol) sunt protejate de
-  // radieră — vezi explicația din redrawStrokes().
-  pageData.strokes.forEach(s => { if (s.type === 'function') drawStrokeOn(drawCtx, s); });
+  const strokes = pageData.strokes;
+  for (let i = 0; i < strokes.length; i++) {
+    drawStrokeOn(drawCtx, strokes[i]);
+    if (strokes[i].erase) {
+      // Graficele de funcție protejate de radieră — vezi explicația din
+      // redrawStrokes().
+      for (let j = 0; j < i; j++) {
+        if (strokes[j].type === 'function') drawStrokeOn(drawCtx, strokes[j]);
+      }
+    }
+  }
 }
 
 // La fel ca mai sus, dar pentru containerul de imagini lipite pe fișa PDF —
@@ -2673,14 +2680,20 @@ function redrawStrokes(limit) {
   const pane = pdfPanes[activeSurface];
   const drawCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
   const n = limit !== undefined ? limit : page.strokes.length;
-  for (let i = 0; i < n; i++) drawStrokeOn(drawCtx, page.strokes[i]);
-  // Graficele de funcție (inclusiv sistemul de axe gol) sunt protejate de
-  // radieră — le redesenăm încă o dată, deasupra a tot, cu compunere
-  // normală (nu "destination-out"), ca să "repare" orice ar fi tăiat o
-  // radieră care le suprapune. Rămân ștergibile normal, dar doar explicit,
-  // prin selectare + Delete.
   for (let i = 0; i < n; i++) {
-    if (page.strokes[i].type === 'function') drawStrokeOn(drawCtx, page.strokes[i]);
+    const s = page.strokes[i];
+    drawStrokeOn(drawCtx, s);
+    if (s.erase) {
+      // Graficele de funcție (inclusiv sistemul de axe gol) desenate ÎNAINTE
+      // de această radieră sunt protejate — le redesenăm imediat, ca
+      // radiera să nu le poată afecta. Redesenarea se face DOAR aici, nu
+      // forțat la finalul întregii liste — altfel, dacă ai scris ceva
+      // intenționat DEASUPRA unui grafic (fără nicio radieră implicată),
+      // acel text ar fi ascuns greșit de grafic la fiecare redesenare.
+      for (let j = 0; j < i; j++) {
+        if (page.strokes[j].type === 'function') drawStrokeOn(drawCtx, page.strokes[j]);
+      }
+    }
   }
   drawSelectionHighlights();
 }
@@ -6862,11 +6875,28 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     if (p1.y < hardMin || p1.y > hardMax || p2.y < hardMin || p2.y > hardMax) continue;
     if (p1.y === 0) { rawRoots.push(p1.x); continue; }
     if ((p1.y < 0 && p2.y > 0) || (p1.y > 0 && p2.y < 0)) {
-      const t = p1.y / (p1.y - p2.y);
-      rawRoots.push(p1.x + t * (p2.x - p1.x));
+      // Estimare inițială prin interpolare liniară, apoi rafinare prin
+      // înjumătățire succesivă (bisecție) pe funcția REALĂ — precizie mult
+      // mai bună decât simpla interpolare liniară, mai ales pe un interval x
+      // larg (eșantionare rară, ex. -100..100).
+      let lo = p1.x, hi = p2.x, loY = p1.y;
+      for (let iter = 0; iter < 40; iter++) {
+        const mid = (lo + hi) / 2;
+        let midY;
+        try { midY = fn(mid); } catch (e) { midY = NaN; }
+        if (!isFinite(midY)) break;
+        if ((loY < 0 && midY < 0) || (loY > 0 && midY > 0)) { lo = mid; loY = midY; }
+        else { hi = mid; }
+      }
+      rawRoots.push((lo + hi) / 2);
     }
   }
-  const minGap = (xRange / N) * 3;
+  // Prag mic, doar pentru duplicate EXACTE ale aceleiași rădăcini (rare,
+  // posibile la limita de precizie numerică) — NU pentru a "fuziona" rădăcini
+  // distincte, chiar dacă sunt apropiate (ex. 2 și 3, la doar 1 unitate
+  // distanță, cu intervalul implicit larg -100/100 ar fi fost confundate cu
+  // un prag mai mare).
+  const minGap = (xRange / N) * 0.1;
   const mergedRoots = [];
   rawRoots.forEach(r => { if (!mergedRoots.some(m => Math.abs(m - r) < minGap)) mergedRoots.push(r); });
   const roots = mergedRoots.map(xRoot => {
@@ -6878,7 +6908,7 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     type: 'function',
     expr: rawExpr,
     color: strokeColor,
-    size: 3,
+    size: 2,
     segments: segments,
     axisColor: '#7a7a7a',
     xAxis: [toCanvas(xMin, oxY), toCanvas(xMax, oxY)],
