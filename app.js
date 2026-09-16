@@ -1343,6 +1343,9 @@ function attachPanePanZoom(name) {
   let pts = new Map();
   let lastDist = null, lastMid = null;
   let singleFingerPan = false;
+  // Detecția tap-ului cu 2 degete (= undo), la fel ca pe tablă — vezi
+  // boardTwoFingerTapState pentru explicația completă.
+  let twoFingerTapState = null;
 
   root.addEventListener('pointerdown', function(e) {
     const pane = pdfPanes[name];
@@ -1368,6 +1371,8 @@ function attachPanePanZoom(name) {
       singleFingerPan = false;
       activatePane(name);
       lastDist = null; lastMid = null;
+      const [a, b] = Array.from(pts.values());
+      twoFingerTapState = { startTime: Date.now(), p1: { ...a }, p2: { ...b }, moved: false };
       // Anulează orice linie începută cu primul deget, ca gestul cu 2 degete
       // (pan/zoom pe fișă) să nu lase o urmă nedorită pe desen.
       if (drawing) {
@@ -1441,6 +1446,12 @@ function attachPanePanZoom(name) {
     }
 
     if (pts.size === 2) {
+      if (twoFingerTapState && !twoFingerTapState.moved) {
+        const [a, b] = Array.from(pts.values());
+        const d1 = Math.hypot(a.x - twoFingerTapState.p1.x, a.y - twoFingerTapState.p1.y);
+        const d2 = Math.hypot(b.x - twoFingerTapState.p2.x, b.y - twoFingerTapState.p2.y);
+        if (d1 > 14 || d2 > 14) twoFingerTapState.moved = true;
+      }
       schedulePinchUpdate();
     }
   }, { passive: true });
@@ -1448,7 +1459,14 @@ function attachPanePanZoom(name) {
   function clearPt(e) {
     pts.delete(e.pointerId);
     if (pts.size < 2) { lastDist = null; lastMid = null; }
-    if (pts.size === 0) singleFingerPan = false;
+    if (pts.size === 0) {
+      singleFingerPan = false;
+      if (twoFingerTapState && !twoFingerTapState.moved &&
+          (Date.now() - twoFingerTapState.startTime) < 400) {
+        document.getElementById('btn-undo').click();
+      }
+      twoFingerTapState = null;
+    }
   }
   root.addEventListener('pointerup', clearPt, { passive: true });
   root.addEventListener('pointercancel', clearPt, { passive: true });
@@ -2354,26 +2372,26 @@ function drawStrokeOn(c, stroke) {
 
     // diviziuni (ticks) pe Ox și Oy
     c.strokeStyle = axisColor;
-    c.lineWidth = 1;
+    c.lineWidth = 1.3;
     c.fillStyle = axisColor;
     c.font = (stroke.tickFontSize || 12) + 'px system-ui, sans-serif';
     (stroke.xTicks || []).forEach(t => {
       c.beginPath();
-      c.moveTo(t.x, t.y - 4);
-      c.lineTo(t.x, t.y + 4);
+      c.moveTo(t.x, t.y - 5);
+      c.lineTo(t.x, t.y + 5);
       c.stroke();
       c.textAlign = 'center';
       c.textBaseline = 'top';
-      c.fillText(t.label, t.x, t.y + 6);
+      c.fillText(t.label, t.x, t.y + 7);
     });
     (stroke.yTicks || []).forEach(t => {
       c.beginPath();
-      c.moveTo(t.x - 4, t.y);
-      c.lineTo(t.x + 4, t.y);
+      c.moveTo(t.x - 5, t.y);
+      c.lineTo(t.x + 5, t.y);
       c.stroke();
       c.textAlign = 'right';
       c.textBaseline = 'middle';
-      c.fillText(t.label, t.x - 7, t.y);
+      c.fillText(t.label, t.x - 8, t.y);
     });
 
     // valorile extreme (domeniu pe Ox, imaginea vizibilă pe Oy) — evidențiate
@@ -3177,6 +3195,13 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
       out.font = (orig.font || '').replace(/[\d.]+px/, out.fontSize.toFixed(1) + 'px');
       break;
     }
+    case 'mathlabel': {
+      const p = sp(orig.x, orig.y);
+      out.x = p.x; out.y = p.y;
+      out.fontSize = Math.max(6, (orig.fontSize || 20) * factor);
+      out.font = (orig.font || '').replace(/[\d.]+px/, out.fontSize.toFixed(1) + 'px');
+      break;
+    }
     case 'midpoint': {
       const p = sp(orig.x, orig.y); out.x = p.x; out.y = p.y;
       out.p1 = sp(orig.p1.x, orig.p1.y);
@@ -3366,6 +3391,9 @@ function findStrokeAt(x, y, page) {
       const maxW = Math.max(...lines.map(l => l.length * fs * 0.6));
       const h = lines.length * fs * 1.3;
       if (x >= s.x && x <= s.x + maxW && y >= s.y && y <= s.y + h) return i;
+    } else if (s.type === 'mathlabel') {
+      const bbox = getStrokeBoundingBox(s);
+      if (x >= bbox.x && x <= bbox.x + bbox.w && y >= bbox.y && y <= bbox.y + bbox.h) return i;
     } else if (s.type === 'rect') {
       if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) return i;
     } else if (s.type === 'polygon' && s.points && s.points.length > 2) {
@@ -3648,6 +3676,8 @@ function offsetStrokeInPlace(s, dx, dy) {
     if (s.p1) { s.p1.x += dx; s.p1.y += dy; }
     if (s.p2) { s.p2.x += dx; s.p2.y += dy; }
   } else if (s.type === 'text') {
+    s.x += dx; s.y += dy;
+  } else if (s.type === 'mathlabel') {
     s.x += dx; s.y += dy;
   } else if (s.type === 'rect') {
     s.x += dx; s.y += dy;
@@ -3971,7 +4001,24 @@ function handlePointerDown(e) {
       return;
     }
     
-    const idx = findStrokeAt(p.x, p.y, page);
+    let idx = findStrokeAt(p.x, p.y, page);
+    if (idx < 0 && selectedStrokes.size > 0) {
+      // Unele forme (graficul unei funcții — doar o curbă subțire, cu mult
+      // "gol" în interiorul căsuței de selecție) nu se pot atinge precis
+      // oriunde în interiorul lor. Dacă atingerea cade în interiorul căsuței
+      // de selecție a unui element DEJA selectat, îl tratăm tot ca atins —
+      // altfel un click "aproape, dar nu exact pe linie" ar anula selecția
+      // în loc să pornească tragerea.
+      for (const si of selectedStrokes) {
+        const s = page.strokes[si];
+        if (!s) continue;
+        const bbox = getStrokeBoundingBox(s);
+        if (p.x >= bbox.x && p.x <= bbox.x + bbox.w && p.y >= bbox.y && p.y <= bbox.y + bbox.h) {
+          idx = si;
+          break;
+        }
+      }
+    }
     
     if (idx >= 0) {
       const shiftKey = e.shiftKey || e.metaKey || multiSelectMode;
@@ -3995,6 +4042,8 @@ function handlePointerDown(e) {
           } else if (s.type === 'midpoint') {
             dragStartPositions.set(si, { x: s.x, y: s.y, p1: { x: s.p1.x, y: s.p1.y }, p2: { x: s.p2.x, y: s.p2.y } });
           } else if (s.type === 'text') {
+            dragStartPositions.set(si, { x: s.x, y: s.y });
+          } else if (s.type === 'mathlabel') {
             dragStartPositions.set(si, { x: s.x, y: s.y });
           } else if (s.type === 'rect') {
             dragStartPositions.set(si, { x: s.x, y: s.y });
@@ -4279,6 +4328,9 @@ function handlePointerMove(e) {
         if (start.p1) { s.p1 = { x: start.p1.x + dx, y: start.p1.y + dy }; }
         if (start.p2) { s.p2 = { x: start.p2.x + dx, y: start.p2.y + dy }; }
       } else if (s.type === 'text') {
+        s.x = start.x + dx;
+        s.y = start.y + dy;
+      } else if (s.type === 'mathlabel') {
         s.x = start.x + dx;
         s.y = start.y + dy;
       } else if (s.type === 'rect') {
@@ -6524,6 +6576,104 @@ function buildMathLabelParts(expr) {
   return parts;
 }
 
+// Inserează doar sistemul de axe xOy (fără nicio curbă, fără numerotare pe
+// diviziuni, fără eticheta "f(x) = ...") — folosit când fereastra de funcție
+// e trimisă fără nicio expresie scrisă. Diviziunile sunt la fiecare 1 cm
+// (aceeași unitate folosită de riglă/echer), nu adaptate la un interval x.
+function plotEmptyAxesOnCanvas(strokeColor) {
+  const page = getCurrentPage();
+  if (!page) throw new Error(LANG === 'en' ? 'No active page.' : 'Nu există o pagină activă.');
+
+  const rect = drawC.getBoundingClientRect();
+  const fnPane = pdfPanes[activeSurface];
+  const fnScaleComp = fnPane ? (fnPane.baseScale || fnPane.finalScale || 1) : 1;
+  let W = rect.width > 50 ? rect.width : wrap.clientWidth;
+  let H = rect.height > 50 ? rect.height : wrap.clientHeight;
+  // Plasă de siguranță suplimentară: indiferent ce ar reveni mai sus, W/H nu
+  // pot depăși fereastra reală a browser-ului (mereu disponibilă și de
+  // încredere) — pe unele dispozitive mobile, dreptunghiul suprafeței sau
+  // containerul tablei pot reveni temporar cu o valoare neașteptat de mare,
+  // ceea ce ar produce un sistem de axe mult prea mare.
+  if (window.innerWidth > 50) W = Math.min(W, window.innerWidth);
+  if (window.innerHeight > 50) H = Math.min(H, window.innerHeight);
+  // Zona de desenare e mult mai generoasă decât la un grafic normal (60%
+  // umplere, în loc de 25%) — fără nicio curbă care să concureze vizual,
+  // trebuie loc suficient ca mai multe diviziuni de 1cm (fixe, 50px) să
+  // încapă vizibil; la 25% umplere, pe un telefon cu ecran îngust, jumătatea
+  // axei abia depășea un singur pas de 1cm, deci apărea cel mult o
+  // diviziune (sau niciuna).
+  const marginX = W * 0.20, marginY = H * 0.20;
+  const plotW = Math.max(W - marginX * 2, 50);
+  const plotH = Math.max(H - marginY * 2, 50);
+  const originX = marginX + plotW / 2;
+  const originY = marginY + plotH / 2;
+  const SELECTION_SAFE_PAD = 50;
+
+  function canvasPxToContent(px, py) {
+    if (activeSurface === 'board') {
+      const z = boardZoom || 1;
+      return { x: (px - boardPanX) / z, y: (py - boardPanY) / z };
+    }
+    if (pdfPanes[activeSurface]) {
+      const t = getPaneContentTransform(activeSurface);
+      return { x: (px - t.offX) / t.scale, y: (py - t.offY) / t.scale };
+    }
+    return { x: px, y: py };
+  }
+  function toScreen(px, py) {
+    px = Math.max(SELECTION_SAFE_PAD, Math.min(W - SELECTION_SAFE_PAD, px));
+    py = Math.max(SELECTION_SAFE_PAD, Math.min(H - SELECTION_SAFE_PAD, py));
+    return canvasPxToContent(px, py);
+  }
+
+  // Garantăm minim 20 de diviziuni pe fiecare axă (10 de fiecare parte a
+  // originii, deci minim 10cm jumătate de axă) — indiferent de cât de mic
+  // ar fi ecranul.
+  const halfW = Math.max(plotW / 2, PX_PER_CM * 10);
+  const halfH = Math.max(plotH / 2, PX_PER_CM * 10);
+  const xAxis = [toScreen(originX - halfW, originY), toScreen(originX + halfW, originY)];
+  const yAxis = [toScreen(originX, originY + halfH), toScreen(originX, originY - halfH)];
+
+  // Diviziuni la fiecare 1 cm, simetric față de origine, fără numerotare
+  // (eticheta fiecărei diviziuni rămâne goală — vezi randarea tipului
+  // 'function' în drawStrokeOn, care pur și simplu nu desenează text pentru
+  // o etichetă goală).
+  const xTicks = [], yTicks = [];
+  for (let d = PX_PER_CM; d <= halfW; d += PX_PER_CM) {
+    xTicks.push({ ...toScreen(originX + d, originY), label: '' });
+    xTicks.push({ ...toScreen(originX - d, originY), label: '' });
+  }
+  for (let d = PX_PER_CM; d <= halfH; d += PX_PER_CM) {
+    yTicks.push({ ...toScreen(originX, originY + d), label: '' });
+    yTicks.push({ ...toScreen(originX, originY - d), label: '' });
+  }
+
+  const stroke = {
+    type: 'function',
+    expr: '',
+    color: strokeColor,
+    size: 3,
+    segments: [],
+    axisColor: strokeColor,
+    xAxis, yAxis,
+    xTicks, yTicks,
+    extremes: [],
+    tickFontSize: 12 / fnScaleComp
+  };
+  pushStroke(page, stroke);
+  const idx = page.strokes.length - 1;
+
+  setTool('select');
+  selectedStrokes.clear();
+  selectedImages.clear();
+  selectedStrokes.add(idx);
+
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast(LANG === 'en' ? '✓ Coordinate system inserted' : '✓ Sistem de axe inserat');
+}
+
 function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   const fn = compileFunctionExpr(rawExpr);
   const page = getCurrentPage();
@@ -6542,8 +6692,14 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   // dintr-un mod anterior, nesincronizat încă), revenim la dimensiunea
   // containerului tablei — mai bine o dimensiune rezonabilă decât un grafic
   // calculat pentru o suprafață de 0×0.
-  const W = rect.width > 50 ? rect.width : wrap.clientWidth;
-  const H = rect.height > 50 ? rect.height : wrap.clientHeight;
+  let W = rect.width > 50 ? rect.width : wrap.clientWidth;
+  let H = rect.height > 50 ? rect.height : wrap.clientHeight;
+  // Plasă de siguranță suplimentară: indiferent ce ar reveni mai sus, W/H nu
+  // pot depăși fereastra reală a browser-ului — pe unele dispozitive mobile,
+  // dreptunghiul suprafeței sau containerul tablei pot reveni temporar cu o
+  // valoare neașteptat de mare, ceea ce ar produce un grafic mult prea mare.
+  if (window.innerWidth > 50) W = Math.min(W, window.innerWidth);
+  if (window.innerHeight > 50) H = Math.min(H, window.innerHeight);
   // Graficul apare implicit FOARTE MIC (25% din suprafață) — mai simplu și
   // mai sigur decât să încercăm să-l facem "cât mai mare posibil": rămâne
   // loc din belșug de mărit cu mânerul de redimensionare, dacă e nevoie,
@@ -8879,6 +9035,20 @@ document.getElementById('btn-finish-polygon').onclick = () => {
 document.getElementById('btn-erase').onclick = () => setTool('erase');
 document.getElementById('btn-text').onclick = () => setTool('text');
 document.getElementById('btn-function').onclick = () => openFunctionModal();
+document.getElementById('btn-axes').onclick = () => {
+  // Ne asigurăm că suprafața activă (și deci drawC) e cea EFECTIV vizibilă
+  // acum, la fel ca la f(x) — altfel dimensiunile calculate ar fi greșite.
+  if (!pdfModeActive) {
+    activatePane('board');
+  } else if (!pdfSplitMode) {
+    activatePane('top');
+  }
+  try {
+    plotEmptyAxesOnCanvas(color);
+  } catch (err) {
+    showToast(err.message || (LANG === 'en' ? 'An error occurred while inserting the coordinate system.' : 'A apărut o eroare la inserarea sistemului de axe.'));
+  }
+};
 document.getElementById('btn-midpoint').onclick = () => setTool('midpoint');
 document.getElementById('btn-vspace').onclick = () => setTool('vspace');
 document.getElementById('btn-select').onclick = () => setTool('select');
@@ -12074,6 +12244,7 @@ const HELP_CONTENT_HTML = `
 <h4>Matematică</h4>
 <ul>
   <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
+  <li><b>Sistem de axe</b> — adaugă direct un sistem de axe xOy gol, cu 20 de diviziuni la fiecare 1 cm pe orizontală și pe verticală (10 de fiecare parte a originii), fără numerotare și fără nicio etichetă — util ca punct de plecare pentru un exercițiu desenat de mână.</li>
   <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
   <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat; are și buton de rotire (colțul stânga-sus, albastru) și de multiplicare (colțul dreapta-jos, mov).</li>
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
@@ -12183,6 +12354,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Math</h4>
 <ul>
   <li><b>f(x)</b> — plot a function graph.</li>
+  <li><b>Coordinate system</b> — directly adds an empty xOy coordinate system, with 20 divisions every 1 cm both horizontally and vertically (10 on each side of the origin), no numbering and no label — handy as a starting point for a hand-drawn exercise.</li>
   <li><b>Geometric solids</b> — insert a predefined 3D solid (cube, prism, pyramid, frustum, etc.).</li>
   <li><b>Geometric figures</b> — insert a predefined 2D outline (triangles, parallelogram, rectangle, square, rhombus, trapezoids), centered on the board and ready to move/resize; it also has a rotate button (top-left corner, blue) and a duplicate button (bottom-right corner, purple).</li>
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
