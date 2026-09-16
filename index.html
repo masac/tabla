@@ -187,7 +187,11 @@
       background: #ff0000;
     }
     
-    #status-bar { height: 28px; background: #f0f0f4; border-top: 1px solid #c8c8cd; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 12px; color: #444; user-select: none; }
+    #status-bar { height: 36px; background: #f0f0f4; border-top: 1px solid #c8c8cd; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 12px; color: #444; user-select: none; position: relative; }
+    #status-quick-access { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; }
+    #status-quick-access .qa-sep { width: 1px; height: 18px; background: #c8c8cd; margin: 0 2px; }
+    #status-quick-access .page-btn { display: flex; align-items: center; justify-content: center; }
+    #status-quick-access #page-num { display: inline-flex; align-items: center; justify-content: center; min-height: clamp(22px, 2.1vw, 30px); padding: 0 4px; font-size: 12px; font-weight: 600; color: #444; white-space: nowrap; flex-shrink: 0; }
     #toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 18px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 100; }
     #toast.show { opacity: 1; }
 
@@ -819,20 +823,30 @@
 
   <div id="status-bar">
     <div class="status-segment">
-      <div class="page-controls">
-        <button class="page-btn" id="btn-prev-page" title="Pagina anterioară"><i class="ti ti-chevron-left"></i></button>
-        <span id="page-num">1 / 1</span>
-        <button class="page-btn" id="btn-next-page" title="Pagina următoare"><i class="ti ti-chevron-right"></i></button>
-        <button class="page-btn" id="btn-del-page" title="Șterge pagina curentă" style="color:#b30000;margin-left:4px"><i class="ti ti-trash"></i></button>
-      </div>
-      <span id="status-strokes">0 stroke-uri</span>
-      <span id="status-selection" style="margin-left:12px;color:#e67e00;display:none;"></span>
+      <span id="status-selection" style="color:#e67e00;display:none;"></span>
+    </div>
+    <div id="status-quick-access">
+      <button class="tool" id="btn-undo"><i class="ti ti-arrow-back-up"></i></button>
+      <button class="tool" id="btn-redo"><i class="ti ti-arrow-forward-up"></i></button>
+      <span class="qa-sep"></span>
+      <button class="tool page-btn" id="btn-prev-page" title="Pagina anterioară"><i class="ti ti-chevron-left"></i></button>
+      <span id="page-num">1 / 1</span>
+      <button class="tool page-btn" id="btn-next-page" title="Pagina următoare"><i class="ti ti-chevron-right"></i></button>
+      <span class="qa-sep"></span>
+      <button class="tool active" id="btn-pen"><i class="ti ti-pencil"></i></button>
+      <button class="color-btn" id="qa-color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
+      <button class="color-btn" id="qa-color-red" style="background:#ff0000" title="Roșu"></button>
+      <button class="color-btn" id="qa-color-green" style="background:#2ecc71" title="Verde deschis"></button>
+      <button class="color-btn" id="qa-color-blue" style="background:#3498db" title="Albastru deschis"></button>
+      <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
+      <span class="qa-sep"></span>
+      <button class="tool" id="btn-clear" title="Ștergere totală (golește pagina curentă)"><i class="ti ti-eraser-off"></i></button>
+      <button class="tool page-btn" id="btn-del-page" title="Șterge pagina curentă" style="color:#b30000;"><i class="ti ti-trash"></i></button>
     </div>
   </div>
 
   <div id="toolbar">
     <div class="tool-group">
-      <button class="tool active" id="btn-pen"><i class="ti ti-pencil"></i></button>
       <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
       <button class="tool" id="btn-dashed" title="Linie întreruptă">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block">
@@ -846,7 +860,6 @@
       <button class="tool shape-tool" id="btn-rect" title="Dreptunghi"><i class="ti ti-rectangle"></i></button>
       <button class="tool shape-tool" id="btn-polygon" title="Poligon"><i class="ti ti-polygon"></i></button>
       <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
-      <button class="tool" id="btn-erase"><i class="ti ti-eraser"></i></button>
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
       <button class="tool" id="btn-axes" title="Adaugă un sistem de axe xOy, cu 20 de diviziuni pe orizontală și verticală"><i class="ti ti-axis-x"></i></button>
@@ -874,16 +887,12 @@
     <div class="sep"></div>
     <div class="tool-group color-group">
       <input type="color" id="color-pick" value="#ffffff" title="Culoare">
-      <button class="color-btn" id="color-red" style="background:#ff0000" title="Roșu"></button>
-      <button class="color-btn" id="color-green" style="background:#2ecc71" title="Verde deschis"></button>
-      <button class="color-btn" id="color-blue" style="background:#3498db" title="Albastru"></button>
       <button class="color-btn" id="color-purple" style="background:#9b59b6" title="Violet"></button>
       <button class="color-btn color-yellow" id="color-yellow" style="background:#f1c40f" title="Galben"></button>
       <button class="color-btn" id="color-black" style="background:#000000" title="Negru"></button>
-      <button class="color-btn active-color" id="color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
       <label class="compact-label" id="gros-label">Gros.</label>
       <button class="tool" id="size-minus" style="padding:4px 5px; font-weight:700;">−</button>
-      <span id="size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">1</span>
+      <span id="size-val" style="font-size:12px; min-width:16px; text-align:center; display:inline-block;">3</span>
       <button class="tool" id="size-plus" style="padding:4px 5px; font-weight:700;">+</button>
     </div>
     <div class="sep"></div>
@@ -902,9 +911,6 @@
     </div>
     <div class="sep"></div>
     <div class="tool-group">
-      <button class="tool" id="btn-undo"><i class="ti ti-arrow-back-up"></i></button>
-      <button class="tool" id="btn-redo"><i class="ti ti-arrow-forward-up"></i></button>
-      <button class="tool" id="btn-clear"><i class="ti ti-trash"></i></button>
       <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
       <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
       <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
@@ -1118,11 +1124,11 @@
     <div class="fn-modal-row">
       <div class="fn-modal-field">
         <label for="fn-xmin-input" id="fn-xmin-label">x minim</label>
-        <input type="number" id="fn-xmin-input" value="-10">
+        <input type="number" id="fn-xmin-input" value="-100">
       </div>
       <div class="fn-modal-field">
         <label for="fn-xmax-input" id="fn-xmax-label">x maxim</label>
-        <input type="number" id="fn-xmax-input" value="10">
+        <input type="number" id="fn-xmax-input" value="100">
       </div>
       <div class="fn-modal-field">
         <label for="fn-color-input" id="fn-color-label">Culoare</label>

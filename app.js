@@ -486,23 +486,12 @@ function panBoardBy(dx, dy) {
 function updateGuideSvgPan() {
   const el = document.getElementById('guide-pan-group');
   if (!el) return;
-  if (activeSurface === 'board' && !pdfSplitMode) {
-    // Tabla ocupă tot spațiul de lucru (nu suntem în mod split) —
-    // instrumentele urmăresc panoramarea/zoom-ul tablei, ca înainte.
-    const wrapRect = wrap.getBoundingClientRect();
-    const wsRect = document.getElementById('workspace').getBoundingClientRect();
-    const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
-    el.setAttribute('transform', `translate(${boardPanX + dx},${boardPanY + dy}) scale(${boardZoom})`);
-  } else {
-    // Peste o fișă PDF, SAU în modul split (tablă + fișă vizibile
-    // simultan), instrumentele (riglă/echer/raportor/compas) rămân
-    // relative la ECRAN, ca un obiect fizic așezat deasupra — nu se
-    // deplasează o dată cu derularea conținutului de dedesubt și nu li se
-    // schimbă dimensiunea la zoom. În modul split, asta permite mutarea
-    // liberă a instrumentului dintr-o zonă în alta (vezi
-    // geoDetectSurfaceForScreenPoint pentru suprafața-țintă efectivă).
-    el.setAttribute('transform', 'translate(0,0)');
-  }
+  // Instrumentele (riglă/echer/raportor/compas) rămân MEREU relative la
+  // ECRAN, ca un obiect fizic așezat deasupra — indiferent de suprafață
+  // (tablă sau fișă PDF) sau de mod (split sau nu). Nu se deplasează o dată
+  // cu panoramarea/zoom-ul de dedesubt și nu li se schimbă dimensiunea —
+  // rămân mereu accesibile, oriunde ai naviga pe conținut.
+  el.setAttribute('transform', 'translate(0,0)');
 }
 let ctx = drawC.getContext('2d');
 let overlayCtx = overlayC.getContext('2d');
@@ -515,7 +504,7 @@ let boardRedoStack = [];
 
 let DPR = Math.min(window.devicePixelRatio || 1, 2);
 let tool = 'pen', color = '#ffffff';
-let lastPenSize = 1, lastEraserSize = 25;
+let lastPenSize = 3, lastEraserSize = 25;
 
 let drawing = false;
 let currentStroke = [];
@@ -2428,6 +2417,17 @@ function drawStrokeOn(c, stroke) {
       for (let i = 1; i < seg.length; i++) c.lineTo(seg[i].x, seg[i].y);
       c.stroke();
     });
+
+    // punctele de intersecție cu axa Ox (rădăcinile funcției) — doar punctul
+    // evidențiat, fără etichetă pe grafic (nu era clar, suprapunându-se cu
+    // curba/axa) — coordonatele apar separat, sub eticheta "f(x) = ...".
+    c.fillStyle = stroke.color;
+    (stroke.roots || []).forEach(r => {
+      c.beginPath();
+      c.arc(r.x, r.y, 4, 0, Math.PI * 2);
+      c.fill();
+    });
+
     c.restore();
     return;
   }
@@ -2679,14 +2679,7 @@ function updateStatus() {
   if (undoStack.length > MAX_UNDO) undoStack.splice(0, undoStack.length - MAX_UNDO);
   if (redoStack.length > MAX_UNDO) redoStack.splice(0, redoStack.length - MAX_UNDO);
 
-  const page = getCurrentPage();
-  const totalStrokes = page ? page.strokes.length : 0;
-  const imageCount = page ? page.images.length : 0;
-
   const selCount = selectedStrokes.size + selectedImages.size;
-  document.getElementById('status-strokes').textContent = (LANG === 'en')
-    ? `${totalStrokes} lines  ·  ${imageCount} images`
-    : `${totalStrokes} linii  ·  ${imageCount} imagini`;
 
   const selEl = document.getElementById('status-selection');
   if (selCount > 0) {
@@ -2999,15 +2992,14 @@ const pos = e => {
 };
 
 function geoPos(e) {
-  if (activeSurface === 'board' && !pdfSplitMode) return pos(e);
-  // Peste o fișă PDF, SAU în modul split (tablă + fișă vizibile simultan),
-  // instrumentele rămân relative la ECRAN — nu se deplasează o dată cu
-  // conținutul de dedesubt (ca stroke-urile) și nu li se schimbă
+  // Instrumentele rămân MEREU relative la ECRAN — indiferent de suprafață
+  // (tablă sau fișă PDF) sau de mod (split sau nu). Nu se deplasează o dată
+  // cu conținutul de dedesubt (ca stroke-urile) și nu li se schimbă
   // dimensiunea la zoom. Coordonatele sunt simple pixeli, relativi la
   // colțul containerului comun (workspace) — aceleași folosite de
-  // updateGuideSvgPan() la randare, deci auto-consistente. În modul split,
-  // asta permite ca ACELAȘI instrument să poată fi mutat liber între tablă
-  // și fișă — suprafața-țintă efectivă se detectează dinamic (vezi
+  // updateGuideSvgPan() la randare, deci auto-consistente. Asta permite ca
+  // ACELAȘI instrument să poată fi mutat liber între tablă și fișă (în mod
+  // split) — suprafața-țintă efectivă se detectează dinamic (vezi
   // geoDetectSurfaceForScreenPoint), nu e fixată la deschidere.
   const wsRect = document.getElementById('workspace').getBoundingClientRect();
   return { x: e.clientX - wsRect.left, y: e.clientY - wsRect.top };
@@ -3050,7 +3042,6 @@ function geoGuideReferencePoint(name) {
 function geoScreenToContent(p, targetSurface) {
   const surf = targetSurface || (pdfSplitMode ? geoDetectSurfaceForScreenPoint(p) : activeSurface);
   if (surf === 'board') {
-    if (!pdfSplitMode) return { x: p.x, y: p.y }; // mod normal: p e deja conținut de tablă
     const wrapRect = wrap.getBoundingClientRect();
     const wsRect = document.getElementById('workspace').getBoundingClientRect();
     const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
@@ -3071,7 +3062,6 @@ function geoScreenToContent(p, targetSurface) {
 function geoContentToScreen(p, targetSurface) {
   const surf = targetSurface || activeSurface;
   if (surf === 'board') {
-    if (!pdfSplitMode) return { x: p.x, y: p.y };
     const wrapRect = wrap.getBoundingClientRect();
     const wsRect = document.getElementById('workspace').getBoundingClientRect();
     const dx = wrapRect.left - wsRect.left, dy = wrapRect.top - wsRect.top;
@@ -3092,7 +3082,7 @@ function geoContentToScreen(p, targetSurface) {
 function geoScreenLengthToContent(len, targetSurface) {
   const surf = targetSurface || activeSurface;
   if (surf === 'board') {
-    return pdfSplitMode ? len / (boardZoom || 1) : len;
+    return len / (boardZoom || 1);
   }
   if (!pdfPanes[surf]) return len;
   const t = getPaneContentTransform(surf);
@@ -3232,6 +3222,7 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
       out.xTicks = (orig.xTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
       out.yTicks = (orig.yTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
       out.extremes = (orig.extremes || []).map(t => ({ ...sp(t.x, t.y), label: t.label, axis: t.axis }));
+      out.roots = (orig.roots || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
       break;
     }
     case 'solid3d': {
@@ -3697,6 +3688,7 @@ function offsetStrokeInPlace(s, dx, dy) {
     if (s.xTicks) s.xTicks = s.xTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
     if (s.yTicks) s.yTicks = s.yTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
     if (s.extremes) s.extremes = s.extremes.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
+    if (s.roots) s.roots = s.roots.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
   } else if (s.points) {
     s.points.forEach(pt => { pt.x += dx; pt.y += dy; });
   }
@@ -3751,7 +3743,8 @@ function snapshotStrokePosition(stroke) {
       yAxis: (stroke.yAxis || []).map(p => ({ x: p.x, y: p.y })),
       xTicks: (stroke.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
       yTicks: (stroke.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
-      extremes: (stroke.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }))
+      extremes: (stroke.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis })),
+      roots: (stroke.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }))
     };
   }
   return null;
@@ -3788,6 +3781,7 @@ function restoreStrokePosition(stroke, snap) {
     stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
     stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
     stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }));
+    stroke.roots = (snap.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
   } else if (stroke.points && snap.points) {
     stroke.points = snap.points.map(p => ({ x: p.x, y: p.y }));
   }
@@ -3827,6 +3821,7 @@ function applyStrokePositionOffset(stroke, snap, dx, dy) {
     stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
     stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
     stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
+    stroke.roots = (snap.roots || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
   } else if (stroke.points && snap.points) {
     stroke.points = snap.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
   }
@@ -4067,7 +4062,8 @@ function handlePointerDown(e) {
               yAxis: (s.yAxis || []).map(pt => ({ x: pt.x, y: pt.y })),
               xTicks: (s.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
               yTicks: (s.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
-              extremes: (s.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }))
+              extremes: (s.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis })),
+              roots: (s.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }))
             });
           } else if (s.points && s.points.length > 0) {
             dragStartPositions.set(si, { points: s.points.map(pt => ({ x: pt.x, y: pt.y })) });
@@ -4356,6 +4352,7 @@ function handlePointerMove(e) {
         s.xTicks = (start.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
         s.yTicks = (start.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
         s.extremes = (start.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
+        s.roots = (start.roots || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
       } else if (s.points) {
         for (let i = 0; i < s.points.length; i++) {
           const orig = start.points && start.points[i];
@@ -5940,7 +5937,7 @@ function applyAutoColorForSurface(name) {
   const colorPickEl = document.getElementById('color-pick');
   if (colorPickEl) colorPickEl.value = autoColor;
   document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active-color'));
-  const btn = document.getElementById(name === 'board' ? 'color-white' : 'color-red');
+  const btn = document.getElementById(name === 'board' ? 'qa-color-white' : 'qa-color-red');
   if (btn) btn.classList.add('active-color');
 }
 
@@ -6829,6 +6826,35 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   extremes.push({ x: pMinY.x, y: pMinY.y, label: formatNumber(yMin), axis: 'y' });
   extremes.push({ x: pMaxY.x, y: pMaxY.y, label: formatNumber(yMax), axis: 'y' });
 
+  // Punctele unde graficul intersectează axa Ox (rădăcinile funcției) —
+  // pentru fiecare schimbare de semn între două eșantioane consecutive,
+  // aproximăm punctul exact prin interpolare liniară. O schimbare de semn
+  // cauzată de o ASIMPTOTĂ (funcția "sare" de la +infinit la -infinit, ca la
+  // x/(x+1) în jurul lui x=-1) NU e o rădăcină reală — o filtrăm cerând ca
+  // ambele puncte care mărginesc schimbarea de semn să aibă valori
+  // rezonabile (aceleași limite folosite mai sus pentru desenarea curbei,
+  // dincolo de care segmentul se rupe din cauza unei discontinuități).
+  // Eliminăm și rădăcinile prea apropiate (posibile duplicate din
+  // eșantionarea deasă, aproape de o rădăcină reală).
+  const rawRoots = [];
+  for (let i = 0; i < rawPoints.length - 1; i++) {
+    const p1 = rawPoints[i], p2 = rawPoints[i + 1];
+    if (!isFinite(p1.y) || !isFinite(p2.y)) continue;
+    if (p1.y < hardMin || p1.y > hardMax || p2.y < hardMin || p2.y > hardMax) continue;
+    if (p1.y === 0) { rawRoots.push(p1.x); continue; }
+    if ((p1.y < 0 && p2.y > 0) || (p1.y > 0 && p2.y < 0)) {
+      const t = p1.y / (p1.y - p2.y);
+      rawRoots.push(p1.x + t * (p2.x - p1.x));
+    }
+  }
+  const minGap = (xRange / N) * 3;
+  const mergedRoots = [];
+  rawRoots.forEach(r => { if (!mergedRoots.some(m => Math.abs(m - r) < minGap)) mergedRoots.push(r); });
+  const roots = mergedRoots.map(xRoot => {
+    const p = toCanvas(xRoot, 0);
+    return { x: p.x, y: p.y, label: `(${formatNumber(xRoot)}, 0)` };
+  });
+
   const stroke = {
     type: 'function',
     expr: rawExpr,
@@ -6838,7 +6864,7 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     axisColor: '#7a7a7a',
     xAxis: [toCanvas(xMin, oxY), toCanvas(xMax, oxY)],
     yAxis: [toCanvas(oyX, yMin), toCanvas(oyX, yMax)],
-    xTicks, yTicks, extremes,
+    xTicks, yTicks, extremes, roots,
     // Dimensiunea fontului diviziunilor, compensată explicit cu scala de
     // bază a fișei PDF (dacă desenăm peste una) — ca cifrele de pe axe să
     // aibă vizual aceeași mărime ca pe tablă, indiferent de zoom-ul fișei.
@@ -6864,6 +6890,25 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
     color: strokeColor,
     fontSize: labelFs
   });
+
+  // Sub eticheta funcției, un rând separat cu coordonatele exacte ale
+  // intersecțiilor cu Ox — pe grafic rămâne doar punctul evidențiat (o
+  // etichetă direct pe desen s-ar suprapune cu curba/axa, nefiind clară).
+  if (roots.length > 0) {
+    const rootsFs = 14 / fnScaleComp;
+    const rootsPos = canvasPxToContent(marginX, H - marginY + 30 + labelFs * 1.5);
+    const rootsText = (LANG === 'en' ? 'Ox intersections: ' : 'Intersecții cu Ox: ') + roots.map(r => r.label).join('  ·  ');
+    pushStroke(page, {
+      type: 'text',
+      text: rootsText,
+      x: rootsPos.x,
+      y: rootsPos.y,
+      font: rootsFs + 'px sans-serif',
+      color: strokeColor,
+      fontSize: rootsFs,
+      textAlign: 'left'
+    });
+  }
 
   // Selectăm implicit graficul (nu și eticheta), gata de redimensionat cu
   // mânerul, dacă dimensiunea implicită (puțin mai mică) nu e potrivită.
@@ -9077,14 +9122,17 @@ document.getElementById('color-pick').oninput = e => { color = e.target.value; c
 document.getElementById('size-minus').onclick = () => setCurrentSize(getCurrentSize() - 1);
 document.getElementById('size-plus').onclick = () => setCurrentSize(getCurrentSize() + 1);
 
-document.getElementById('color-red').onclick = () => setColorFromButton('#ff0000', 'color-red');
-document.getElementById('color-green').onclick = () => setColorFromButton('#2ecc71', 'color-green');
-document.getElementById('color-blue').onclick = () => setColorFromButton('#3498db', 'color-blue');
+// Cele patru culori rapide, lângă creion/radieră din bara de stare — nu mai
+// sunt duplicate și în paleta principală (rămân doar acolo: negru, violet,
+// galben — albul a rămas doar pe rândul 1).
+document.getElementById('qa-color-white').onclick = () => setColorFromButton('#ffffff', 'qa-color-white');
+document.getElementById('qa-color-red').onclick = () => setColorFromButton('#ff0000', 'qa-color-red');
+document.getElementById('qa-color-green').onclick = () => setColorFromButton('#2ecc71', 'qa-color-green');
+document.getElementById('qa-color-blue').onclick = () => setColorFromButton('#3498db', 'qa-color-blue');
 document.getElementById('color-purple').onclick = () => setColorFromButton('#9b59b6', 'color-purple');
 document.getElementById('color-yellow').onclick = () => setColorFromButton('#f1c40f', 'color-yellow');
 document.getElementById('color-black').onclick = () => setColorFromButton('#000000', 'color-black');
-document.getElementById('color-white').onclick = () => setColorFromButton('#ffffff', 'color-white');
-document.getElementById('color-white').classList.add('active-color');
+document.getElementById('qa-color-white').classList.add('active-color');
 color = '#ffffff';
 
 document.getElementById('bg-white').onclick = () => setBackgroundColor('#ffffff', 'bg-white');
@@ -10476,6 +10524,25 @@ function geoBuildPencilButton() {
 
 // Buton rotund negru cu X — închide instrumentul (ascunde ghidajul și
 // dezactivează butonul corespunzător din bara de unelte).
+// Comută lipirea de punct la o dublă-atingere pe corpul instrumentului —
+// funcționează atât cu mouse (unde dblclick nativ ar fi fost suficient),
+// cât și cu degetul, pe table interactive tactile, unde evenimentul nativ
+// "dblclick" nu se declanșează fiabil din două atingeri rapide.
+function attachDoubleTapToggleSnap(body) {
+  let lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+  body.addEventListener('pointerdown', ev => {
+    const now = Date.now();
+    const dist = Math.hypot(ev.clientX - lastTapX, ev.clientY - lastTapY);
+    if (now - lastTapTime < 350 && dist < 25) {
+      ev.stopPropagation();
+      toggleSnapToPoint();
+      lastTapTime = 0; // resetăm, ca o a treia atingere rapidă să nu comute din nou
+    } else {
+      lastTapTime = now; lastTapX = ev.clientX; lastTapY = ev.clientY;
+    }
+  });
+}
+
 function geoBuildCloseButton() {
   const g = geoEl('g', { class: 'guide-handle' });
   g.appendChild(geoEl('circle', { r: 11, fill: '#222222', stroke: '#ffffff', 'stroke-width': 1.5 }));
@@ -10554,7 +10621,7 @@ function buildGeoRuler() {
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('ruler'); });
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul riglei, nu printr-un buton dedicat.
-  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+  attachDoubleTapToggleSnap(body);
   renderGeoRuler();
 }
 
@@ -10649,7 +10716,7 @@ function buildGeoSetsquare() {
   geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul echerului, nu printr-un buton dedicat.
-  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+  attachDoubleTapToggleSnap(body);
 
   resizeHandleW.addEventListener('pointerdown', e => {
     if (geoSegBuild) cancelGeoSegBuild();
@@ -10854,7 +10921,7 @@ function buildGeoProtractor() {
   geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul raportorului, nu printr-un buton dedicat.
-  body.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleSnapToPoint(); });
+  attachDoubleTapToggleSnap(body);
   renderGeoProtractor();
 }
 
@@ -11560,16 +11627,12 @@ function finalizeProtractorArc(skipUsageRecord) {
 // tablei, ca instrumentul să apară exact în zona vizibilă acum.
 function fitGeoGuideToViewport(name) {
   const st = geoGuides[name];
-  let vw, vh, viewLeft, viewTop, zoom;
-  if (activeSurface === 'board' && !pdfSplitMode) {
-    zoom = boardZoom || 1;
-    vw = wrap.clientWidth / zoom; vh = wrap.clientHeight / zoom;
-    viewLeft = -boardPanX / zoom; viewTop = -boardPanY / zoom;
-  } else if (activeSurface === 'board' && pdfSplitMode) {
-    // În mod split, instrumentul deschis pe tablă e tot relativ la ecran
-    // (ca să poată fi mutat liber între tablă și fișă) — centrăm pe zona
+  let vw, vh, viewLeft, viewTop, zoom = 1;
+  if (activeSurface === 'board') {
+    // Instrumentul deschis pe tablă e relativ la ecran (ca să rămână mereu
+    // accesibil, indiferent de zoom-ul/panoramarea tablei, și ca să poată fi
+    // mutat liber între tablă și fișă în mod split) — centrăm pe zona
     // vizibilă a tablei, în coordonate "workspace".
-    zoom = 1;
     const wrapRect = wrap.getBoundingClientRect();
     const wsRect = document.getElementById('workspace').getBoundingClientRect();
     vw = wrapRect.width; vh = wrapRect.height;
@@ -11579,7 +11642,6 @@ function fitGeoGuideToViewport(name) {
     // fixă (neafectată de zoom-ul fișei) — centrul se calculează pe zona
     // vizibilă a fișei, în coordonate "workspace" (aceleași pe care le
     // folosește geoPos() la tragere), nu pe panoramarea/zoom-ul tablei.
-    zoom = 1;
     const paneRect = getPaneEls(activeSurface).root.getBoundingClientRect();
     const wsRect = document.getElementById('workspace').getBoundingClientRect();
     vw = paneRect.width; vh = paneRect.height;
@@ -12243,7 +12305,7 @@ const HELP_CONTENT_HTML = `
 
 <h4>Matematică</h4>
 <ul>
-  <li><b>f(x)</b> — reprezintă grafic o funcție.</li>
+  <li><b>f(x)</b> — reprezintă grafic o funcție. Punctele unde graficul intersectează axa Ox (rădăcinile funcției) sunt marcate automat, cu coordonatele lor exacte.</li>
   <li><b>Sistem de axe</b> — adaugă direct un sistem de axe xOy gol, cu 20 de diviziuni la fiecare 1 cm pe orizontală și pe verticală (10 de fiecare parte a originii), fără numerotare și fără nicio etichetă — util ca punct de plecare pentru un exercițiu desenat de mână.</li>
   <li><b>Corpuri geometrice</b> — inserează un corp 3D predefinit (cub, prismă, piramidă, trunchi etc.).</li>
   <li><b>Figuri geometrice</b> — inserează un contur 2D predefinit (triunghiuri, paralelogram, dreptunghi, pătrat, romb, trapeze), centrat pe tablă și gata de mutat/redimensionat; are și buton de rotire (colțul stânga-sus, albastru) și de multiplicare (colțul dreapta-jos, mov).</li>
@@ -12353,7 +12415,7 @@ const HELP_CONTENT_HTML_EN = `
 
 <h4>Math</h4>
 <ul>
-  <li><b>f(x)</b> — plot a function graph.</li>
+  <li><b>f(x)</b> — plot a function graph. Points where the graph crosses the Ox axis (the function's roots) are marked automatically, with their exact coordinates.</li>
   <li><b>Coordinate system</b> — directly adds an empty xOy coordinate system, with 20 divisions every 1 cm both horizontally and vertically (10 on each side of the origin), no numbering and no label — handy as a starting point for a hand-drawn exercise.</li>
   <li><b>Geometric solids</b> — insert a predefined 3D solid (cube, prism, pyramid, frustum, etc.).</li>
   <li><b>Geometric figures</b> — insert a predefined 2D outline (triangles, parallelogram, rectangle, square, rhombus, trapezoids), centered on the board and ready to move/resize; it also has a rotate button (top-left corner, blue) and a duplicate button (bottom-right corner, purple).</li>
