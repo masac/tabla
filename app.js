@@ -4212,7 +4212,13 @@ function handlePointerMove(e) {
     return;
   }
   
-  if (tool === 'pen' && !geoActiveDrag) {
+  if (tool === 'pen' && !geoActiveDrag && e.pointerType === 'mouse') {
+    // Cursorul special (creion lângă instrument) are sens doar cu mouse-ul
+    // — pe ecran tactil (deget/stylus) nu există niciodată un cursor vizibil
+    // de schimbat, deci sărim complet peste acest calcul acolo. Rula
+    // anterior la FIECARE mișcare, indiferent de tipul de intrare — o sursă
+    // inutilă de încărcare suplimentară la desenul cu degetul, mai ales pe
+    // table interactive cu procesor mai slab.
     const gd = nearestGuideDist(p);
     drawC.style.cursor = (gd < GUIDE_SNAP_DIST) ? GEO_PEN_CURSOR : '';
   }
