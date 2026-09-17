@@ -332,7 +332,17 @@ function setLanguage(lang) {
 // COD COMPLET - VERSIUNE FINALĂ 
 // ====================================================================
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = _pdfWorkerSrc;
+// Inițializarea PDF.js e protejată — dacă biblioteca nu s-a încărcat corect
+// (de exemplu la deschiderea fișierelor direct de pe un ecran tactil, unde
+// managerul de fișiere/vizualizatorul HTML dă acces doar la index.html, nu
+// și la fișierele "vecine" din lib/), o eroare aici NU mai oprește restul
+// aplicației — desenul, instrumentele geometrice, calculatorul etc.
+// funcționează în continuare normal; doar fișa PDF rămâne indisponibilă.
+try {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = _pdfWorkerSrc;
+} catch (e) {
+  console.warn('PDF.js nu a putut fi inițializat — funcția de fișă PDF va fi indisponibilă.', e);
+}
 
 const wrap = document.getElementById('canvas-wrap');
 const boardBgC = document.getElementById('bg-canvas');
@@ -960,7 +970,7 @@ function swapAdjacentIntoCurrent(name) {
 // nu era încă pregătită, o randăm acum (fără să sărim peste conținut). La
 // fel și în sens invers, spre pagina anterioară. O săritură reală de pagină
 // se întâmplă doar la apăsarea explicită a butoanelor/săgeților.
-function checkPdfPageBoundaryScroll(name) {
+function checkPdfPageBoundaryScroll(name, marginOverride) {
   const pane = pdfPanes[name];
   const els = getPaneEls(name);
   if (!els.bg || !els.bg.height) return;
@@ -979,7 +989,11 @@ function checkPdfPageBoundaryScroll(name) {
   // înaltă decât fereastra, orice derulare minimă să declanșeze imediat
   // schimbarea de pagină — părea o tranziție bruscă, instantă. Cu o margine
   // mai mare, trebuie o derulare reală, deliberată, înainte de tranziție.
-  const margin = 60;
+  // La panoramarea cu două degete pe ecran tactil, apelantul poate cere o
+  // margine MULT mai mare (vezi mai jos) — altfel era prea ușor să sari
+  // accidental la pagina alăturată doar încercând să privești/mărești
+  // partea de jos/sus a paginii curente.
+  const margin = marginOverride != null ? marginOverride : 60;
   if (bottomEdge < rect.height - margin && pane.pageNum < pdfTotalPages) {
     if (pane.adjNum === pane.pageNum + 1 && pane.adjDir === 1) {
       pane.panY += (h + gap);
@@ -1115,25 +1129,18 @@ function setPdfSplitMode(split) {
 document.getElementById('btn-pdf-split').onclick = () => setPdfSplitMode(!pdfSplitMode);
 
 // ===== Bara de control a ferestrei PDF =====
-// În modul ecran complet (implicit la încărcare), bara rămâne mereu
-// vizibilă, ca utilizatorul să aibă mereu control. Doar în modul ecran
-// împărțit (după apăsarea butonului de separare) bara se ascunde automat
-// după 10 secunde de inactivitate, ca tabla + fișa să câștige spațiu —
-// reapare la atingerea barei de separare.
+// Rămâne MEREU vizibilă, atât în modul ecran complet cât și în modul split
+// — la fel ca la deschiderea unei fișe pe tot ecranul. Ascunderea automată
+// (după 10 secunde de inactivitate) a fost dezactivată la cererea
+// utilizatorului, care o dorea mereu la îndemână, inclusiv săgețile de
+// navigare (sus/jos/stânga/dreapta).
 let pdfPaneControlsHideTimer = null;
 function schedulePdfPaneControlsAutoHide() {
-  clearTimeout(pdfPaneControlsHideTimer);
-  pdfPaneControlsHideTimer = null;
-  if (!pdfModeActive || !pdfSplitMode) return;
-  pdfPaneControlsHideTimer = setTimeout(() => {
-    const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
-    if (bar) bar.classList.add('pdf-pane-controls-hidden');
-  }, 10000);
+  // Dezactivat intenționat — vezi comentariul de mai sus.
 }
 function showPdfPaneControlsTemporarily() {
   const bar = document.querySelector('#pdf-pane-top .pdf-pane-controls');
   if (bar) bar.classList.remove('pdf-pane-controls-hidden');
-  schedulePdfPaneControlsAutoHide();
 }
 
 // ===== Încărcare fișă PDF =====
@@ -1143,6 +1150,12 @@ pdfFileInput.addEventListener('change', function(e) {
   const file = e.target.files[0];
   pdfFileInput.value = '';
   if (!file) return;
+  if (typeof pdfjsLib === 'undefined') {
+    alert(LANG === 'en'
+      ? 'The PDF library could not load — the PDF sheet feature is unavailable right now. The rest of the app (drawing, tools) still works normally.'
+      : 'Biblioteca PDF nu s-a putut încărca — funcția de fișă PDF nu e disponibilă acum. Restul aplicației (desen, instrumente) funcționează normal.');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = function(ev) {
     pdfjsLib.getDocument({ data: ev.target.result }).promise.then(function(doc) {
@@ -1151,7 +1164,7 @@ pdfFileInput.addEventListener('change', function(e) {
       pdfPanes.top = makePdfPane();
       document.getElementById('btn-toggle-pdf-mode').disabled = false;
       document.getElementById('btn-pdf-split').disabled = false;
-      setCurrentSize(2);
+      setCurrentSize(3);
       showToast((LANG === 'en' ? '✓ PDF sheet loaded (' : '✓ Fișă PDF încărcată (') + pdfTotalPages + (LANG === 'en' ? ' pages)' : ' pagini)'));
       setBoardMode(true);
     }).catch(function(err) {
@@ -1348,6 +1361,16 @@ function attachPanePanZoom(name) {
 
   root.addEventListener('pointerdown', function(e) {
     const pane = pdfPanes[name];
+    // Dacă o interacțiune exclusivă cu UN SINGUR deget e deja în curs
+    // (rotire corp/poligon, redimensionare, mutare selecție) — o a doua
+    // atingere accidentală (ex. un deget rămas sprijinit lângă cel care
+    // rotește) NU trebuie să pornească un gest de pinch/zoom pe fișă. Fără
+    // această verificare, orice a doua atingere întrerupea rotirea și
+    // "sărea" brusc la un zoom mare, nedorit.
+    if (isRotatingSolid || isRotatingPolygon || isResizingStroke || isDraggingSelected ||
+        isImageDrag || resizeImageId) {
+      return;
+    }
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
       if (e.pointerType === 'mouse' && e.button !== 0) return; // doar click stânga
       if (paneShouldPanInsteadOfDraw(name, e)) {
@@ -1423,7 +1446,13 @@ function attachPanePanZoom(name) {
           zoomPaneAtPoint(name, scaleDelta, mid.x, mid.y);
         } else {
           updatePdfPanePosition(name);
-          checkPdfPageBoundaryScroll(name);
+          // Prag mult mai mare aici (250px, față de 60px implicit) — la
+          // panoramarea cu două degete pe ecran tactil, era prea ușor să
+          // sari accidental la pagina alăturată doar încercând să privești
+          // partea de jos/sus a paginii curente, fără nicio intenție de a
+          // schimba pagina. Pe computer (tastatură/rotiță), pragul implicit
+          // rămâne neschimbat — acolo controlul e deja precis.
+          checkPdfPageBoundaryScroll(name, 250);
         }
       }
       lastDist = dist; lastMid = mid;
@@ -2678,7 +2707,13 @@ function redrawStrokes(limit) {
   const page = getCurrentPage();
   if (!page) return;
   const pane = pdfPanes[activeSurface];
-  const drawCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
+  // Grosimea liniei rămâne constantă pe ECRAN, indiferent de zoom — pe fișa
+  // PDF se compensează cu scara paginii, pe tablă cu boardZoom. Fără asta,
+  // aceeași grosime "3" ar apărea mai groasă sau mai subțire în funcție de
+  // cât de mult ai mărit/micșorat tabla.
+  const drawCtx = pane
+    ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+    : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
   const n = limit !== undefined ? limit : page.strokes.length;
   for (let i = 0; i < n; i++) {
     const s = page.strokes[i];
@@ -4479,7 +4514,9 @@ function handlePointerMove(e) {
   if (!drawing) return;
   const size = tool === 'erase' ? lastEraserSize : lastPenSize;
   const pdfPaneNow = pdfPanes[activeSurface];
-  const effSize = pdfPaneNow ? size / (pdfPaneNow.baseScale || pdfPaneNow.finalScale || 1) : size;
+  const effSize = pdfPaneNow
+    ? size / (pdfPaneNow.baseScale || pdfPaneNow.finalScale || 1)
+    : size / (boardZoom || 1);
   if (tool === 'circle') {
     clearCanvas(ctx, drawC);
     redrawStrokes();
@@ -4539,7 +4576,9 @@ function handlePointerMove(e) {
     const newPoint = snapToGuides(p);
     currentStroke.push(newPoint);
     const pane = pdfPanes[activeSurface];
-    const previewCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
+    const previewCtx = pane
+      ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+      : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
     previewCtx.save();
     previewCtx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
     previewCtx.strokeStyle = tool === 'erase' ? 'rgba(0,0,0,1)' : color;
@@ -4566,7 +4605,9 @@ function handlePointerMove(e) {
     clearCanvas(ctx, drawC);
     redrawStrokes();
     const pane = pdfPanes[activeSurface];
-    const previewCtx = pane ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1)) : ctx;
+    const previewCtx = pane
+      ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+      : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
     drawStrokeOn(previewCtx, {points: currentStroke, color, size, erase: tool==='erase'});
   }
 }
@@ -6625,12 +6666,18 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   let W = rect.width > 50 ? rect.width : wrap.clientWidth;
   let H = rect.height > 50 ? rect.height : wrap.clientHeight;
   // Plasă de siguranță suplimentară: indiferent ce ar reveni mai sus, W/H nu
-  // pot depăși fereastra reală a browser-ului (mereu disponibilă și de
-  // încredere) — pe unele dispozitive mobile, dreptunghiul suprafeței sau
-  // containerul tablei pot reveni temporar cu o valoare neașteptat de mare,
-  // ceea ce ar produce un sistem de axe mult prea mare.
-  if (window.innerWidth > 50) W = Math.min(W, window.innerWidth);
-  if (window.innerHeight > 50) H = Math.min(H, window.innerHeight);
+  // pot depăși dimensiunea reală și de încredere a suprafeței active — pe
+  // fișă PDF, limita corectă e chiar panoul PDF (rădăcina lui, aceeași
+  // folosită de getPaneContentTransform pentru conversia coordonatelor),
+  // NU fereastra întreagă a browserului: în modul split, fișa ocupă doar o
+  // parte din ecran, deci fereastra întreagă ar fi o limită mult prea mare
+  // și ar lăsa sistemul de axe să depășească vizibil panoul PDF. Pe tablă,
+  // limita rămâne fereastra browserului, ca înainte.
+  const safeLimit = fnPane
+    ? getPaneEls(activeSurface).root.getBoundingClientRect()
+    : { width: window.innerWidth, height: window.innerHeight };
+  if (safeLimit.width > 50) W = Math.min(W, safeLimit.width);
+  if (safeLimit.height > 50) H = Math.min(H, safeLimit.height);
   // Zona de desenare e mult mai generoasă decât la un grafic normal (60%
   // umplere, în loc de 25%) — fără nicio curbă care să concureze vizual,
   // trebuie loc suficient ca mai multe diviziuni de 1cm (fixe, 50px) să
@@ -6730,11 +6777,16 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   let W = rect.width > 50 ? rect.width : wrap.clientWidth;
   let H = rect.height > 50 ? rect.height : wrap.clientHeight;
   // Plasă de siguranță suplimentară: indiferent ce ar reveni mai sus, W/H nu
-  // pot depăși fereastra reală a browser-ului — pe unele dispozitive mobile,
-  // dreptunghiul suprafeței sau containerul tablei pot reveni temporar cu o
-  // valoare neașteptat de mare, ceea ce ar produce un grafic mult prea mare.
-  if (window.innerWidth > 50) W = Math.min(W, window.innerWidth);
-  if (window.innerHeight > 50) H = Math.min(H, window.innerHeight);
+  // pot depăși dimensiunea reală a suprafeței active — pe fișă PDF, limita
+  // corectă e panoul PDF însuși, NU fereastra întreagă a browserului: în
+  // modul split, fișa ocupă doar o parte din ecran, deci fereastra întreagă
+  // ar fi o limită mult prea mare, lăsând graficul să depășească vizibil
+  // panoul PDF.
+  const safeLimit = fnPane
+    ? getPaneEls(activeSurface).root.getBoundingClientRect()
+    : { width: window.innerWidth, height: window.innerHeight };
+  if (safeLimit.width > 50) W = Math.min(W, safeLimit.width);
+  if (safeLimit.height > 50) H = Math.min(H, safeLimit.height);
   // Graficul apare implicit FOARTE MIC (25% din suprafață) — mai simplu și
   // mai sigur decât să încercăm să-l facem "cât mai mare posibil": rămâne
   // loc din belșug de mărit cu mânerul de redimensionare, dacă e nevoie,
@@ -7330,8 +7382,39 @@ function insertSolidShape(shapeKey) {
   });
   const rect = drawC.getBoundingClientRect();
   const cx = rect.width / 2, cy = rect.height * 0.28;
-  const offX = cx - (minX + maxX) / 2, offY = cy - (minY + maxY) / 2;
-  const shift = seg => seg.map(p => ({ x: p.x + offX, y: p.y + offY }));
+  // Poziția de centrare e calculată în pixeli de ECRAN (jumătatea lățimii
+  // vizibile) — dar corpul se stochează în coordonate de CONȚINUT, la fel ca
+  // orice alt desen. Pe tablă cele două coincid doar la zoom 1 (fără
+  // panoramare), dar la orice alt zoom, sau pe o fișă PDF panoramată/mărită,
+  // NU mai coincid — fără această conversie, corpul apărea complet în afara
+  // zonei vizibile (părea că "nu se adaugă" nimic). Aceeași conversie
+  // ecran→conținut folosită de pos() la desenul normal.
+  //
+  // sizeScale compensează și DIMENSIUNEA proprie a corpului (nu doar
+  // poziția) — fără ea, corpul ar apărea mărit/micșorat o dată cu zoom-ul
+  // curent al suprafeței (pentru că la randare, coordonatele de conținut se
+  // înmulțesc din nou cu acel zoom). Împărțind aici la zoom, înmulțirea de
+  // la randare anulează exact compensarea, iar corpul apare mereu la
+  // aceeași dimensiune pe ecran, indiferent de zoom — exact ca la inserarea
+  // pe tablă, la zoom implicit.
+  const paneNow = pdfPanes[activeSurface];
+  let centerContent, sizeScale;
+  if (activeSurface === 'board') {
+    const z = boardZoom || 1;
+    centerContent = { x: (cx - boardPanX) / z, y: (cy - boardPanY) / z };
+    sizeScale = 1 / z;
+  } else if (paneNow) {
+    const t = getPaneContentTransform(activeSurface);
+    centerContent = { x: (cx - t.offX) / t.scale, y: (cy - t.offY) / t.scale };
+    sizeScale = 1 / t.scale;
+  } else {
+    centerContent = { x: cx, y: cy };
+    sizeScale = 1;
+  }
+  const shift = seg => seg.map(p => ({
+    x: (p.x - (minX + maxX) / 2) * sizeScale + centerContent.x,
+    y: (p.y - (minY + maxY) / 2) * sizeScale + centerContent.y
+  }));
 
   const stroke = {
     type: 'solid3d',
@@ -8112,6 +8195,11 @@ async function insertSolidNet(shapeKey) {
   const w = maxX - minX, h = maxY - minY;
   // scalăm dacă desfășurarea e prea mare pentru fereastra curentă
   const fitScale = Math.min(1, (rect.width * 0.7) / w, (rect.height * 0.6) / h);
+  // cx/cy rămân relative la ECRAN aici — folosite de shift/shiftPoint pentru
+  // PREVIZUALIZAREA ANIMATĂ (pe overlayCtx, care NU are nicio transformare
+  // de zoom/pan aplicată, deci așteaptă coordonate simple de ecran). Desenul
+  // FINAL stocat primește o conversie separată, mai jos, chiar înainte de a
+  // fi creat ca stroke.
   const cx = rect.width / 2, cy = rect.height * 0.32;
   const shift = seg => seg.map(p => ({
     x: (p.x - (minX + maxX) / 2) * fitScale + cx,
@@ -8121,6 +8209,24 @@ async function insertSolidNet(shapeKey) {
     x: (p.x - (minX + maxX) / 2) * fitScale + cx,
     y: (p.y - (minY + maxY) / 2) * fitScale + cy
   });
+  // Convertește un punct relativ la ECRAN (aceeași bază ca shift/shiftPoint
+  // de mai sus) în coordonate de CONȚINUT — folosit DOAR pentru desenul
+  // final stocat (nu și pentru previzualizarea animată de pe overlayCtx,
+  // care nu are nicio transformare de zoom/pan aplicată). Fără asta,
+  // desfășurarea apărea în afara zonei vizibile pe o fișă PDF
+  // panoramată/mărită sau pe o tablă panoramată/mărită.
+  const paneNowNet = pdfPanes[activeSurface];
+  function toContentPoint(p) {
+    if (activeSurface === 'board') {
+      const z = boardZoom || 1;
+      return { x: (p.x - boardPanX) / z, y: (p.y - boardPanY) / z };
+    }
+    if (paneNowNet) {
+      const t = getPaneContentTransform(activeSurface);
+      return { x: (p.x - t.offX) / t.scale, y: (p.y - t.offY) / t.scale };
+    }
+    return { x: p.x, y: p.y };
+  }
 
   // ---- construim funcția de randare renderAt(t) potrivită formei, apoi arătăm panoul
   //      cu slider: se joacă animația o dată automat, iar utilizatorul poate apoi trage
@@ -8158,8 +8264,8 @@ async function insertSolidNet(shapeKey) {
     shape: shapeKey,
     color: color,
     size: netLineSize,
-    visible: built.visible.map(shift),
-    hidden: built.hidden.map(shift)
+    visible: built.visible.map(shift).map(seg => seg.map(toContentPoint)),
+    hidden: built.hidden.map(shift).map(seg => seg.map(toContentPoint))
   };
 
   pushStroke(page, stroke);
@@ -8197,6 +8303,56 @@ confirmModalBackdrop.addEventListener('pointerdown', (e) => {
   if (e.target === confirmModalBackdrop) closeConfirmModal(false);
 });
 
+// "Sari la pagina" — util mai ales la o fișă PDF cu multe pagini, unde a
+// ajunge la o pagină cu număr mare doar din "următoarea" ar fi extrem de
+// lent. Se deschide apăsând direct pe numărul paginii curente, din bara de
+// control a fișei.
+const gotoPageBackdrop = document.getElementById('goto-page-backdrop');
+const gotoPageInput = document.getElementById('goto-page-input');
+const gotoPageTitle = document.getElementById('goto-page-title');
+let gotoPageModalPaneName = null;
+function openGotoPageModal(name) {
+  const pane = pdfPanes[name];
+  if (!pane || !pdfDoc) return;
+  gotoPageModalPaneName = name;
+  gotoPageInput.value = pane.pageNum;
+  gotoPageInput.max = pdfTotalPages;
+  gotoPageInput.min = 1;
+  gotoPageTitle.textContent = (LANG === 'en' ? `Jump to page (1–${pdfTotalPages})` : `Sari la pagina (1–${pdfTotalPages})`);
+  gotoPageBackdrop.classList.add('show');
+  gotoPageInput.focus();
+  gotoPageInput.select();
+}
+function closeGotoPageModal() {
+  gotoPageBackdrop.classList.remove('show');
+  gotoPageModalPaneName = null;
+}
+function confirmGotoPage() {
+  const val = parseInt(gotoPageInput.value, 10);
+  if (gotoPageModalPaneName && val >= 1 && val <= pdfTotalPages) {
+    jumpToPdfPage(gotoPageModalPaneName, val);
+  } else if (gotoPageModalPaneName) {
+    showToast(LANG === 'en' ? `⚠ Enter a number between 1 and ${pdfTotalPages}` : `⚠ Introdu un număr între 1 și ${pdfTotalPages}`);
+    return; // lăsăm fereastra deschisă, ca utilizatorul să corecteze
+  }
+  closeGotoPageModal();
+}
+document.querySelectorAll('.pdf-pane-pagenum').forEach(el => {
+  el.addEventListener('click', () => {
+    const paneRoot = el.closest('.pdf-pane');
+    if (!paneRoot) return;
+    openGotoPageModal(paneRoot.dataset.pane);
+  });
+});
+document.getElementById('goto-page-ok').onclick = confirmGotoPage;
+document.getElementById('goto-page-cancel').onclick = closeGotoPageModal;
+gotoPageBackdrop.addEventListener('pointerdown', (e) => {
+  if (e.target === gotoPageBackdrop) closeGotoPageModal();
+});
+gotoPageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') confirmGotoPage();
+});
+
 const solidsMenuEl = document.getElementById('solids-menu');
 const btnSolids = document.getElementById('btn-solids');
 btnSolids.innerHTML = buildShapeIconSVG('cub', 20);
@@ -8222,6 +8378,15 @@ function buildSolidsMenu() {
   }).join('');
   solidsMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
     item.onclick = () => {
+      // Ne asigurăm că suprafața activă (și deci drawC) e cea EFECTIV
+      // vizibilă acum — la fel ca la butonul de axe/f(x) — altfel corpul s-ar
+      // calcula pentru o suprafață greșită și ar apărea în afara ecranului
+      // vizibil (sau nicăieri).
+      if (!pdfModeActive) {
+        activatePane('board');
+      } else if (!pdfSplitMode) {
+        activatePane('top');
+      }
       insertSolidShape(item.dataset.shape);
       closeSolidsMenu();
     };
@@ -9730,6 +9895,24 @@ document.addEventListener('paste', (e) => {
   };
   img.src = URL.createObjectURL(imageFile);
 });
+
+// Ascunde/arată complet bara principală de instrumente (care se poate
+// întinde pe 2-3 rânduri, în funcție de lățimea ecranului) — utilă mai ales
+// pe o tablă interactivă, unde spațiul vertical contează, iar rândul cu
+// creion/culori/radieră din bara de stare acoperă deja nevoile de bază.
+let toolbarHidden = false;
+function setToolbarHidden(hidden) {
+  toolbarHidden = hidden;
+  document.getElementById('toolbar').style.display = hidden ? 'none' : '';
+  const btn = document.getElementById('btn-toggle-toolbar');
+  btn.innerHTML = hidden
+    ? '<i class="ti ti-chevrons-down"></i>'
+    : '<i class="ti ti-chevrons-up"></i>';
+  btn.title = hidden
+    ? (LANG === 'en' ? 'Show the toolbar' : 'Arată bara de instrumente')
+    : (LANG === 'en' ? 'Hide the toolbar (frees up space on the board)' : 'Ascunde bara de instrumente (eliberează spațiu pe tablă)');
+}
+document.getElementById('btn-toggle-toolbar').onclick = () => setToolbarHidden(!toolbarHidden);
 
 document.getElementById('btn-undo').onclick = () => {
   if (undoStack.length === 0) return;
@@ -12398,7 +12581,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 2 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b> cât timp fișa e pe tot ecranul. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Acolo, bara de control a fișei dispare după 10 secunde de inactivitate și reapare la atingerea barei de separare. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă. Butonul de descărcare (⬇) din bara fișei exportă un fișier PDF nou, cu fișa originală și tot ce ai scris peste ea îmbinate într-un singur document — util pentru a trimite mai departe o fișă rezolvată; fișa încărcată în aplicație nu se modifică niciodată.</li>
+  <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 3 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b>, atât în ecran complet cât și în modul split. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. Apasă direct pe numărul paginii (ex. „3/50") ca să sari instant la orice pagină, fără să treci pagină cu pagină — util mai ales la o fișă cu multe pagini. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă. Butonul de descărcare (⬇) din bara fișei exportă un fișier PDF nou, cu fișa originală și tot ce ai scris peste ea îmbinate într-un singur document — util pentru a trimite mai departe o fișă rezolvată; fișa încărcată în aplicație nu se modifică niciodată.</li>
 </ul>
 
 <h4>Fișier și istoric</h4>
