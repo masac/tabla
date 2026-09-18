@@ -1362,13 +1362,16 @@ function attachPanePanZoom(name) {
   root.addEventListener('pointerdown', function(e) {
     const pane = pdfPanes[name];
     // Dacă o interacțiune exclusivă cu UN SINGUR deget e deja în curs
-    // (rotire corp/poligon, redimensionare, mutare selecție) — o a doua
-    // atingere accidentală (ex. un deget rămas sprijinit lângă cel care
-    // rotește) NU trebuie să pornească un gest de pinch/zoom pe fișă. Fără
-    // această verificare, orice a doua atingere întrerupea rotirea și
-    // "sărea" brusc la un zoom mare, nedorit.
+    // (rotire corp/poligon, redimensionare, mutare selecție, desen de
+    // poligon punct-cu-punct) — o a doua atingere accidentală (ex. un deget
+    // rămas sprijinit lângă cel care rotește/desenează, sau o mică
+    // "ricoșare" tactilă la ridicarea degetului) NU trebuie să pornească un
+    // gest de pinch/zoom pe fișă. Fără această verificare, orice a doua
+    // atingere întrerupea interacțiunea în curs — un corp rotit "sărea"
+    // brusc la un zoom mare, iar un poligon pe jumătate desenat se anula
+    // complet (părea că "nu se adaugă" nimic).
     if (isRotatingSolid || isRotatingPolygon || isResizingStroke || isDraggingSelected ||
-        isImageDrag || resizeImageId) {
+        isImageDrag || resizeImageId || (tool === 'polygon' && drawing)) {
       return;
     }
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
@@ -3418,7 +3421,7 @@ function getStrokeBoundingBox(stroke) {
 }
 
 function findSegmentStrokeAt(x, y, page) {
-  let best = -1, bestDist = 14;
+  let best = -1, bestDist = geoScreenLengthToContent(14);
   for (let i = page.strokes.length - 1; i >= 0; i--) {
     const s = page.strokes[i];
     if (s.erase) continue;
@@ -3431,10 +3434,18 @@ function findSegmentStrokeAt(x, y, page) {
 }
 
 function findStrokeAt(x, y, page) {
+  // Pragurile de mai jos sunt definite ca lungimi de ECRAN (convertite în
+  // conținut) — la un prag fix în conținut, la zoom mic pe PDF (tipic pe
+  // telefon, ca să încapă toată pagina) zona sensibilă la atingere pentru
+  // selectarea unui desen ar deveni minusculă pe ecran, aproape imposibil
+  // de nimerit cu degetul.
+  const HIT10 = geoScreenLengthToContent(10);
+  const HIT12 = geoScreenLengthToContent(12);
+  const HIT15 = geoScreenLengthToContent(15);
   for (let i = page.strokes.length - 1; i >= 0; i--) {
     const s = page.strokes[i];
     if (s.type === 'midpoint') {
-      if (Math.hypot(x - s.x, y - s.y) < 10) return i;
+      if (Math.hypot(x - s.x, y - s.y) < HIT10) return i;
     } else if (s.type === 'text') {
       const fs = s.fontSize || 28;
       const lines = s.text ? s.text.split('\n') : [''];
@@ -3450,10 +3461,10 @@ function findStrokeAt(x, y, page) {
       if (pointInPolygon(x, y, s.points)) return i;
     } else if (s.type === 'circle') {
       const dist = Math.sqrt((x - s.cx)**2 + (y - s.cy)**2);
-      if (Math.abs(dist - s.radius) < 15) return i;
+      if (Math.abs(dist - s.radius) < HIT15) return i;
     } else if (s.type === 'arc') {
       const dist = Math.sqrt((x - s.cx)**2 + (y - s.cy)**2);
-      if (Math.abs(dist - s.radius) < 15) {
+      if (Math.abs(dist - s.radius) < HIT15) {
         let ang = Math.atan2(y - s.cy, x - s.cx);
         while (ang < s.startAngle) ang += 2 * Math.PI;
         if (ang <= s.endAngle) return i;
@@ -3461,25 +3472,25 @@ function findStrokeAt(x, y, page) {
     } else if (s.type === 'angle') {
       const d1 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray1.x, s.ray1.y);
       const d2 = distToSegment(x, y, s.vertex.x, s.vertex.y, s.ray2.x, s.ray2.y);
-      if (Math.min(d1, d2) < 12) return i;
+      if (Math.min(d1, d2) < HIT12) return i;
     } else if (s.type === 'solid3d' || s.type === 'solidNet') {
       const allSegs = [...(s.visible || []), ...(s.hidden || [])];
       for (const seg of allSegs) {
         const d = distToSegment(x, y, seg[0].x, seg[0].y, seg[1].x, seg[1].y);
-        if (d < 12) return i;
+        if (d < HIT12) return i;
       }
     } else if (s.type === 'function') {
       for (const seg of (s.segments || [])) {
         for (let j = 0; j < seg.length - 1; j++) {
           const d = distToSegment(x, y, seg[j].x, seg[j].y, seg[j+1].x, seg[j+1].y);
-          if (d < 12) return i;
+          if (d < HIT12) return i;
         }
       }
     } else if (s.points && s.points.length > 0) {
       for (let j = 0; j < s.points.length - 1; j++) {
         const p1 = s.points[j], p2 = s.points[j+1];
         const d = distToSegment(x, y, p1.x, p1.y, p2.x, p2.y);
-        if (d < 12) return i;
+        if (d < HIT12) return i;
       }
     }
   }
@@ -3577,9 +3588,15 @@ function drawSelectionHighlights() {
 
       // Mâner de multiplicare (copiere) — colțul din dreapta-jos, ușor
       // decalat față de mânerul de scalare (același colț), ca să nu se
-      // suprapună.
-      const cpx = hx + 27;
-      const cpy = hy + 27;
+      // suprapună. Decalajul e definit tot ca o lungime de ECRAN (convertită
+      // în conținut) — la o valoare fixă în conținut, la zoom mic pe PDF
+      // (tipic pe telefon, ca să încapă toată pagina) zonele de "lovire" ale
+      // celor două mânere (deja adaptate la scară) ar ajunge să se
+      // suprapună, făcând ca o încercare de redimensionare să declanșeze
+      // din greșeală duplicarea.
+      const cpOffset = geoScreenLengthToContent(27);
+      const cpx = hx + cpOffset;
+      const cpy = hy + cpOffset;
       currentDuplicateHandle = { x: cpx, y: cpy, strokeIdx: idx };
       selCtx.save();
       selCtx.fillStyle = '#8e44ad';
@@ -3976,7 +3993,13 @@ function handlePointerDown(e) {
 
     if (currentDeleteHandle && selectedStrokes.has(currentDeleteHandle.strokeIdx)) {
       const dhx2 = p.x - currentDeleteHandle.x, dhy2 = p.y - currentDeleteHandle.y;
-      const delHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      // Raza de "lovire" e definită în pixeli de ECRAN, dar p/handle sunt în
+      // coordonate de CONȚINUT — pe o fișă PDF micșorată (ex. 50%), o
+      // distanță "de conținut" egală cu 16 ar corespunde doar la 8px pe
+      // ecran, înjumătățind efectiv zona sensibilă la atingere. Convertim
+      // raza în coordonate de conținut, ca zona sensibilă să rămână
+      // constantă pe ecran, indiferent de zoom.
+      const delHitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(dhx2 * dhx2 + dhy2 * dhy2) < delHitRadius) {
         e.preventDefault();
         deleteSelectedStrokes();
@@ -3986,7 +4009,8 @@ function handlePointerDown(e) {
 
     if (currentRotateHandle && selectedStrokes.has(currentRotateHandle.strokeIdx)) {
       const rhx = p.x - currentRotateHandle.x, rhy = p.y - currentRotateHandle.y;
-      const rotHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      // Vezi explicația de la delHitRadius mai sus — aceeași conversie.
+      const rotHitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(rhx * rhx + rhy * rhy) < rotHitRadius && page) {
         const stroke = page.strokes[currentRotateHandle.strokeIdx];
         if (stroke && stroke.type === 'polygon') {
@@ -4016,7 +4040,8 @@ function handlePointerDown(e) {
 
     if (currentDuplicateHandle && selectedStrokes.has(currentDuplicateHandle.strokeIdx)) {
       const cphx = p.x - currentDuplicateHandle.x, cphy = p.y - currentDuplicateHandle.y;
-      const cpHitRadius = e.pointerType === 'touch' ? 30 : 16;
+      // Vezi explicația de la delHitRadius mai sus — aceeași conversie.
+      const cpHitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(cphx * cphx + cphy * cphy) < cpHitRadius && page) {
         e.preventDefault();
         duplicateSelectedStroke(currentDuplicateHandle.strokeIdx);
@@ -4026,7 +4051,8 @@ function handlePointerDown(e) {
 
     if (currentResizeHandle && selectedStrokes.has(currentResizeHandle.strokeIdx)) {
       const dhx = p.x - currentResizeHandle.x, dhy = p.y - currentResizeHandle.y;
-      const hitRadius = e.pointerType === 'touch' ? 30 : 16;
+      // Vezi explicația de la delHitRadius mai sus — aceeași conversie.
+      const hitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(dhx * dhx + dhy * dhy) < hitRadius && page) {
         const stroke = page.strokes[currentResizeHandle.strokeIdx];
         if (stroke) {
@@ -7422,7 +7448,13 @@ function insertSolidShape(shapeKey) {
     color: color,
     size: 2.4,
     rotationY: initialRotationY,
-    baseScale: 1,
+    // baseScale reflectă exact compensarea de scară aplicată mai sus
+    // (sizeScale) — folosită de rotateSolid3D la reconstruirea corpului
+    // pentru un unghi nou. Dacă rămânea fixată la 1 (ignorând sizeScale),
+    // rotirea reconstruia corpul la dimensiunea "brută" a formei, complet
+    // diferită de cea inserată — exact saltul brusc de dimensiune observat
+    // la rotirea unui corp adăugat pe o fișă PDF panoramată/mărită.
+    baseScale: sizeScale,
     visible: built.visible.map(shift),
     hidden: built.hidden.map(shift)
   };
@@ -8501,14 +8533,35 @@ function insertFigureShape(shapeKey) {
   });
 
   // Aceeași centrare ca la "Corpuri geometrice": pe orizontală exact la
-  // mijlocul tablei, pe verticală ușor mai sus de centru.
+  // mijlocul suprafeței active, pe verticală ușor mai sus de centru.
+  // Poziția și dimensiunea sunt calculate în pixeli de ECRAN — convertite
+  // aici în coordonate de CONȚINUT (poziție) și compensate la scară
+  // (dimensiune), la fel ca la insertSolidShape (vezi explicația de acolo).
+  // Fără asta, figura apărea complet în afara zonei vizibile pe o fișă PDF
+  // panoramată/mărită, sau la o dimensiune greșită, dependentă de zoom.
   const rect = drawC.getBoundingClientRect();
   const cx = rect.width / 2, cy = rect.height * 0.28;
-  const offX = cx - (minX + maxX) / 2, offY = cy - (minY + maxY) / 2;
+  const paneNowFig = pdfPanes[activeSurface];
+  let centerContentFig, sizeScaleFig;
+  if (activeSurface === 'board') {
+    const z = boardZoom || 1;
+    centerContentFig = { x: (cx - boardPanX) / z, y: (cy - boardPanY) / z };
+    sizeScaleFig = 1 / z;
+  } else if (paneNowFig) {
+    const t = getPaneContentTransform(activeSurface);
+    centerContentFig = { x: (cx - t.offX) / t.scale, y: (cy - t.offY) / t.scale };
+    sizeScaleFig = 1 / t.scale;
+  } else {
+    centerContentFig = { x: cx, y: cy };
+    sizeScaleFig = 1;
+  }
 
   const stroke = {
     type: 'polygon',
-    points: pts.map(p => ({ x: p.x + offX, y: p.y + offY })),
+    points: pts.map(p => ({
+      x: (p.x - (minX + maxX) / 2) * sizeScaleFig + centerContentFig.x,
+      y: (p.y - (minY + maxY) / 2) * sizeScaleFig + centerContentFig.y
+    })),
     color: color,
     size: lastPenSize,
     closed: true
@@ -8550,6 +8603,14 @@ function buildFiguresMenu() {
   }).join('');
   figuresMenuEl.querySelectorAll('.solids-menu-item').forEach(item => {
     item.onclick = () => {
+      // Ne asigurăm că suprafața activă (și deci drawC) e cea EFECTIV
+      // vizibilă acum — la fel ca la corpurile geometrice — altfel figura
+      // s-ar calcula pentru o suprafață greșită.
+      if (!pdfModeActive) {
+        activatePane('board');
+      } else if (!pdfSplitMode) {
+        activatePane('top');
+      }
       insertFigureShape(item.dataset.figure);
       closeFiguresMenu();
     };
