@@ -37,6 +37,24 @@ function setToolbarPosition(pos) {
   applyToolbarPosition(pos);
 }
 
+// Tema (întunecată implicit / luminoasă) — implicit întunecată, cu un efect
+// discret de "glow" pe elementele active, în stil Apple. Alegerea se
+// salvează și rămâne setată. Comutabilă din Ajutor → Setări.
+function getTheme() {
+  try {
+    const saved = localStorage.getItem('wb-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch (e) {}
+  return 'dark';
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+}
+function setTheme(theme) {
+  try { localStorage.setItem('wb-theme', theme); } catch (e) {}
+  applyTheme(theme);
+}
+
 // Traduceri pentru atribute statice (title / placeholder / aria-label),
 // indexate după textul românesc exact (implicit).
 const UI_TEXT = {
@@ -561,6 +579,11 @@ let isDraggingSelected = false;
 let isResizingStroke = false;
 let resizeStrokeIndex = -1;
 let resizeOriginalStroke = null;
+// Pentru redimensionarea unui GRUP de stroke-uri (selecție multiplă) —
+// tablouri paralele cu indicii selectați și starea lor originală, scalate
+// împreună, proporțional, față de un colț comun (bbox-ul combinat).
+let resizeStrokeIndices = [];
+let resizeOriginalStrokes = [];
 let resizeAnchor = { x: 0, y: 0 };
 let resizeStartDist = 1;
 let currentResizeHandle = null; // { x, y, strokeIdx }
@@ -3407,6 +3430,7 @@ function getStrokeBoundingBox(stroke) {
     (stroke.xTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
     (stroke.yTicks || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
     (stroke.extremes || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
+    (stroke.roots || []).forEach(t => allPts.push({ x: t.x, y: t.y }));
     for (const p of allPts) {
       if (p.x < minX) minX = p.x;
       if (p.y < minY) minY = p.y;
@@ -3540,18 +3564,28 @@ function drawSelectionHighlights() {
   selCtx.setLineDash([]);
   selCtx.restore();
 
-  // Mâner de scalare — vizibil doar când e selectat un singur stroke
+  // Mâner de scalare și de ștergere — vizibile la ORICE selecție (unul sau
+  // mai multe stroke-uri), calculate pe bbox-ul COMBINAT al tuturor
+  // elementelor selectate. Rotirea și multiplicarea rămân disponibile doar
+  // pentru un singur stroke selectat (nu au sens/nu au fost cerute pentru
+  // un grup).
   currentResizeHandle = null;
   currentDeleteHandle = null;
   currentDuplicateHandle = null;
-  if (selectedStrokes.size === 1) {
-    const idx = [...selectedStrokes][0];
-    const stroke = page.strokes[idx];
-    if (stroke) {
-      const bbox = getStrokeBoundingBox(stroke);
+  if (selectedStrokes.size >= 1) {
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (const idx of selectedStrokes) {
+      const s = page.strokes[idx];
+      if (!s) continue;
+      const b = getStrokeBoundingBox(s);
+      gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
+      gx1 = Math.max(gx1, b.x + b.w); gy1 = Math.max(gy1, b.y + b.h);
+    }
+    if (gx0 < gx1) {
+      const bbox = { x: gx0, y: gy0, w: gx1 - gx0, h: gy1 - gy0 };
       const hx = bbox.x + bbox.w + 2;
       const hy = bbox.y + bbox.h + 2;
-      currentResizeHandle = { x: hx, y: hy, strokeIdx: idx };
+      currentResizeHandle = { x: hx, y: hy, strokeIdx: [...selectedStrokes] };
       selCtx.save();
       selCtx.fillStyle = '#e67e00';
       selCtx.strokeStyle = '#ffffff';
@@ -3565,7 +3599,7 @@ function drawSelectionHighlights() {
       // Mâner de ștergere (X roșu) — colțul din dreapta-sus, la fel ca la imagini
       const dx = bbox.x + bbox.w + 2;
       const dy = bbox.y - 2;
-      currentDeleteHandle = { x: dx, y: dy, strokeIdx: idx };
+      currentDeleteHandle = { x: dx, y: dy, strokeIdx: [...selectedStrokes] };
       selCtx.save();
       selCtx.fillStyle = '#cc0000';
       selCtx.strokeStyle = '#ffffff';
@@ -3585,6 +3619,13 @@ function drawSelectionHighlights() {
       selCtx.lineTo(dx - xr, dy + xr);
       selCtx.stroke();
       selCtx.restore();
+    }
+  }
+  if (selectedStrokes.size === 1) {
+    const idx = [...selectedStrokes][0];
+    const stroke = page.strokes[idx];
+    if (stroke) {
+      const bbox = getStrokeBoundingBox(stroke);
 
       // Mâner de multiplicare (copiere) — colțul din dreapta-jos, ușor
       // decalat față de mânerul de scalare (același colț), ca să nu se
@@ -3594,6 +3635,8 @@ function drawSelectionHighlights() {
       // celor două mânere (deja adaptate la scară) ar ajunge să se
       // suprapună, făcând ca o încercare de redimensionare să declanșeze
       // din greșeală duplicarea.
+      const hx = bbox.x + bbox.w + 2;
+      const hy = bbox.y + bbox.h + 2;
       const cpOffset = geoScreenLengthToContent(27);
       const cpx = hx + cpOffset;
       const cpy = hy + cpOffset;
@@ -3991,7 +4034,8 @@ function handlePointerDown(e) {
     const p = pos(e);
     const page = getCurrentPage();
 
-    if (currentDeleteHandle && selectedStrokes.has(currentDeleteHandle.strokeIdx)) {
+    if (currentDeleteHandle && currentDeleteHandle.strokeIdx.length > 0 &&
+        currentDeleteHandle.strokeIdx.every(i => selectedStrokes.has(i))) {
       const dhx2 = p.x - currentDeleteHandle.x, dhy2 = p.y - currentDeleteHandle.y;
       // Raza de "lovire" e definită în pixeli de ECRAN, dar p/handle sunt în
       // coordonate de CONȚINUT — pe o fișă PDF micșorată (ex. 50%), o
@@ -4049,18 +4093,28 @@ function handlePointerDown(e) {
       }
     }
 
-    if (currentResizeHandle && selectedStrokes.has(currentResizeHandle.strokeIdx)) {
+    if (currentResizeHandle && currentResizeHandle.strokeIdx.length > 0 &&
+        currentResizeHandle.strokeIdx.every(i => selectedStrokes.has(i))) {
       const dhx = p.x - currentResizeHandle.x, dhy = p.y - currentResizeHandle.y;
       // Vezi explicația de la delHitRadius mai sus — aceeași conversie.
       const hitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(dhx * dhx + dhy * dhy) < hitRadius && page) {
-        const stroke = page.strokes[currentResizeHandle.strokeIdx];
-        if (stroke) {
-          const bbox = getStrokeBoundingBox(stroke);
+        const indices = currentResizeHandle.strokeIdx;
+        const strokes = indices.map(i => page.strokes[i]).filter(Boolean);
+        if (strokes.length > 0) {
+          // Bbox COMBINAT peste toate stroke-urile selectate — ancora
+          // redimensionării e colțul din stânga-sus al acestui bbox comun,
+          // ca toate elementele să se scaleze împreună, proporțional, ca un
+          // singur grup (nu fiecare separat, față de propriul colț).
+          let gx0 = Infinity, gy0 = Infinity;
+          for (const s of strokes) {
+            const b = getStrokeBoundingBox(s);
+            gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
+          }
           isResizingStroke = true;
-          resizeStrokeIndex = currentResizeHandle.strokeIdx;
-          resizeOriginalStroke = JSON.parse(JSON.stringify(stroke));
-          resizeAnchor = { x: bbox.x, y: bbox.y };
+          resizeStrokeIndices = indices.slice();
+          resizeOriginalStrokes = indices.map(i => JSON.parse(JSON.stringify(page.strokes[i])));
+          resizeAnchor = { x: gx0, y: gy0 };
           const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
           resizeStartDist = Math.max(1, Math.sqrt(ddx * ddx + ddy * ddy));
           drawC.setPointerCapture(e.pointerId);
@@ -4323,16 +4377,19 @@ function handlePointerMove(e) {
 
   if (tool === 'select' && isResizingStroke) {
     const page = getCurrentPage();
-    if (page && resizeOriginalStroke) {
-      const stroke = page.strokes[resizeStrokeIndex];
-      if (stroke) {
-        const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
-        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        const factor = Math.min(20, Math.max(0.05, dist / resizeStartDist));
-        Object.assign(stroke, computeScaledGeometry(resizeOriginalStroke, resizeAnchor.x, resizeAnchor.y, factor));
-        redrawStrokes();
-        drawSelectionHighlights();
-      }
+    if (page && resizeOriginalStrokes.length > 0) {
+      const ddx = p.x - resizeAnchor.x, ddy = p.y - resizeAnchor.y;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      const factor = Math.min(20, Math.max(0.05, dist / resizeStartDist));
+      resizeStrokeIndices.forEach((idx, i) => {
+        const stroke = page.strokes[idx];
+        const orig = resizeOriginalStrokes[i];
+        if (stroke && orig) {
+          Object.assign(stroke, computeScaledGeometry(orig, resizeAnchor.x, resizeAnchor.y, factor));
+        }
+      });
+      redrawStrokes();
+      drawSelectionHighlights();
     }
     return;
   }
@@ -4713,15 +4770,28 @@ function handlePointerUp(e) {
   if (tool === 'select' && isResizingStroke) {
     isResizingStroke = false;
     const page = getCurrentPage();
-    const stroke = page ? page.strokes[resizeStrokeIndex] : null;
-    if (page && stroke && resizeOriginalStroke) {
-      const after = JSON.parse(JSON.stringify(stroke));
-      if (JSON.stringify(after) !== JSON.stringify(resizeOriginalStroke)) {
-        undoStack.push({ type: 'resizeStroke', page, stroke, before: resizeOriginalStroke, after });
+    if (page && resizeOriginalStrokes.length > 0) {
+      const items = [];
+      resizeStrokeIndices.forEach((idx, i) => {
+        const stroke = page.strokes[idx];
+        const before = resizeOriginalStrokes[i];
+        if (stroke && before) {
+          const after = JSON.parse(JSON.stringify(stroke));
+          if (JSON.stringify(after) !== JSON.stringify(before)) {
+            items.push({ stroke, before, after });
+          }
+        }
+      });
+      if (items.length > 0) {
+        undoStack.push({ type: 'resizeStrokeGroup', page, items });
         redoStack = [];
-        showToast(LANG === 'en' ? '✓ Stroke scaled' : '✓ Stroke scalat');
+        showToast(items.length > 1
+          ? (LANG === 'en' ? `✓ ${items.length} strokes scaled` : `✓ ${items.length} stroke-uri scalate`)
+          : (LANG === 'en' ? '✓ Stroke scaled' : '✓ Stroke scalat'));
       }
     }
+    resizeOriginalStrokes = [];
+    resizeStrokeIndices = [];
     resizeOriginalStroke = null;
     resizeStrokeIndex = -1;
     updateStatus();
@@ -5200,11 +5270,22 @@ boardDrawC.addEventListener('dblclick', handleDblClick);
 // Zoom cu Ctrl+rotița mouse-ului (sau pinch de trackpad, raportat tot ca
 // 'wheel' cu ctrlKey=true), centrat pe poziția cursorului.
 boardDrawC.addEventListener('wheel', function(e) {
-  if (!e.ctrlKey || activeSurface !== 'board') return;
+  if (activeSurface !== 'board') return;
+  if (e.ctrlKey) {
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    zoomBoardAtPoint(factor, e.clientX, e.clientY);
+    refreshBoardView();
+    return;
+  }
+  // Fără Ctrl, scroll-ul (rotița mouse-ului sau derularea pe trackpad)
+  // panoramează tabla sus/jos, exact ca și cum ai apăsa săgețile sus/jos —
+  // aceeași funcție (panBoardBy), doar declanșată de scroll, nu de
+  // tastatură. Pe fișa PDF, scroll-ul funcționează deja normal (nu
+  // schimbăm nimic acolo).
   e.preventDefault();
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  zoomBoardAtPoint(factor, e.clientX, e.clientY);
-  refreshBoardView();
+  const step = 40;
+  panBoardBy(0, e.deltaY > 0 ? -step : step);
 }, { passive: false });
 
 
@@ -5298,6 +5379,8 @@ function setTool(t) {
   isResizingStroke = false;
   resizeOriginalStroke = null;
   resizeStrokeIndex = -1;
+  resizeOriginalStrokes = [];
+  resizeStrokeIndices = [];
   isRotatingSolid = false;
   rotateOriginalStroke = null;
   rotateStrokeIndex = -1;
@@ -9967,8 +10050,8 @@ function setToolbarHidden(hidden) {
   document.getElementById('toolbar').style.display = hidden ? 'none' : '';
   const btn = document.getElementById('btn-toggle-toolbar');
   btn.innerHTML = hidden
-    ? '<i class="ti ti-chevrons-down"></i>'
-    : '<i class="ti ti-chevrons-up"></i>';
+    ? '<i class="ti ti-chevrons-up"></i>'
+    : '<i class="ti ti-chevrons-down"></i>';
   btn.title = hidden
     ? (LANG === 'en' ? 'Show the toolbar' : 'Arată bara de instrumente')
     : (LANG === 'en' ? 'Hide the toolbar (frees up space on the board)' : 'Ascunde bara de instrumente (eliberează spațiu pe tablă)');
@@ -9993,6 +10076,10 @@ document.getElementById('btn-undo').onclick = () => {
     }
   } else if (action.type === 'resizeStroke') {
     Object.assign(action.stroke, action.before);
+  } else if (action.type === 'resizeStrokeGroup') {
+    for (const item of action.items) {
+      Object.assign(item.stroke, item.before);
+    }
   } else if (action.type === 'imageMove') {
     for (const item of action.items) {
       item.img.x = item.before.x;
@@ -10040,6 +10127,10 @@ document.getElementById('btn-redo').onclick = () => {
     }
   } else if (action.type === 'resizeStroke') {
     Object.assign(action.stroke, action.after);
+  } else if (action.type === 'resizeStrokeGroup') {
+    for (const item of action.items) {
+      Object.assign(item.stroke, item.after);
+    }
   } else if (action.type === 'imageMove') {
     for (const item of action.items) {
       item.img.x = item.after.x;
@@ -11951,7 +12042,7 @@ function fitGeoGuideToViewport(name) {
   const availH = Math.max(160, vh - margin * 2);
 
   if (name === 'ruler') {
-    const designL = 700, designT = 50;
+    const designL = 900, designT = 65;
     const scale = Math.min(1, availW / designL, availH / designT);
     const L = Math.max(180, designL * scale);
     const T = Math.max(24, designT * scale);
@@ -11959,21 +12050,21 @@ function fitGeoGuideToViewport(name) {
     st.x = viewLeft + vw / 2 - L / 2;
     st.y = viewTop + vh / 2 - T / 2;
   } else if (name === 'setsquare') {
-    const designS = 420;
+    const designS = 550;
     const scale = Math.min(1, availW / designS, availH / designS);
     const S = Math.max(150, designS * scale);
     st.width = S; st.height = S; st.angle = 0;
     st.x = viewLeft + vw / 2 - S / 2;
     st.y = viewTop + vh / 2 + S / 2;
   } else if (name === 'protractor') {
-    const designR = 260;
+    const designR = 340;
     const scale = Math.min(1, availW / (designR * 2), availH / designR);
     const R = Math.max(100, designR * scale);
     st.radius = R; st.angle = 0;
     st.x = viewLeft + vw / 2;
     st.y = viewTop + vh / 2 + R / 2;
   } else if (name === 'compass') {
-    const designR = 160;
+    const designR = 210;
     const scale = Math.min(1, availW / (designR * 2), availH / (designR * 2));
     const R = Math.max(70, designR * scale);
     st.radius = R; st.angle = -Math.PI * 0.65;
@@ -12582,6 +12673,15 @@ function cancelGeoSegBuild() {
 const HELP_CONTENT_HTML = `
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+  <span>Temă:</span>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="theme-choice" id="theme-dark" value="dark"> Întunecată (implicit)
+  </label>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="theme-choice" id="theme-light" value="light"> Luminoasă
+  </label>
+</p>
+<p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Poziția barei de instrumente:</span>
   <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
     <input type="radio" name="toolbar-pos" id="toolbar-pos-top" value="top"> Sus
@@ -12691,6 +12791,15 @@ const LICENSE_CONTENT_HTML = `
 
 const HELP_CONTENT_HTML_EN = `
 <h4>Settings</h4>
+<p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+  <span>Theme:</span>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="theme-choice" id="theme-dark" value="dark"> Dark (default)
+  </label>
+  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
+    <input type="radio" name="theme-choice" id="theme-light" value="light"> Light
+  </label>
+</p>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Toolbar position:</span>
   <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;">
@@ -12815,6 +12924,14 @@ function openInfoModal(title, bodyHtml) {
     toolbarPosTop.addEventListener('change', () => { if (toolbarPosTop.checked) setToolbarPosition('top'); });
     toolbarPosBottom.addEventListener('change', () => { if (toolbarPosBottom.checked) setToolbarPosition('bottom'); });
   }
+  const themeDark = document.getElementById('theme-dark');
+  const themeLight = document.getElementById('theme-light');
+  if (themeDark && themeLight) {
+    const currentTheme = getTheme();
+    (currentTheme === 'light' ? themeLight : themeDark).checked = true;
+    themeDark.addEventListener('change', () => { if (themeDark.checked) setTheme('dark'); });
+    themeLight.addEventListener('change', () => { if (themeLight.checked) setTheme('light'); });
+  }
   const hiddenLinesToggle = document.getElementById('toggle-hidden-lines');
   if (hiddenLinesToggle) {
     // Bifat = "arată toate muchiile continue" → SOLID_SHOW_HIDDEN_LINES = false.
@@ -12882,6 +12999,7 @@ const langSelectEl = document.getElementById('lang-select');
 if (langSelectEl) langSelectEl.addEventListener('change', (e) => setLanguage(e.target.value));
 setLanguage(LANG);
 applyToolbarPosition(getToolbarPosition());
+applyTheme(getTheme());
 
 setTimeout(checkAutosaveOnStartup, 600);
 
