@@ -404,18 +404,36 @@ function clearCanvas(cx, canvas) {
 // "font" aici — unele etichete (raportor, unghi) își calculează deja
 // explicit propria compensare la creare (stocată direct pe stroke); a
 // compensa din nou aici ar dubla împărțirea, făcând textul mult prea mic.
+const _widthScaledCtxCache = new WeakMap();
 function makeWidthScaledContext(cx, scale) {
   if (!scale || scale === 1) return cx;
-  return new Proxy(cx, {
+  // Memoizare — pe fișa PDF, scara aproape niciodată nu e exact 1, deci
+  // fără cache, acest Proxy s-ar recrea la FIECARE mișcare a creionului (de
+  // multe ori pe secundă cât timp scrii), o sursă reală de mică întârziere.
+  // Refolosim același Proxy cât timp aceeași pereche (context, scară) e
+  // cerută din nou.
+  let entry = _widthScaledCtxCache.get(cx);
+  if (entry && entry.scale === scale) return entry.proxy;
+  const boundCache = new Map();
+  const proxy = new Proxy(cx, {
     set(target, prop, value) {
       target[prop] = (prop === 'lineWidth') ? value * scale : value;
       return true;
     },
     get(target, prop) {
       const val = target[prop];
-      return (typeof val === 'function') ? val.bind(target) : val;
+      if (typeof val !== 'function') return val;
+      // Cache și pentru metodele legate (bind) — fără asta, fiecare
+      // ctx.beginPath()/moveTo()/lineTo()/stroke() din timpul desenării ar
+      // crea o funcție nouă legată la fiecare acces, inutil de costisitor
+      // la frecvența unui traseu desenat cu creionul.
+      let bound = boundCache.get(prop);
+      if (!bound) { bound = val.bind(target); boundCache.set(prop, bound); }
+      return bound;
     }
   });
+  _widthScaledCtxCache.set(cx, { scale, proxy });
+  return proxy;
 }
 
 // Imaginile sunt elemente DOM poziționate în pixeli (coordonate "lume", ca și
@@ -564,7 +582,7 @@ let rulingSize = 25; // distanța de bază (px) dintre liniile/pătratele liniat
 let snapToGridEnabled = false; // când e activ, elementele desenate se lipesc de nodurile caroiajului
 let snapToPointEnabled = false; // când e activ, elementele desenate se lipesc de puncte speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas)
 let rulingColor = '#ffffff'; // culoarea liniaturii; implicit alb, fiindcă tabla pornește cu fundal negru
-let rulingOpacity = 0.5; // opacitatea liniaturii (0-1); implicit 50%
+let rulingOpacity = 0.2; // opacitatea liniaturii (0-1); implicit 20%
 
 // ================================================================
 // VARIABILE PENTRU SELECTARE ȘI MUTARE
@@ -1169,31 +1187,42 @@ function showPdfPaneControlsTemporarily() {
 // ===== Încărcare fișă PDF =====
 const pdfFileInput = document.getElementById('pdf-file-input');
 document.getElementById('btn-load-pdf').addEventListener('click', () => pdfFileInput.click());
-pdfFileInput.addEventListener('change', function(e) {
-  const file = e.target.files[0];
-  pdfFileInput.value = '';
-  if (!file) return;
+// Încarcă o fișă PDF din date binare brute (ArrayBuffer) — reutilizată atât
+// la selectarea unui fișier de pe dispozitiv, cât și la încărcarea directă
+// de la o adresă web (vezi loadPdfFromUrl mai jos).
+// Păstrăm datele brute ale PDF-ului încărcat — necesare ca să putem include
+// fișa PDF (nu doar adnotările) într-o sesiune salvată, ca la redeschidere
+// să nu mai fie nevoie să încarci din nou manual același fișier.
+let loadedPdfArrayBuffer = null;
+function loadPdfFromArrayBuffer(arrayBuffer) {
   if (typeof pdfjsLib === 'undefined') {
     alert(LANG === 'en'
       ? 'The PDF library could not load — the PDF sheet feature is unavailable right now. The rest of the app (drawing, tools) still works normally.'
       : 'Biblioteca PDF nu s-a putut încărca — funcția de fișă PDF nu e disponibilă acum. Restul aplicației (desen, instrumente) funcționează normal.');
     return;
   }
+  const bufferCopy = arrayBuffer.slice(0);
+  pdfjsLib.getDocument({ data: arrayBuffer }).promise.then(function(doc) {
+    pdfDoc = doc;
+    loadedPdfArrayBuffer = bufferCopy;
+    pdfTotalPages = doc.numPages;
+    pdfPanes.top = makePdfPane();
+    document.getElementById('btn-toggle-pdf-mode').disabled = false;
+    document.getElementById('btn-pdf-split').disabled = false;
+    setCurrentSize(3);
+    showToast((LANG === 'en' ? '✓ PDF sheet loaded (' : '✓ Fișă PDF încărcată (') + pdfTotalPages + (LANG === 'en' ? ' pages)' : ' pagini)'));
+    setBoardMode(true);
+  }).catch(function(err) {
+    alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
+  });
+}
+
+pdfFileInput.addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  pdfFileInput.value = '';
+  if (!file) return;
   const reader = new FileReader();
-  reader.onload = function(ev) {
-    pdfjsLib.getDocument({ data: ev.target.result }).promise.then(function(doc) {
-      pdfDoc = doc;
-      pdfTotalPages = doc.numPages;
-      pdfPanes.top = makePdfPane();
-      document.getElementById('btn-toggle-pdf-mode').disabled = false;
-      document.getElementById('btn-pdf-split').disabled = false;
-      setCurrentSize(3);
-      showToast((LANG === 'en' ? '✓ PDF sheet loaded (' : '✓ Fișă PDF încărcată (') + pdfTotalPages + (LANG === 'en' ? ' pages)' : ' pagini)'));
-      setBoardMode(true);
-    }).catch(function(err) {
-      alert(trMsg('Eroare la încărcarea PDF: ' + err.message));
-    });
-  };
+  reader.onload = function(ev) { loadPdfFromArrayBuffer(ev.target.result); };
   reader.readAsArrayBuffer(file);
 });
 
@@ -1250,6 +1279,11 @@ let pdfRightClickPrevTool = null;
   els.draw.addEventListener('contextmenu', e => e.preventDefault());
   els.draw.addEventListener('pointerdown', function(e) {
     if (isEraserButtonEvent(e)) {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        document.getElementById('btn-undo').click();
+        return;
+      }
       // Click dreapta sau butonul lateral al stylus-ului, ținut apăsat =
       // radieră temporară, indiferent ce unealtă era selectată — revine
       // automat la eliberare.
@@ -2154,6 +2188,15 @@ let toastTimer = null;
 function showToast(msg, duration = 3000) {
   const t = document.getElementById('toast');
   t.textContent = trMsg(msg);
+  // Poziționăm mesajul dinamic, chiar deasupra barei de stare (primul rând
+  // de butoane) — indiferent dacă bara principală de instrumente e
+  // vizibilă/ascunsă sau poziționată sus/jos, indiferent de suprafață.
+  // Altfel, mesajul putea ajunge exact peste butoane, acoperindu-le.
+  const statusBar = document.getElementById('status-bar');
+  if (statusBar) {
+    const rect = statusBar.getBoundingClientRect();
+    t.style.bottom = Math.max(40, window.innerHeight - rect.top + 10) + 'px';
+  }
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), duration);
@@ -3207,7 +3250,7 @@ function magneticAngleSnap45(start, end) {
   let diff = (angle - nearest) % (2 * Math.PI);
   if (diff > Math.PI) diff -= 2 * Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
-  const threshold = 6 * Math.PI / 180; // prag de ~6°
+  const threshold = 3 * Math.PI / 180; // prag de ~3° (redus, mai puțin agresiv)
   if (Math.abs(diff) < threshold) {
     return { x: start.x + dist * Math.cos(nearest), y: start.y + dist * Math.sin(nearest) };
   }
@@ -3581,37 +3624,43 @@ function drawSelectionHighlights() {
       gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
       gx1 = Math.max(gx1, b.x + b.w); gy1 = Math.max(gy1, b.y + b.h);
     }
+    // hs = 1 pixel de ECRAN, convertit în conținut, pentru suprafața
+    // curentă — folosit pentru TOATE dimensiunile mânerelor (rază, grosime
+    // linie, decalaje), ca acestea să rămână la aceeași dimensiune vizuală
+    // pe ecran, exact ca pe tablă, indiferent de zoom-ul fișei PDF. Fără
+    // asta, mânerele apăreau mult mai mari/mici pe o fișă mărită/micșorată.
+    const hs = geoScreenLengthToContent(1);
     if (gx0 < gx1) {
       const bbox = { x: gx0, y: gy0, w: gx1 - gx0, h: gy1 - gy0 };
-      const hx = bbox.x + bbox.w + 2;
-      const hy = bbox.y + bbox.h + 2;
+      const hx = bbox.x + bbox.w + 2 * hs;
+      const hy = bbox.y + bbox.h + 2 * hs;
       currentResizeHandle = { x: hx, y: hy, strokeIdx: [...selectedStrokes] };
       selCtx.save();
       selCtx.fillStyle = '#e67e00';
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 3;
+      selCtx.lineWidth = 3 * hs;
       selCtx.beginPath();
-      selCtx.arc(hx, hy, 13, 0, Math.PI * 2);
+      selCtx.arc(hx, hy, 13 * hs, 0, Math.PI * 2);
       selCtx.fill();
       selCtx.stroke();
       selCtx.restore();
 
       // Mâner de ștergere (X roșu) — colțul din dreapta-sus, la fel ca la imagini
-      const dx = bbox.x + bbox.w + 2;
-      const dy = bbox.y - 2;
+      const dx = bbox.x + bbox.w + 2 * hs;
+      const dy = bbox.y - 2 * hs;
       currentDeleteHandle = { x: dx, y: dy, strokeIdx: [...selectedStrokes] };
       selCtx.save();
       selCtx.fillStyle = '#cc0000';
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 2.5;
+      selCtx.lineWidth = 2.5 * hs;
       selCtx.beginPath();
-      selCtx.arc(dx, dy, 12, 0, Math.PI * 2);
+      selCtx.arc(dx, dy, 12 * hs, 0, Math.PI * 2);
       selCtx.fill();
       selCtx.stroke();
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 2.4;
+      selCtx.lineWidth = 2.4 * hs;
       selCtx.lineCap = 'round';
-      const xr = 5;
+      const xr = 5 * hs;
       selCtx.beginPath();
       selCtx.moveTo(dx - xr, dy - xr);
       selCtx.lineTo(dx + xr, dy + xr);
@@ -3626,6 +3675,7 @@ function drawSelectionHighlights() {
     const stroke = page.strokes[idx];
     if (stroke) {
       const bbox = getStrokeBoundingBox(stroke);
+      const hs = geoScreenLengthToContent(1);
 
       // Mâner de multiplicare (copiere) — colțul din dreapta-jos, ușor
       // decalat față de mânerul de scalare (același colț), ca să nu se
@@ -3635,8 +3685,8 @@ function drawSelectionHighlights() {
       // celor două mânere (deja adaptate la scară) ar ajunge să se
       // suprapună, făcând ca o încercare de redimensionare să declanșeze
       // din greșeală duplicarea.
-      const hx = bbox.x + bbox.w + 2;
-      const hy = bbox.y + bbox.h + 2;
+      const hx = bbox.x + bbox.w + 2 * hs;
+      const hy = bbox.y + bbox.h + 2 * hs;
       const cpOffset = geoScreenLengthToContent(27);
       const cpx = hx + cpOffset;
       const cpy = hy + cpOffset;
@@ -3644,17 +3694,17 @@ function drawSelectionHighlights() {
       selCtx.save();
       selCtx.fillStyle = '#8e44ad';
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 2.5;
+      selCtx.lineWidth = 2.5 * hs;
       selCtx.beginPath();
-      selCtx.arc(cpx, cpy, 12, 0, Math.PI * 2);
+      selCtx.arc(cpx, cpy, 12 * hs, 0, Math.PI * 2);
       selCtx.fill();
       selCtx.stroke();
       // pictogramă "copiere" — două pătrate suprapuse
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 1.6;
+      selCtx.lineWidth = 1.6 * hs;
       selCtx.lineJoin = 'round';
-      selCtx.strokeRect(cpx - 6, cpy - 3, 7, 7);
-      selCtx.strokeRect(cpx - 2, cpy - 7, 7, 7);
+      selCtx.strokeRect(cpx - 6 * hs, cpy - 3 * hs, 7 * hs, 7 * hs);
+      selCtx.strokeRect(cpx - 2 * hs, cpy - 7 * hs, 7 * hs, 7 * hs);
       selCtx.restore();
     }
   }
@@ -3675,30 +3725,31 @@ function drawSelectionHighlights() {
     }
     if (showRotate) {
       const bbox = getStrokeBoundingBox(stroke);
-      const rx = bbox.x - 2;
-      const ry = bbox.y - 2;
+      const hs = geoScreenLengthToContent(1);
+      const rx = bbox.x - 2 * hs;
+      const ry = bbox.y - 2 * hs;
       currentRotateHandle = { x: rx, y: ry, strokeIdx: idx };
       selCtx.save();
       selCtx.fillStyle = '#2d7dd2';
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 3;
+      selCtx.lineWidth = 3 * hs;
       selCtx.beginPath();
-      selCtx.arc(rx, ry, 13, 0, Math.PI * 2);
+      selCtx.arc(rx, ry, 13 * hs, 0, Math.PI * 2);
       selCtx.fill();
       selCtx.stroke();
       // săgeată circulară simplă ca indiciu vizual de rotire
       selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 1.8;
+      selCtx.lineWidth = 1.8 * hs;
       selCtx.beginPath();
-      selCtx.arc(rx, ry, 6, -0.3 * Math.PI, 1.2 * Math.PI);
+      selCtx.arc(rx, ry, 6 * hs, -0.3 * Math.PI, 1.2 * Math.PI);
       selCtx.stroke();
       const ah = 1.2 * Math.PI;
-      const ahx = rx + 6 * Math.cos(ah), ahy = ry + 6 * Math.sin(ah);
+      const ahx = rx + 6 * hs * Math.cos(ah), ahy = ry + 6 * hs * Math.sin(ah);
       selCtx.beginPath();
       selCtx.moveTo(ahx, ahy);
-      selCtx.lineTo(ahx - 4, ahy - 2);
+      selCtx.lineTo(ahx - 4 * hs, ahy - 2 * hs);
       selCtx.moveTo(ahx, ahy);
-      selCtx.lineTo(ahx - 1, ahy + 4);
+      selCtx.lineTo(ahx - 1 * hs, ahy + 4 * hs);
       selCtx.stroke();
       selCtx.restore();
     }
@@ -5109,6 +5160,13 @@ boardDrawC.addEventListener('pointerdown', function(e) {
   activatePane('board');
 
   if (isEraserButtonEvent(e)) {
+    if (e.ctrlKey) {
+      // Ctrl + click-dreapta / butonul lateral al stylus-ului = anulare
+      // (undo) rapidă, fără să mai schimbi unealta.
+      e.preventDefault();
+      document.getElementById('btn-undo').click();
+      return;
+    }
     // Click dreapta sau butonul lateral al stylus-ului (ex. Wacom), ținut
     // apăsat = radieră temporară, indiferent ce unealtă era selectată —
     // revine automat la eliberare.
@@ -8468,6 +8526,7 @@ gotoPageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') confirmGotoPage();
 });
 
+
 const solidsMenuEl = document.getElementById('solids-menu');
 const btnSolids = document.getElementById('btn-solids');
 btnSolids.innerHTML = buildShapeIconSVG('cub', 20);
@@ -10055,6 +10114,12 @@ function setToolbarHidden(hidden) {
   btn.title = hidden
     ? (LANG === 'en' ? 'Show the toolbar' : 'Arată bara de instrumente')
     : (LANG === 'en' ? 'Hide the toolbar (frees up space on the board)' : 'Ascunde bara de instrumente (eliberează spațiu pe tablă)');
+  // Zona de lucru (tabla) se mărește/micșorează când bara dispare/apare —
+  // fără reîmprospătarea canvas-urilor, acea zonă nou eliberată rămânea
+  // nedesenabilă (canvas-ul păstra dimensiunea veche), iar liniatura de
+  // fundal nu se extindea acolo. Un mic delay lasă timp layout-ului să se
+  // recalculeze înainte de a citi noile dimensiuni.
+  setTimeout(refreshCanvasesForViewport, 50);
 }
 document.getElementById('btn-toggle-toolbar').onclick = () => setToolbarHidden(!toolbarHidden);
 
@@ -10219,8 +10284,9 @@ document.getElementById('pdf-export-btn').addEventListener('click', async () => 
     const { jsPDF } = window.jspdf;
     // Scală fixă de export (calitate bună de tipar), independentă de
     // zoom-ul curent al ferestrei — ca exportul să arate la fel indiferent
-    // la ce zoom lucrai când ai apăsat butonul.
-    const EXPORT_SCALE = 2.0;
+    // la ce zoom lucrai când ai apăsat butonul. Mărită față de înainte
+    // (2.0→3.0) pentru claritate mai bună a scrisului fin.
+    const EXPORT_SCALE = 3.0;
     let doc = null;
     for (let pageNum = 1; pageNum <= pdfTotalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
@@ -10260,14 +10326,18 @@ document.getElementById('pdf-export-btn').addEventListener('click', async () => 
       finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
       finalCtx.drawImage(canvas, 0, 0);
 
-      const dataUrl = finalCanvas.toDataURL('image/jpeg', 0.92);
+      // Fără pierderi (PNG), nu JPEG — compresia JPEG estompa vizibil
+      // liniile subțiri și scrisul de mână, mai ales la text mic. Fundalul
+      // alb compus mai sus (necesar oricum, ca zonele șterse să nu devină
+      // negre) rămâne valabil identic pentru PNG.
+      const dataUrl = finalCanvas.toDataURL('image/png');
       const pdfW = viewport.width / EXPORT_SCALE, pdfH = viewport.height / EXPORT_SCALE;
       if (!doc) {
         doc = new jsPDF(pdfW > pdfH ? 'l' : 'p', 'pt', [pdfW, pdfH]);
       } else {
         doc.addPage([pdfW, pdfH], pdfW > pdfH ? 'l' : 'p');
       }
-      doc.addImage(dataUrl, 'JPEG', 0, 0, pdfW, pdfH);
+      doc.addImage(dataUrl, 'PNG', 0, 0, pdfW, pdfH);
     }
     doc.save('fisa-adnotata.pdf');
     showToast(LANG === 'en' ? '✓ Annotated PDF exported' : '✓ Fișă PDF adnotată exportată');
@@ -10337,7 +10407,7 @@ async function buildSessionData() {
     };
   }));
 
-  return {
+  const sessionData = {
     version: 2,
     savedAt: new Date().toISOString(),
     currentPageIdx,
@@ -10349,6 +10419,45 @@ async function buildSessionData() {
     rulingOpacity: rulingOpacity,
     imageIdCounter: imageIdCounter
   };
+
+  // Includem și fișa PDF, dacă e încărcată — datele binare (codate base64)
+  // plus adnotările de pe fiecare pagină, ca la redeschiderea sesiunii să
+  // nu mai fie nevoie să reîncarci manual același fișier: totul (tablă +
+  // fișă + adnotările de pe amândouă) se restaurează dintr-o singură
+  // acțiune.
+  if (pdfDoc && loadedPdfArrayBuffer && pdfPanes.top) {
+    let binary = '';
+    const bytes = new Uint8Array(loadedPdfArrayBuffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    const pdfPagesData = {};
+    for (const pageNum in pdfPanes.top.pagesData) {
+      const pd = pdfPanes.top.pagesData[pageNum];
+      const imagesData = await Promise.all((pd.images || []).map(async (imgData) => {
+        let dataUrl = imgData.dataUrl;
+        if (!dataUrl && imgData.img) {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = imgData.img.naturalWidth || imgData.img.width;
+            canvas.height = imgData.img.naturalHeight || imgData.img.height;
+            canvas.getContext('2d').drawImage(imgData.img, 0, 0);
+            dataUrl = canvas.toDataURL('image/png');
+          } catch (e) {}
+        }
+        return { id: imgData.id, x: imgData.x, y: imgData.y, w: imgData.w, h: imgData.h, locked: !!imgData.locked, dataUrl };
+      }));
+      pdfPagesData[pageNum] = { strokes: pd.strokes || [], images: imagesData };
+    }
+    sessionData.pdf = {
+      base64: btoa(binary),
+      pageNum: pdfPanes.top.pageNum,
+      pagesData: pdfPagesData
+    };
+  }
+
+  return sessionData;
 }
 
 async function saveSession() {
@@ -10433,7 +10542,7 @@ async function restoreSessionData(data, opts) {
   rulingSize = data.rulingSize || 28;
   document.getElementById('ruling-size-val').textContent = rulingSize;
   rulingColor = data.rulingColor || '#ffffff';
-  rulingOpacity = (data.rulingOpacity != null) ? data.rulingOpacity : 0.5;
+  rulingOpacity = (data.rulingOpacity != null) ? data.rulingOpacity : 0.2;
   document.getElementById('ruling-opacity-val').textContent = Math.round(rulingOpacity * 100) + '%';
   syncRulingColorPicker();
 
@@ -10446,6 +10555,44 @@ async function restoreSessionData(data, opts) {
   redrawStrokes();
   renderImages();
   updateStatus();
+
+  // Restaurăm și fișa PDF, dacă a fost inclusă în sesiune — reîncărcăm
+  // fișierul din datele salvate (base64) și restaurăm adnotările pe fiecare
+  // pagină, exact ca înainte de salvare.
+  if (data.pdf && data.pdf.base64 && typeof pdfjsLib !== 'undefined') {
+    try {
+      const binary = atob(data.pdf.base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+      pdfDoc = doc;
+      loadedPdfArrayBuffer = bytes.buffer;
+      pdfTotalPages = doc.numPages;
+      pdfPanes.top = makePdfPane();
+      pdfPanes.top.pageNum = data.pdf.pageNum || 1;
+      const restoredPagesData = await Promise.all(Object.keys(data.pdf.pagesData || {}).map((pageNum) => {
+        return new Promise((resolve) => {
+          const pd = data.pdf.pagesData[pageNum];
+          const pdPage = { strokes: pd.strokes || [], images: [] };
+          const loadImgs = (pd.images || []).map((imgData) => new Promise((res) => {
+            if (imgData.dataUrl) {
+              const img = new Image();
+              img.onload = () => { pdPage.images.push({ ...imgData, img }); res(); };
+              img.onerror = () => res();
+              img.src = imgData.dataUrl;
+            } else { res(); }
+          }));
+          Promise.all(loadImgs).then(() => resolve({ pageNum, pdPage }));
+        });
+      }));
+      restoredPagesData.forEach(({ pageNum, pdPage }) => { pdfPanes.top.pagesData[pageNum] = pdPage; });
+      document.getElementById('btn-toggle-pdf-mode').disabled = false;
+      document.getElementById('btn-pdf-split').disabled = false;
+    } catch (err) {
+      console.warn('Nu s-a putut restaura fișa PDF din sesiune:', err);
+    }
+  }
+
   if (!opts.silent) showToast(trMsg(`✓ Sesiunea a fost restaurată! (${pages.length} pagini, ${imageIdCounter} imagini)`));
 }
 
@@ -10536,6 +10683,13 @@ document.getElementById('btn-load-session').onclick = () => {
 document.getElementById('session-file-input').onchange = e => {
   loadSession(e.target.files[0]);
   e.target.value = '';
+};
+// Aceleași acțiuni, accesibile și direct din bara de control a fișei PDF —
+// salvarea/deschiderea include acum și fișa PDF cu adnotațiile ei, nu doar
+// tabla.
+document.getElementById('pdf-save-session-btn').onclick = saveSession;
+document.getElementById('pdf-load-session-btn').onclick = () => {
+  document.getElementById('session-file-input').click();
 };
 
 // ====================================================================
@@ -10850,6 +11004,17 @@ const guideSvg = document.getElementById('guide-svg');
 // nicio decupare nouă), iar conținutul lui se mișcă normal, ca o cameră.
 const guidePanGroup = geoEl('g', { id: 'guide-pan-group' });
 guideSvg.appendChild(guidePanGroup);
+// Gradient gri metalic, comun riglei/echerului/raportorului — le dă un
+// aspect realist, ca un instrument fizic din plastic/metal, în loc de
+// dreptunghiul aproape transparent de dinainte.
+const geoDefs = geoEl('defs', {});
+const geoMetalGrad = geoEl('linearGradient', { id: 'geo-metal-gradient', x1: '0', y1: '0', x2: '0', y2: '1' });
+geoMetalGrad.appendChild(geoEl('stop', { offset: '0%', 'stop-color': '#f2f2f2', 'stop-opacity': '0.78' }));
+geoMetalGrad.appendChild(geoEl('stop', { offset: '45%', 'stop-color': '#d4d4d4', 'stop-opacity': '0.78' }));
+geoMetalGrad.appendChild(geoEl('stop', { offset: '55%', 'stop-color': '#b8b8b8', 'stop-opacity': '0.78' }));
+geoMetalGrad.appendChild(geoEl('stop', { offset: '100%', 'stop-color': '#949494', 'stop-opacity': '0.78' }));
+geoDefs.appendChild(geoMetalGrad);
+guideSvg.appendChild(geoDefs);
 const GUIDE_SNAP_DIST = 14;
 const PX_PER_CM = 50;
 const PX_PER_MM = PX_PER_CM / 10;
@@ -10892,7 +11057,13 @@ function geoTickColor(st) {
   if (pdfSplitMode && st) {
     surf = geoDetectSurfaceForScreenPoint(geoLocalToWorld(st, 0, 0));
   }
-  return (surf === 'board') ? 'rgba(0,85,204,0.85)' : 'rgba(144,238,144,0.9)';
+  return (surf === 'board') ? '#ffffff' : '#000000';
+}
+// Conturul cifrelor/diviziunilor — culoarea OPUSĂ textului (alb pe tablă →
+// contur negru; negru pe PDF → contur alb), ca cifrele să rămână lizibile
+// prin contrast, indiferent exact ce e dedesubt.
+function geoTickOutlineColor(st) {
+  return geoTickColor(st) === '#ffffff' ? '#000000' : '#ffffff';
 }
 
 const geoGroups = {};
@@ -10984,7 +11155,7 @@ function geoBuildFlipButton(horizontal) {
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
-    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
+    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5, rx: 4 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -11027,6 +11198,10 @@ function renderGeoRuler() {
   const extraPx = EXTRA_MM * PX_PER_MM;
   body.setAttribute('x', -extraPx); body.setAttribute('y', 0);
   body.setAttribute('width', L + extraPx); body.setAttribute('height', T);
+  // Conturul corpului se adaptează la suprafață — la fel ca cifrele, ca
+  // marginea instrumentului să rămână clar vizibilă atât pe tablă cât și pe
+  // fișa PDF.
+  body.setAttribute('stroke', geoTickColor(st));
 
   geoClear(ticks);
   const totalMM = Math.round(L / PX_PER_MM);
@@ -11038,7 +11213,7 @@ function renderGeoRuler() {
     ticks.appendChild(geoEl('line', { x1: x, y1: 0, x2: x, y2: tickH,
       stroke: geoTickColor(st), 'stroke-width': isCM ? 1.6 : (isHalf ? 1.1 : 0.7) }));
     if (isCM && mm > 0) {
-      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: x - 4, y: T - 8 });
+      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: x - 4, y: T - 8 });
       t.textContent = mm / 10;
       ticks.appendChild(t);
     }
@@ -11064,7 +11239,7 @@ function renderGeoRuler() {
 function buildGeoSetsquare() {
   const g = geoEl('g', { class: 'guide', id: 'guide-setsquare' });
   const body = geoEl('polygon', { class: 'guide-body',
-    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.8)', 'stroke-width': 1.5 });
+    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -11147,6 +11322,7 @@ function renderGeoSetsquare() {
   // vârful (local 0,0), nu diviziunea 0 mutată.
   const extraPx = GEO_SETSQUARE_ZERO_OFFSET;
   body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
+  body.setAttribute('stroke', geoTickColor(st));
 
   geoClear(ticks);
   // Diviziunea 0 a fiecărei catete e acum la 2mm (extraPx) de vârful
@@ -11163,7 +11339,7 @@ function renderGeoSetsquare() {
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
     ticks.appendChild(geoEl('line', { x1: d, y1: 0, x2: d, y2: -tickLen, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: d - 4, y: -6 });
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: d - 4, y: -6 });
       t1.textContent = mm / 10;
       ticks.appendChild(t1);
     }
@@ -11177,7 +11353,7 @@ function renderGeoSetsquare() {
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
     ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: 4, y: -d - 3 });
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: 4, y: -d - 3 });
       t2.textContent = mm / 10;
       ticks.appendChild(t2);
     }
@@ -11224,16 +11400,16 @@ function buildGeoProtractor() {
   const g = geoEl('g', { class: 'guide', id: 'guide-protractor' });
 
   const body = geoEl('path', { class: 'guide-body', 'fill-rule': 'evenodd',
-    fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(0,85,204,0.85)', 'stroke-width': 1.5 });
+    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5 });
   g.appendChild(body);
 
-  const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(0,85,204,0.28)', 'stroke-width': 0.8 });
+  const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(90,90,90,0.35)', 'stroke-width': 0.8 });
   g.appendChild(spokes);
 
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
 
-  const notch = geoEl('path', { fill: 'none', stroke: 'rgba(0,85,204,0.85)', 'stroke-width': 1.3 });
+  const notch = geoEl('path', { fill: 'none', stroke: '#5a5a5a', 'stroke-width': 1.3 });
   g.appendChild(notch);
 
   const centerHole = geoEl('circle', { cx: 0, cy: 0, r: 16, fill: 'rgba(255,255,255,0)', stroke: 'none' });
@@ -11389,6 +11565,7 @@ function renderGeoProtractor() {
   const holeR = 16;
   d += `M ${holeR} 0 A ${holeR} ${holeR} 0 1 0 ${-holeR} 0 A ${holeR} ${holeR} 0 1 0 ${holeR} 0 Z`;
   body.setAttribute('d', d);
+  body.setAttribute('stroke', geoTickColor(st));
 
   const nR = 13;
   notch.setAttribute('d', `M ${-nR} 0 A ${nR} ${nR} 0 0 1 ${nR} 0`);
@@ -11417,11 +11594,11 @@ function renderGeoProtractor() {
       stroke: geoTickColor(st), 'stroke-width': big ? 1.7 : (med ? 1.1 : 0.6) }));
     if (big) {
       const rt1 = R - 38;
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: rt1 * cx - 8, y: rt1 * sy + 4 });
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: rt1 * cx - 8, y: rt1 * sy + 4 });
       t1.textContent = deg;
       ticks.appendChild(t1);
       const rt2 = R - 64;
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), x: rt2 * cx - 8, y: rt2 * sy + 4 });
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: rt2 * cx - 8, y: rt2 * sy + 4 });
       t2.textContent = 180 - deg;
       ticks.appendChild(t2);
     }

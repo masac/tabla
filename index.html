@@ -792,7 +792,9 @@ input:focus-visible {
         <span class="pdf-ctl-sep"></span>
         <button class="pdf-ctl" id="pdf-panmode-btn" data-act="panmode" title="Plimbă fișa cu degetul (dezactivează desenul temporar)"><i class="ti ti-hand-stop"></i></button>
         <button class="pdf-ctl" id="pdf-clear-ink-btn" title="Șterge doar ce ai scris pe fișa PDF"><i class="ti ti-eraser"></i></button>
-        <button class="pdf-ctl" id="pdf-export-btn" title="Exportă fișa PDF cu adnotațiile tale, ca fișier nou" style="color:#4ade80;"><i class="ti ti-download"></i></button>
+        <button class="pdf-ctl" id="pdf-export-btn" title="Exportă fișa PDF cu adnotațiile tale, ca fișier nou (imagine plată, pentru distribuire)" style="color:#4ade80;"><i class="ti ti-download"></i></button>
+        <button class="pdf-ctl" id="pdf-save-session-btn" title="Salvează sesiunea (fișa PDF + toate adnotațiile, ca să continui lucrul mai târziu)" style="color:#006644;"><i class="ti ti-device-floppy"></i></button>
+        <button class="pdf-ctl" id="pdf-load-session-btn" title="Deschide o sesiune salvată anterior (fișă PDF + adnotații)" style="color:#664400;"><i class="ti ti-folder-open"></i></button>
         <span class="pdf-ctl-sep"></span>
         <button class="pdf-ctl" data-act="up" title="Mută sus"><i class="ti ti-arrow-up"></i></button>
         <button class="pdf-ctl" data-act="down" title="Mută jos"><i class="ti ti-arrow-down"></i></button>
@@ -937,6 +939,7 @@ input:focus-visible {
       <button class="tool page-btn" id="btn-next-page" title="Pagina următoare"><i class="ti ti-chevron-right"></i></button>
       <span class="qa-sep"></span>
       <button class="tool active" id="btn-pen"><i class="ti ti-pencil"></i></button>
+      <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
       <button class="tool select-tool" id="btn-select"><i class="ti ti-select"></i></button>
       <button class="tool" id="btn-vspace" title="Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă"><i class="ti ti-arrows-vertical"></i></button>
       <span class="qa-sep"></span>
@@ -953,7 +956,6 @@ input:focus-visible {
 
   <div id="toolbar">
     <div class="tool-group">
-      <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
       <button class="tool" id="btn-dashed" title="Linie întreruptă">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block">
           <line x1="1" y1="8" x2="4.2" y2="8" stroke="currentColor" stroke-width="2"/>
@@ -979,11 +981,11 @@ input:focus-visible {
       <button class="tool" id="btn-solids" title="Corpuri geometrice" style="position:relative;"></button>
       <button class="tool" id="btn-figures" title="Figuri geometrice" style="position:relative;"></button>
       <button class="tool" id="btn-3d" title="Corp 3D interactiv (rotește liber, apoi inserează)"><i class="ti ti-rotate-3d"></i></button>
+      <button class="tool" id="btn-multiselect" title="Selecție multiplă (pentru ecran tactil, fără tastă Shift)"><i class="ti ti-stack-2"></i></button>
+      <button class="tool" id="btn-panmode" title="Plimbă tabla cu degetul (suprafață infinită)"><i class="ti ti-hand-stop"></i></button>
       <button class="tool" id="btn-midpoint" title="Mijlocul unui segment (click pe un segment)">
         <svg width="15" height="15" viewBox="0 0 16 16" style="display:block"><line x1="1" y1="13" x2="15" y2="3" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.3" fill="currentColor"/></svg>
       </button>
-      <button class="tool" id="btn-multiselect" title="Selecție multiplă (pentru ecran tactil, fără tastă Shift)"><i class="ti ti-stack-2"></i></button>
-      <button class="tool" id="btn-panmode" title="Plimbă tabla cu degetul (suprafață infinită)"><i class="ti ti-hand-stop"></i></button>
       <button class="tool" id="btn-recenter-board" title="Revino la poziția inițială a tablei"><i class="ti ti-viewfinder"></i></button>
     </div>
     <div class="sep"></div>
@@ -1050,7 +1052,7 @@ input:focus-visible {
       <button class="tool" id="ruling-size-plus" title="Mărește liniatura" style="padding:4px 5px; font-weight:700;">+</button>
       <input type="color" id="ruling-color-pick" value="#ffffff" title="Culoare liniatură">
       <button class="tool" id="ruling-opacity-minus" title="Scade opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">−</button>
-      <span id="ruling-opacity-val" style="font-size:12px; min-width:30px; text-align:center; display:inline-block;">50%</span>
+      <span id="ruling-opacity-val" style="font-size:12px; min-width:30px; text-align:center; display:inline-block;">20%</span>
       <button class="tool" id="ruling-opacity-plus" title="Crește opacitatea liniaturii" style="padding:4px 5px; font-weight:700;">+</button>
       <button class="tool" id="btn-snap-grid" title="Lipire de rețea — elementele desenate se lipesc de nodurile caroiajului"><i class="ti ti-layout-grid"></i></button>
       <button class="tool" id="btn-snap-point" title="Lipire de punct — elementele desenate se lipesc de punctele speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul cercului la compas)"><i class="ti ti-focus-2"></i></button>
