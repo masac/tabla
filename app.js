@@ -2541,6 +2541,19 @@ function drawStrokeOn(c, stroke) {
   }
   if (stroke.type === 'text') {
     c.save();
+    if (stroke.isAngleLabel) {
+      // Etichetă de unghi (de pe raportor) — mărimea se recalculează la
+      // FIECARE desenare, ca rezultatul pe ecran să rămână mereu vizibil,
+      // indiferent de zoom-ul CURENT (nu doar cel de la crearea etichetei).
+      const dynFs = geoScreenLengthToContent(16) || stroke.fontSize || 16;
+      c.font = `bold ${dynFs}px sans-serif`;
+      c.fillStyle = stroke.color;
+      c.textAlign = stroke.textAlign || 'left';
+      c.textBaseline = 'top';
+      c.fillText(stroke.text, stroke.x, stroke.y);
+      c.restore();
+      return;
+    }
     c.font = stroke.font;
     c.fillStyle = stroke.color;
     c.textAlign = stroke.textAlign || 'left';
@@ -2678,7 +2691,13 @@ function drawStrokeOn(c, stroke) {
     const midA = (startA + endA) / 2;
     const labelR = r + 14;
     const deg = (angleDiff * 180 / Math.PI);
-    c.font = 'bold ' + (stroke.labelFontSize || 16) + 'px sans-serif';
+    // Calculăm mărimea fontului DINAMIC, la fiecare desenare — nu doar o
+    // singură dată la creare — ca rezultatul pe ecran să rămână mereu
+    // 16px, indiferent de zoom-ul CURENT al suprafeței (chiar dacă mai
+    // faci zoom DUPĂ ce unghiul a fost deja desenat). `stroke.labelFontSize`
+    // rămâne doar ca valoare de rezervă, pentru desene foarte vechi.
+    const dynFontSize = geoScreenLengthToContent(16) || stroke.labelFontSize || 16;
+    c.font = 'bold ' + dynFontSize + 'px sans-serif';
     c.fillStyle = stroke.color;
     c.textAlign = 'center';
     c.textBaseline = 'bottom';
@@ -4981,12 +5000,12 @@ function handlePointerUp(e) {
     if (diff > Math.PI) diff = 2 * Math.PI - diff;
     
     if (diff > 0.05) {
-      // Compensăm explicit dimensiunea fontului cu scala de bază a fișei
-      // PDF (dacă desenăm peste una) — la fel ca la eticheta raportorului —
-      // ca unghiul să aibă vizual aceeași mărime ca pe tablă, indiferent de
-      // zoom-ul fișei.
+      // Compensăm explicit dimensiunea fontului cu scala curentă a
+      // suprafeței — fișa PDF (finalScale) SAU zoom-ul tablei (boardZoom) —
+      // ca unghiul să aibă mereu aceeași mărime pe ecran, indiferent de cât
+      // de mult e mărită/micșorată suprafața curentă.
       const anglePane = pdfPanes[activeSurface];
-      const angleScaleComp = anglePane ? (anglePane.baseScale || anglePane.finalScale || 1) : 1;
+      const angleScaleComp = anglePane ? (anglePane.baseScale || anglePane.finalScale || 1) : (boardZoom || 1);
       pushStroke(page, {
         type: 'angle',
         vertex: { x: mathStartPoint.x, y: mathStartPoint.y },
@@ -11004,17 +11023,9 @@ const guideSvg = document.getElementById('guide-svg');
 // nicio decupare nouă), iar conținutul lui se mișcă normal, ca o cameră.
 const guidePanGroup = geoEl('g', { id: 'guide-pan-group' });
 guideSvg.appendChild(guidePanGroup);
-// Gradient gri metalic, comun riglei/echerului/raportorului — le dă un
-// aspect realist, ca un instrument fizic din plastic/metal, în loc de
-// dreptunghiul aproape transparent de dinainte.
-const geoDefs = geoEl('defs', {});
-const geoMetalGrad = geoEl('linearGradient', { id: 'geo-metal-gradient', x1: '0', y1: '0', x2: '0', y2: '1' });
-geoMetalGrad.appendChild(geoEl('stop', { offset: '0%', 'stop-color': '#f2f2f2', 'stop-opacity': '0.78' }));
-geoMetalGrad.appendChild(geoEl('stop', { offset: '45%', 'stop-color': '#d4d4d4', 'stop-opacity': '0.78' }));
-geoMetalGrad.appendChild(geoEl('stop', { offset: '55%', 'stop-color': '#b8b8b8', 'stop-opacity': '0.78' }));
-geoMetalGrad.appendChild(geoEl('stop', { offset: '100%', 'stop-color': '#949494', 'stop-opacity': '0.78' }));
-geoDefs.appendChild(geoMetalGrad);
-guideSvg.appendChild(geoDefs);
+// Culoare de fundal gri deschis, comună riglei/echerului/raportorului —
+// simplă, fără gradient.
+const GEO_BODY_FILL = 'rgba(216,216,216,0.45)';
 const GUIDE_SNAP_DIST = 14;
 const PX_PER_CM = 50;
 const PX_PER_MM = PX_PER_CM / 10;
@@ -11155,7 +11166,7 @@ function geoBuildFlipButton(horizontal) {
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
-    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5, rx: 4 });
+    fill: GEO_BODY_FILL, stroke: '#5a5a5a', 'stroke-width': 1.3, rx: 4 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -11201,7 +11212,6 @@ function renderGeoRuler() {
   // Conturul corpului se adaptează la suprafață — la fel ca cifrele, ca
   // marginea instrumentului să rămână clar vizibilă atât pe tablă cât și pe
   // fișa PDF.
-  body.setAttribute('stroke', geoTickColor(st));
 
   geoClear(ticks);
   const totalMM = Math.round(L / PX_PER_MM);
@@ -11213,7 +11223,7 @@ function renderGeoRuler() {
     ticks.appendChild(geoEl('line', { x1: x, y1: 0, x2: x, y2: tickH,
       stroke: geoTickColor(st), 'stroke-width': isCM ? 1.6 : (isHalf ? 1.1 : 0.7) }));
     if (isCM && mm > 0) {
-      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: x - 4, y: T - 8 });
+      const t = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 0.6, 'paint-order': 'stroke fill', x: x - 4, y: T - 8 });
       t.textContent = mm / 10;
       ticks.appendChild(t);
     }
@@ -11239,7 +11249,7 @@ function renderGeoRuler() {
 function buildGeoSetsquare() {
   const g = geoEl('g', { class: 'guide', id: 'guide-setsquare' });
   const body = geoEl('polygon', { class: 'guide-body',
-    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5 });
+    fill: GEO_BODY_FILL, stroke: '#5a5a5a', 'stroke-width': 1.3 });
   g.appendChild(body);
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
@@ -11322,7 +11332,6 @@ function renderGeoSetsquare() {
   // vârful (local 0,0), nu diviziunea 0 mutată.
   const extraPx = GEO_SETSQUARE_ZERO_OFFSET;
   body.setAttribute('points', `0,0 ${W},0 0,${-H}`);
-  body.setAttribute('stroke', geoTickColor(st));
 
   geoClear(ticks);
   // Diviziunea 0 a fiecărei catete e acum la 2mm (extraPx) de vârful
@@ -11339,7 +11348,7 @@ function renderGeoSetsquare() {
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
     ticks.appendChild(geoEl('line', { x1: d, y1: 0, x2: d, y2: -tickLen, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: d - 4, y: -6 });
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 0.6, 'paint-order': 'stroke fill', x: d - 4, y: -6 });
       t1.textContent = mm / 10;
       ticks.appendChild(t1);
     }
@@ -11353,7 +11362,7 @@ function renderGeoSetsquare() {
     const sw = isCM ? 1.6 : (isHalf ? 1.1 : 0.7);
     ticks.appendChild(geoEl('line', { x1: 0, y1: -d, x2: tickLen, y2: -d, stroke: geoTickColor(st), 'stroke-width': sw }));
     if (isCM && mm > 0) {
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: 4, y: -d - 3 });
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 0.6, 'paint-order': 'stroke fill', x: 4, y: -d - 3 });
       t2.textContent = mm / 10;
       ticks.appendChild(t2);
     }
@@ -11400,7 +11409,7 @@ function buildGeoProtractor() {
   const g = geoEl('g', { class: 'guide', id: 'guide-protractor' });
 
   const body = geoEl('path', { class: 'guide-body', 'fill-rule': 'evenodd',
-    fill: 'url(#geo-metal-gradient)', stroke: '#5a5a5a', 'stroke-width': 1.5 });
+    fill: GEO_BODY_FILL, stroke: '#5a5a5a', 'stroke-width': 1.3 });
   g.appendChild(body);
 
   const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(90,90,90,0.35)', 'stroke-width': 0.8 });
@@ -11408,9 +11417,6 @@ function buildGeoProtractor() {
 
   const ticks = geoEl('g', { class: 'guide-ticks' });
   g.appendChild(ticks);
-
-  const notch = geoEl('path', { fill: 'none', stroke: '#5a5a5a', 'stroke-width': 1.3 });
-  g.appendChild(notch);
 
   const centerHole = geoEl('circle', { cx: 0, cy: 0, r: 16, fill: 'rgba(255,255,255,0)', stroke: 'none' });
   g.appendChild(centerHole);
@@ -11484,7 +11490,7 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, notch, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul raportorului, nu printr-un buton dedicat.
   attachDoubleTapToggleSnap(body);
@@ -11552,7 +11558,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, notch, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
+  const { body, spokes, ticks, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
 
@@ -11562,13 +11568,7 @@ function renderGeoProtractor() {
     d += `L ${R * Math.cos(rad)} ${-R * Math.sin(rad)} `;
   }
   d += 'Z ';
-  const holeR = 16;
-  d += `M ${holeR} 0 A ${holeR} ${holeR} 0 1 0 ${-holeR} 0 A ${holeR} ${holeR} 0 1 0 ${holeR} 0 Z`;
   body.setAttribute('d', d);
-  body.setAttribute('stroke', geoTickColor(st));
-
-  const nR = 13;
-  notch.setAttribute('d', `M ${-nR} 0 A ${nR} ${nR} 0 0 1 ${nR} 0`);
 
   geoClear(spokes);
   geoClear(ticks);
@@ -11594,11 +11594,11 @@ function renderGeoProtractor() {
       stroke: geoTickColor(st), 'stroke-width': big ? 1.7 : (med ? 1.1 : 0.6) }));
     if (big) {
       const rt1 = R - 38;
-      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: rt1 * cx - 8, y: rt1 * sy + 4 });
+      const t1 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 0.6, 'paint-order': 'stroke fill', x: rt1 * cx - 8, y: rt1 * sy + 4 });
       t1.textContent = deg;
       ticks.appendChild(t1);
       const rt2 = R - 64;
-      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 2.2, 'paint-order': 'stroke fill', x: rt2 * cx - 8, y: rt2 * sy + 4 });
+      const t2 = geoEl('text', { class: 'guide-label', fill: geoTickColor(st), stroke: geoTickOutlineColor(st), 'stroke-width': 0.6, 'paint-order': 'stroke fill', x: rt2 * cx - 8, y: rt2 * sy + 4 });
       t2.textContent = 180 - deg;
       ticks.appendChild(t2);
     }
@@ -12168,8 +12168,11 @@ function finalizeProtractorArc(skipUsageRecord) {
   // al utilizatorului) — la fel ca la grosimea liniei — ca eticheta să aibă
   // implicit aceeași mărime ca pe tablă, dar să rămână scalabilă dacă
   // utilizatorul mărește manual fișa.
+  // Compensăm cu scala curentă a suprafeței — fișa PDF (finalScale) SAU
+  // zoom-ul tablei (boardZoom) — ca eticheta să aibă mereu aceeași mărime
+  // pe ecran, indiferent de zoom-ul de la momentul creării.
   const protractorPane = pdfPanes[targetSurf];
-  const protractorScaleComp = protractorPane ? (protractorPane.baseScale || protractorPane.finalScale || 1) : 1;
+  const protractorScaleComp = protractorPane ? (protractorPane.baseScale || protractorPane.finalScale || 1) : (boardZoom || 1);
   const labelFontSize = 16 / protractorScaleComp;
   pushStroke(page, {
     type: 'text',
@@ -12179,6 +12182,13 @@ function finalizeProtractorArc(skipUsageRecord) {
     font: `bold ${labelFontSize}px sans-serif`,
     color: color,
     fontSize: labelFontSize,
+    // Marcaj special — la desenare, mărimea acestei etichete se
+    // recalculează dinamic, la fiecare redare, ca să rămână mereu
+    // vizibilă la aceeași mărime pe ecran, indiferent de zoom-ul CURENT
+    // (nu doar cel de la creare). Textul normal, scris de utilizator, NU
+    // e afectat — se comportă în continuare ca orice alt desen, scalând
+    // natural cu zoom-ul, ca o cerneală reală.
+    isAngleLabel: true,
     textAlign: 'left'
   });
   if (targetSurf === activeSurface) redrawStrokes();

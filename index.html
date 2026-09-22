@@ -187,13 +187,17 @@ input:focus-visible {
     #guide-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; transition: filter 0.15s; }
     /* Pe fundal întunecat, instrumentele (riglă/echer/raportor/compas) sunt
        inversate cromatic ca să rămână puternic vizibile și lizibile. */
-    body.dark-board #guide-svg { filter: invert(0.87) hue-rotate(180deg) contrast(1.15); }
+    /* Filtrul CSS de inversare a culorilor pe tablă întunecată a fost
+       eliminat — culorile instrumentelor geometrice (riglă/echer/raportor)
+       sunt acum calculate corect, per element, direct din JS (vezi
+       geoTickColor), în funcție de suprafață. Filtrul vechi le inversa din
+       nou, anulând acea colorare corectă. */
     .guide { display: none; }
     .guide.visible { display: block; }
     .guide-body { cursor: move; pointer-events: auto; touch-action: none; }
     .guide-handle { cursor: grab; pointer-events: auto; touch-action: none; }
     .guide-handle:active { cursor: grabbing; }
-    .guide-label { font-size: 11px; fill: rgba(60,200,60,0.95); font-family: sans-serif; pointer-events: none; user-select: none; }
+    .guide-label { font-size: 11px; font-family: sans-serif; pointer-events: none; user-select: none; }
     
     .image-item {
       position: absolute;
