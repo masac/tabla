@@ -11287,8 +11287,30 @@ function buildGeoSetsquare() {
   rightAngleBox.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
   rightAngleBox.addEventListener('click', ev => { ev.stopPropagation(); toggleSetsquareRightAngleMark(); });
 
+  // Buton de rotire rapidă — rotește echerul cu exact 90° spre stânga, în
+  // jurul vârfului unghiului drept (fără să fie nevoie să tragi manual de
+  // mânerul de rotire pentru unghiuri "drepte", des folosite).
+  const quickRotateBtn = geoEl('g', { style: 'cursor:pointer; pointer-events:auto;' });
+  const quickRotateBg = geoEl('circle', { r: 11, fill: '#2d7dd2', stroke: '#ffffff', 'stroke-width': 1.5 });
+  quickRotateBtn.appendChild(quickRotateBg);
+  const quickRotateIcon = geoEl('path', {
+    d: 'M -4 -5 A 6 6 0 1 0 5 -3.5', fill: 'none', stroke: '#ffffff', 'stroke-width': 1.6,
+    'stroke-linecap': 'round', 'pointer-events': 'none' });
+  quickRotateBtn.appendChild(quickRotateIcon);
+  const quickRotateArrow = geoEl('path', { d: 'M -4 -8 L -4 -2 L -9 -5 Z', fill: '#ffffff', 'pointer-events': 'none' });
+  quickRotateBtn.appendChild(quickRotateArrow);
+  g.appendChild(quickRotateBtn);
+  quickRotateBtn.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  quickRotateBtn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const st = geoGuides.setsquare;
+    st.angle -= Math.PI / 2;
+    updateGeoTransform('setsquare');
+    renderGeoSetsquare();
+  });
+
   guidePanGroup.appendChild(g);
-  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck };
+  geoGroups.setsquare = { g, body, ticks, rotateHandle, resizeHandleW, resizeHandleH, pencilBtns, closeBtn, rightAngleBox, rightAngleCheck, quickRotateBtn };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul echerului, nu printr-un buton dedicat.
   attachDoubleTapToggleSnap(body);
@@ -11388,6 +11410,12 @@ function renderGeoSetsquare() {
     const bx = boxDist * Math.SQRT1_2, by = -boxDist * Math.SQRT1_2;
     rightAngleBox.setAttribute('transform', `translate(${bx},${by})`);
     rightAngleCheck.setAttribute('transform', `translate(${bx},${by})`);
+    // Butonul de rotire rapidă (90° stânga) — pe aceeași diagonală, încă un
+    // cm mai departe spre interiorul echerului, ca să nu se suprapună cu
+    // celelalte butoane.
+    const qrDist = boxDist + PX_PER_CM;
+    const qrx = qrDist * Math.SQRT1_2, qry = -qrDist * Math.SQRT1_2;
+    geoGroups.setsquare.quickRotateBtn.setAttribute('transform', `translate(${qrx},${qry})`);
   }
   // Poziționăm cele 3 creioane la mijlocul fiecărei muchii, ușor în
   // interiorul triunghiului (pe direcția normalei spre interior) — nu în
@@ -11412,7 +11440,7 @@ function buildGeoProtractor() {
     fill: GEO_BODY_FILL, stroke: '#5a5a5a', 'stroke-width': 1.3 });
   g.appendChild(body);
 
-  const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(90,90,90,0.35)', 'stroke-width': 0.8 });
+  const spokes = geoEl('g', { class: 'guide-ticks', stroke: 'rgba(255,255,255,0.4)', 'stroke-width': 0.8 });
   g.appendChild(spokes);
 
   const ticks = geoEl('g', { class: 'guide-ticks' });
@@ -11437,9 +11465,16 @@ function buildGeoProtractor() {
   const closeBtn = geoBuildCloseButton();
   g.appendChild(closeBtn);
 
-  const arcMark = geoEl('path', { fill: 'none', stroke: '#2d9d4f', 'stroke-width': 2,
+  const arcMark = geoEl('path', { fill: 'none', stroke: '#ffffff', 'stroke-width': 2,
     'stroke-dasharray': '5,4', 'pointer-events': 'none' });
   g.appendChild(arcMark);
+
+  // Mică linie perpendiculară la centru (pe lângă linia orizontală de bază
+  // a raportorului) — un reper vizual de aliniere, ca la un raportor real,
+  // util pentru poziționarea precisă peste un unghi deja desenat. Pur
+  // decorativ — nu afectează deloc rotirea sau pivotul.
+  const alignCross = geoEl('line', { stroke: '#5a5a5a', 'stroke-width': 1.2, 'pointer-events': 'none' });
+  g.appendChild(alignCross);
 
   // Segment permanent, de la centrul (pivotul) raportorului până la mânerul
   // verde — arată clar direcția unghiului curent, tot timpul, nu doar cât
@@ -11490,7 +11525,7 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul raportorului, nu printr-un buton dedicat.
   attachDoubleTapToggleSnap(body);
@@ -11558,17 +11593,27 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
+  const { body, spokes, ticks, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
+  // Linia de bază se extinde cu 2mm în plus în jos (o mică "talpă" sub
+  // diametrul raportorului, ca la un raportor real) — PUR vizual: pivotul
+  // rotirii rămâne exact în (0,0), neschimbat, la fel ca până acum.
+  const baseExtra = 2 * PX_PER_MM;
 
-  let d = `M ${-R} 0 `;
+  let d = `M ${-R} 0 L ${-R} ${baseExtra} L ${R} ${baseExtra} L ${R} 0 `;
   for (let deg = 180; deg >= 0; deg -= 2) {
     const rad = deg * Math.PI / 180;
     d += `L ${R * Math.cos(rad)} ${-R * Math.sin(rad)} `;
   }
   d += 'Z ';
   body.setAttribute('d', d);
+  // Linia mică perpendiculară de aliniere — verticală, la centrul (pivotul)
+  // raportorului, trecând prin talpa de 2mm nou adăugată și puțin în
+  // interiorul semicercului (la fel ca la un raportor real, reper pentru
+  // poziționare precisă peste un unghi deja desenat).
+  alignCross.setAttribute('x1', 0); alignCross.setAttribute('y1', baseExtra);
+  alignCross.setAttribute('x2', 0); alignCross.setAttribute('y2', -14);
 
   geoClear(spokes);
   geoClear(ticks);
