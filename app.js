@@ -2656,7 +2656,17 @@ function drawStrokeOn(c, stroke) {
     c.strokeStyle = stroke.color;
     c.lineWidth = stroke.size || 2;
     c.beginPath();
-    c.arc(stroke.cx, stroke.cy, stroke.radius, stroke.startAngle, stroke.endAngle);
+    // La exact 180° distanță între cele două capete, alegerea sensului de
+    // baleiere (min→max, implicit) devine ambiguă — o mică imprecizie de
+    // calcul la STOCARE (vezi finalizeProtractorArc) putea face ca arcul să
+    // fie desenat prin partea de JOS a centrului, în loc de sus. Verificăm
+    // explicit punctul de mijloc și, dacă e nevoie, desenăm prin sensul opus.
+    const arcSpan = stroke.endAngle - stroke.startAngle;
+    if (Math.abs(arcSpan - Math.PI) < 0.02 && Math.sin((stroke.startAngle + stroke.endAngle) / 2) > 0) {
+      c.arc(stroke.cx, stroke.cy, stroke.radius, stroke.startAngle, stroke.endAngle, true);
+    } else {
+      c.arc(stroke.cx, stroke.cy, stroke.radius, stroke.startAngle, stroke.endAngle);
+    }
     c.stroke();
     c.restore();
     return;
@@ -2684,6 +2694,20 @@ function drawStrokeOn(c, stroke) {
       startA = endA;
       endA = temp + 2 * Math.PI;
       angleDiff = endA - startA;
+    }
+    // Caz special, la exact 180° (unghi alungit): cele două sensuri
+    // posibile de baleiere au aceeași lungime — matematic ambiguu. O mică
+    // imprecizie de calcul (Math.sin(Math.PI) nu e niciodată exact 0) putea
+    // face ca arcul să fie ales greșit, prin partea de JOS a vârfului, în
+    // loc de sus. Verificăm explicit punctul de mijloc și, dacă e nevoie,
+    // alegem sensul opus.
+    if (Math.abs(angleDiff - Math.PI) < 0.02) {
+      const midCheck = (startA + endA) / 2;
+      if (Math.sin(midCheck) > 0) {
+        const t = startA;
+        startA = endA;
+        endA = t + 2 * Math.PI;
+      }
     }
     c.beginPath();
     c.arc(stroke.vertex.x, stroke.vertex.y, r, startA, endA);
@@ -5780,6 +5804,23 @@ function drawProtractor(ctx2, vertex, ray1end, ray2end, color, size) {
     angleDiff = ccwDiff;
     startA = a1;
     endA = a1 - angleDiff;
+  }
+  // Caz special, la exact 180° (unghi alungit): cwDiff și ccwDiff sunt
+  // egale — alegerea de mai sus (cwDiff <= Math.PI) devine ambiguă, iar o
+  // mică imprecizie de calcul putea face ca arcul afișat să treacă prin
+  // partea de JOS a vârfului, în loc de sus. Verificăm explicit punctul de
+  // mijloc și, dacă e nevoie, alegem sensul opus.
+  if (Math.abs(angleDiff - Math.PI) < 0.02) {
+    const sweepSignCheck = isCCW ? -1 : 1;
+    const midCheck = startA + sweepSignCheck * angleDiff / 2;
+    if (Math.sin(midCheck) > 0) {
+      isCCW = !isCCW;
+      if (!isCCW) {
+        endA = a2 < a1 ? a2 + 2*Math.PI : a2;
+      } else {
+        endA = a1 - angleDiff;
+      }
+    }
   }
 
   const deg = angleDiff * 180 / Math.PI;
@@ -11068,7 +11109,13 @@ function geoTickColor(st) {
   if (pdfSplitMode && st) {
     surf = geoDetectSurfaceForScreenPoint(geoLocalToWorld(st, 0, 0));
   }
-  return (surf === 'board') ? '#ffffff' : '#000000';
+  if (surf === 'board') {
+    // Pe tablă, alegem în funcție de culoarea REALĂ a fundalului — dacă
+    // tabla e albă/deschisă la culoare, folosim același stil ca pe PDF
+    // (negru), nu presupunem mereu un fundal întunecat.
+    return isColorDark(bgColor) ? '#ffffff' : '#000000';
+  }
+  return '#000000';
 }
 // Conturul cifrelor/diviziunilor — culoarea OPUSĂ textului (alb pe tablă →
 // contur negru; negru pe PDF → contur alb), ca cifrele să rămână lizibile
@@ -12112,7 +12159,13 @@ function geoDragMove(e) {
   } else if (geoActiveDrag.mode === 'protractorArc') {
     const local = geoWorldToLocal(st, p.x, p.y);
     let deg = -Math.atan2(local.y, local.x) * 180 / Math.PI;
-    deg = Math.max(0, Math.min(180, deg));
+    // Normalizăm la [0,360) înainte de a decide cum plafonăm — altfel, o
+    // mică imprecizie la tragerea EXACT spre 180° putea face ca unghiul
+    // calculat să "treacă" ușor dincolo (ex. -178° în loc de 182°), fiind
+    // interpretat greșit ca aproape de -180° și plafonat brusc la 0°, în
+    // loc de 180°.
+    if (deg < 0) deg += 360;
+    if (deg > 180) deg = (deg <= 270) ? 180 : 0;
     st.arcAngle = deg;
     renderGeoProtractor();
   } else if (geoActiveDrag.mode === 'protractorArcRadius') {
@@ -12637,15 +12690,21 @@ function startGeoSegBuild(kind, p0, p1, strokeColor, strokeSize, guideName, axis
   g.appendChild(cancelBtn);
 
   // Etichete mici, câte una lângă fiecare punct, cu valoarea lui curentă în
-  // cm față de diviziunea 0 a ghidajului (poate fi și negativă).
+  // cm față de diviziunea 0 a ghidajului (poate fi și negativă). Culoarea
+  // e adaptivă la suprafață (albă pe tablă, neagră pe PDF), cu un contur
+  // subțire de contrast — fără asta, textul rămânea la negrul implicit al
+  // SVG-ului, invizibil pe o tablă cu fundal negru.
   const label0 = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    fill: geoTickColor(null), stroke: geoTickOutlineColor(null), 'stroke-width': 0.6, 'paint-order': 'stroke fill',
     style: 'font-size:11px;font-weight:600;' });
   g.appendChild(label0);
   const label1 = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    fill: geoTickColor(null), stroke: geoTickOutlineColor(null), 'stroke-width': 0.6, 'paint-order': 'stroke fill',
     style: 'font-size:11px;font-weight:600;' });
   g.appendChild(label1);
   // Eticheta cu distanța totală dintre cele două puncte (lungimea segmentului).
   const lenLabel = geoEl('text', { class: 'guide-label', 'text-anchor': 'middle',
+    fill: geoTickColor(null), stroke: geoTickOutlineColor(null), 'stroke-width': 0.6, 'paint-order': 'stroke fill',
     style: 'font-size:12px;font-weight:700;' });
   g.appendChild(lenLabel);
 
@@ -12709,6 +12768,9 @@ function renderGeoSegBuild() {
     const v0 = ((p0.x - axis.zero.x) * axis.dir.x + (p0.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
     const v1 = ((p1.x - axis.zero.x) * axis.dir.x + (p1.y - axis.zero.y) * axis.dir.y) / PX_PER_CM;
     const labelExtra = 18;
+    const labelFill = geoTickColor(null), labelOutline = geoTickOutlineColor(null);
+    label0.setAttribute('fill', labelFill); label0.setAttribute('stroke', labelOutline);
+    label1.setAttribute('fill', labelFill); label1.setAttribute('stroke', labelOutline);
     label0.setAttribute('x', off0.x + n.x * labelExtra);
     label0.setAttribute('y', off0.y + n.y * labelExtra);
     label0.textContent = formatCmValue(v0);
@@ -12728,6 +12790,8 @@ function renderGeoSegBuild() {
   const bx = mx + n.x * btnOffset, by = my + n.y * btnOffset;
   okBtn.setAttribute('transform', `translate(${bx - 24},${by})`);
   cancelBtn.setAttribute('transform', `translate(${bx + 24},${by})`);
+  lenLabel.setAttribute('fill', geoTickColor(null));
+  lenLabel.setAttribute('stroke', geoTickOutlineColor(null));
   lenLabel.setAttribute('x', bx);
   lenLabel.setAttribute('y', by - 24);
   lenLabel.textContent = (len / PX_PER_CM).toFixed(1) + ' cm';
@@ -12903,6 +12967,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v225</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13022,6 +13087,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v225</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
