@@ -11523,6 +11523,12 @@ function buildGeoProtractor() {
   const alignCross = geoEl('line', { stroke: '#5a5a5a', 'stroke-width': 1.2, 'pointer-events': 'none' });
   g.appendChild(alignCross);
 
+  // Linie roz dedicată pe linia de bază (0°-180°) — mult mai vizibilă decât
+  // conturul discret al corpului, utilă pentru alinierea precisă peste un
+  // desen deja existent.
+  const baseline = geoEl('line', { stroke: '#ff1493', 'stroke-width': 2, 'pointer-events': 'none' });
+  g.appendChild(baseline);
+
   // Segment permanent, de la centrul (pivotul) raportorului până la mânerul
   // verde — arată clar direcția unghiului curent, tot timpul, nu doar cât
   // timp se trage mânerul.
@@ -11572,7 +11578,7 @@ function buildGeoProtractor() {
   closeBtn.addEventListener('click', ev => { ev.stopPropagation(); closeGeoGuide('protractor'); });
 
   guidePanGroup.appendChild(g);
-  geoGroups.protractor = { g, body, spokes, ticks, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
+  geoGroups.protractor = { g, body, spokes, ticks, centerHole, vertexDot, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, baseline, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup, arcBuildBox, arcBuildCheck };
   // Prea multe butoane pe instrument — lipirea de punct se comută acum cu
   // dublu-click direct pe corpul raportorului, nu printr-un buton dedicat.
   attachDoubleTapToggleSnap(body);
@@ -11640,7 +11646,7 @@ function toggleProtractorArcCheckbox() {
 
 function renderGeoProtractor() {
   const st = geoGuides.protractor;
-  const { body, spokes, ticks, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
+  const { body, spokes, ticks, rotateHandle, resizeHandle, resetHorizBtn, closeBtn, arcMark, alignCross, baseline, vertexLine, arcLabel, arcHandle, arcRadiusHandle, arcBuildGroup } = geoGroups.protractor;
   const R = st.radius;
   const arcR = R * (st.arcRadiusScale || 0.45);
   // Linia de bază se extinde cu 2mm în plus în jos (o mică "talpă" sub
@@ -11655,6 +11661,8 @@ function renderGeoProtractor() {
   }
   d += 'Z ';
   body.setAttribute('d', d);
+  baseline.setAttribute('x1', -R); baseline.setAttribute('y1', 0);
+  baseline.setAttribute('x2', R); baseline.setAttribute('y2', 0);
   // Linia mică perpendiculară de aliniere — verticală, la centrul (pivotul)
   // raportorului, trecând prin talpa de 2mm nou adăugată și puțin în
   // interiorul semicercului (la fel ca la un raportor real, reper pentru
@@ -12967,7 +12975,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v225</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v226</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13087,7 +13095,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v225</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v226</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
