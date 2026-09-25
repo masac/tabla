@@ -588,6 +588,9 @@ let rulingOpacity = 0.2; // opacitatea liniaturii (0-1); implicit 20%
 // VARIABILE PENTRU SELECTARE ȘI MUTARE
 // ================================================================
 let selectedStrokes = new Set();
+// Clipboard intern pentru copierea/lipirea desenelor selectate (Ctrl+C/V) —
+// funcționează și între pagini diferite.
+let strokeClipboard = [];
 let isSelecting = false;
 let selectionStartX = 0, selectionStartY = 0;
 let lassoPoints = [];
@@ -10003,12 +10006,40 @@ document.querySelectorAll('#calc-overlay [data-act]').forEach(btn => {
 
 function openCalculator() {
   calcClear();
-  document.getElementById('calc-overlay').style.display = 'block';
+  const overlay = document.getElementById('calc-overlay');
+  // Resetăm poziția la fiecare deschidere — altfel, dacă fusese trasă
+  // anterior (chiar și accidental), rămânea "blocată" acolo permanent.
+  overlay.style.left = '';
+  overlay.style.top = '';
+  overlay.style.transform = '';
+  overlay.style.display = 'block';
+  ensureOverlayFullyVisible(overlay);
 }
 function closeCalculator() {
   document.getElementById('calc-overlay').style.display = 'none';
 }
 document.getElementById('btn-calculator').onclick = openCalculator;
+
+// Verifică, DUPĂ afișare, că fereastra chiar încape complet în zona
+// vizibilă curentă — dacă nu (ecran mic, sau poziția implicită din CSS nu
+// se potrivește cu dimensiunea reală a ferestrei), o repoziționează
+// explicit, prin JS, ca să fie mereu complet vizibilă și lizibilă.
+function ensureOverlayFullyVisible(overlay) {
+  requestAnimationFrame(() => {
+    const rect = overlay.getBoundingClientRect();
+    const margin = 8;
+    let left = rect.left, top = rect.top;
+    if (rect.right > window.innerWidth - margin) left -= (rect.right - (window.innerWidth - margin));
+    if (rect.left < margin) left = margin;
+    if (rect.bottom > window.innerHeight - margin) top -= (rect.bottom - (window.innerHeight - margin));
+    if (rect.top < margin) top = margin;
+    if (left !== rect.left || top !== rect.top) {
+      overlay.style.left = left + 'px';
+      overlay.style.top = top + 'px';
+      overlay.style.transform = 'none';
+    }
+  });
+}
 
 // Fereastra calculatorului poate fi deplasată trăgând de antet (unde scrie
 // "Calculator"), ca orice fereastră flotantă obișnuită.
@@ -10138,7 +10169,17 @@ document.addEventListener('paste', (e) => {
       finalW = w / ct.scale;
       finalH = h / ct.scale;
     } else {
-      x = screenX; y = screenY; finalW = w; finalH = h;
+      // La fel și pe tablă — convertim poziția (calculată în pixeli de
+      // ECRAN, centrată în zona vizibilă) prin zoom-ul/panoramarea curentă.
+      // Fără asta, imaginea se stoca direct la coordonatele "brute" de
+      // conținut, care corespundeau vizual poziției INIȚIALE a tablei
+      // (înainte de orice scroll/zoom) — dacă utilizatorul făcuse scroll
+      // între timp, imaginea apărea complet în afara zonei vizibile curente.
+      const z = boardZoom || 1;
+      x = (screenX - boardPanX) / z;
+      y = (screenY - boardPanY) / z;
+      finalW = w / z;
+      finalH = h / z;
     }
 
     const page = getCurrentPage();
@@ -10195,6 +10236,12 @@ document.getElementById('btn-undo').onclick = () => {
     for (const item of action.items) {
       page.strokes.splice(item.index, 0, item.stroke);
     }
+  } else if (action.type === 'pasteStrokes') {
+    const sorted = [...action.items].sort((a, b) => b.index - a.index);
+    for (const item of sorted) {
+      const idx = page.strokes.indexOf(item.stroke);
+      if (idx !== -1) page.strokes.splice(idx, 1);
+    }
   } else if (action.type === 'move') {
     for (const item of action.items) {
       restoreStrokePosition(item.stroke, item.before);
@@ -10245,6 +10292,10 @@ document.getElementById('btn-redo').onclick = () => {
     for (const item of sorted) {
       const idx = page.strokes.indexOf(item.stroke);
       if (idx !== -1) page.strokes.splice(idx, 1);
+    }
+  } else if (action.type === 'pasteStrokes') {
+    for (const item of action.items) {
+      page.strokes.splice(item.index, 0, item.stroke);
     }
   } else if (action.type === 'move') {
     for (const item of action.items) {
@@ -10843,8 +10894,17 @@ function renderSessionsList() {
 
 function openSessionsOverlay() {
   renderSessionsList();
-  document.getElementById('sessions-overlay').classList.add('show');
+  const overlay = document.getElementById('sessions-overlay');
+  // Resetăm poziția la valoarea implicită (centrată) de fiecare dată când se
+  // deschide — altfel, dacă fereastra fusese trasă anterior (chiar și
+  // accidental), rămânea "blocată" acolo permanent, la fiecare redeschidere
+  // ulterioară, putând ajunge parțial în afara zonei vizibile.
+  overlay.style.left = '';
+  overlay.style.top = '';
+  overlay.style.transform = '';
+  overlay.classList.add('show');
   document.getElementById('sessions-name-input').value = '';
+  ensureOverlayFullyVisible(overlay);
 }
 function closeSessionsOverlay() {
   document.getElementById('sessions-overlay').classList.remove('show');
@@ -10992,6 +11052,72 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
     e.preventDefault();
     document.getElementById('btn-redo').click();
+  }
+
+  // Copiere/lipire a desenelor selectate (Ctrl+C / Ctrl+V) — funcționează
+  // și între pagini diferite: copiezi pe o pagină, treci pe alta, lipești
+  // acolo. Poziționate la centrul zonei vizibile curente (nu la poziția lor
+  // originală), la fel ca la lipirea unei imagini.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+    const page = getCurrentPage();
+    if (page && selectedStrokes.size > 0) {
+      e.preventDefault();
+      strokeClipboard = [...selectedStrokes].map(idx => JSON.parse(JSON.stringify(page.strokes[idx])));
+      showToast(strokeClipboard.length > 1
+        ? (LANG === 'en' ? `✓ ${strokeClipboard.length} strokes copied` : `✓ ${strokeClipboard.length} desene copiate`)
+        : (LANG === 'en' ? '✓ Stroke copied' : '✓ Desen copiat'));
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && strokeClipboard.length > 0) {
+    const page = getCurrentPage();
+    if (page) {
+      e.preventDefault();
+      // Bbox-ul combinat al desenelor copiate, ca să le putem repoziționa
+      // pe toate împreună, păstrând poziția lor relativă unele față de
+      // altele.
+      let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+      for (const s of strokeClipboard) {
+        const b = getStrokeBoundingBox(s);
+        gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
+        gx1 = Math.max(gx1, b.x + b.w); gy1 = Math.max(gy1, b.y + b.h);
+      }
+      const groupCx = (gx0 + gx1) / 2, groupCy = (gy0 + gy1) / 2;
+
+      // Centrul zonei vizibile curente, convertit în coordonate de
+      // conținut — la fel ca la lipirea unei imagini.
+      const isPdfPane = !!pdfPanes[activeSurface];
+      let targetX, targetY;
+      if (isPdfPane) {
+        const els = getPaneEls(activeSurface);
+        const rect = els.root.getBoundingClientRect();
+        const ct = getPaneContentTransform(activeSurface);
+        targetX = (rect.width / 2 - ct.offX) / ct.scale;
+        targetY = (rect.height / 2 - ct.offY) / ct.scale;
+      } else {
+        const z = boardZoom || 1;
+        targetX = (wrap.clientWidth / 2 - boardPanX) / z;
+        targetY = (wrap.clientHeight / 2 - boardPanY) / z;
+      }
+      const dx = targetX - groupCx, dy = targetY - groupCy;
+
+      const newIndices = [];
+      strokeClipboard.forEach(s => {
+        const copy = JSON.parse(JSON.stringify(s));
+        offsetStrokeInPlace(copy, dx, dy);
+        page.strokes.push(copy);
+        newIndices.push(page.strokes.length - 1);
+      });
+      undoStack.push({ type: 'pasteStrokes', page, items: newIndices.map(i => ({ index: i, stroke: page.strokes[i] })) });
+      redoStack = [];
+      setTool('select');
+      selectedStrokes = new Set(newIndices);
+      redrawStrokes();
+      drawSelectionHighlights();
+      updateStatus();
+      showToast(newIndices.length > 1
+        ? (LANG === 'en' ? `✓ ${newIndices.length} strokes pasted` : `✓ ${newIndices.length} desene lipite`)
+        : (LANG === 'en' ? '✓ Stroke pasted' : '✓ Desen lipit'));
+    }
   }
 });
 
@@ -12975,7 +13101,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v226</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v229</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13095,7 +13221,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v226</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v229</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
