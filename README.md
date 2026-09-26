@@ -1,3 +1,4 @@
 https://masac.github.io/tabla/
-<img width="1918" height="1016" alt="1" src="https://github.com/user-attachments/assets/316da5f8-4cf3-4d4b-9f56-5a814439b35a" />
+<img width="1919" height="1047" alt="1" src="https://github.com/user-attachments/assets/536c301c-9b7f-4923-9d81-a9b42bd76f21" />
+
 
