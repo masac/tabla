@@ -578,6 +578,59 @@ let protractorPhase = 0;
 
 let bgColor = '#000000';
 let boardRuling = 'none'; // 'none' | 'grid' | 'dictando' | 'music'
+// Arată/ascunde numerele pe sistemul de axe xOy gol — controlat printr-o
+// mică bifă flotantă, poziționată direct peste ultimul sistem de axe
+// inserat (urmărește panoramarea/zoom-ul), nu un buton fix din bara de
+// instrumente.
+let axesShowNumbers = false;
+let trackedAxesStroke = null;
+let trackedAxesPage = null;
+let trackedAxesSurface = null;
+
+function updateAxesTogglePosition() {
+  const toggle = document.getElementById('axes-numbers-toggle');
+  if (!trackedAxesStroke || !trackedAxesPage) { toggle.style.display = 'none'; return; }
+  // Ascundem bifa dacă axele urmărite nu mai sunt pe pagina curentă (ex.
+  // utilizatorul a schimbat pagina) sau dacă au fost șterse între timp.
+  const page = getCurrentPage();
+  if (page !== trackedAxesPage || !page.strokes.includes(trackedAxesStroke) || trackedAxesSurface !== activeSurface) {
+    toggle.style.display = 'none';
+    return;
+  }
+  const o = trackedAxesStroke.axesOrigin;
+  let screenX, screenY;
+  if (trackedAxesSurface === 'board') {
+    const z = boardZoom || 1;
+    screenX = o.x * z + boardPanX;
+    screenY = o.y * z + boardPanY;
+  } else {
+    const ct = getPaneContentTransform(trackedAxesSurface);
+    screenX = o.x * ct.scale + ct.offX;
+    screenY = o.y * ct.scale + ct.offY;
+  }
+  toggle.style.display = 'flex';
+  toggle.style.left = (screenX + 8) + 'px';
+  toggle.style.top = (screenY + 8) + 'px';
+}
+
+document.getElementById('axes-numbers-check').addEventListener('change', (e) => {
+  axesShowNumbers = e.target.checked;
+  if (!trackedAxesStroke) return;
+  // Regenerăm direct etichetele stroke-ului urmărit (nu doar valoarea
+  // implicită pentru viitoare inserări) — comutarea se vede imediat, pe
+  // sistemul de axe deja desenat, fără să fie nevoie să-l ștergi și să
+  // inserezi altul nou.
+  const st = trackedAxesStroke;
+  st.xTicks.forEach((t) => {
+    const dCm = Math.round((t.x - st.axesOrigin.x) / PX_PER_CM);
+    t.label = axesShowNumbers ? String(dCm) : '';
+  });
+  st.yTicks.forEach((t) => {
+    const dCm = Math.round((st.axesOrigin.y - t.y) / PX_PER_CM);
+    t.label = axesShowNumbers ? String(dCm) : '';
+  });
+  redrawStrokes();
+});
 let rulingSize = 25; // distanța de bază (px) dintre liniile/pătratele liniaturii — 25px = jumătate de cm, ca 2 pătrățele să corespundă exact cu 1cm pe riglă/echer
 let snapToGridEnabled = false; // când e activ, elementele desenate se lipesc de nodurile caroiajului
 let snapToPointEnabled = false; // când e activ, elementele desenate se lipesc de puncte speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul viitor al cercului la compas)
@@ -2852,6 +2905,7 @@ function updateStatus() {
   const MAX_UNDO = 100;
   if (undoStack.length > MAX_UNDO) undoStack.splice(0, undoStack.length - MAX_UNDO);
   if (redoStack.length > MAX_UNDO) redoStack.splice(0, redoStack.length - MAX_UNDO);
+  updateAxesTogglePosition();
 
   const selCount = selectedStrokes.size + selectedImages.size;
 
@@ -6917,7 +6971,7 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   // încapă vizibil; la 25% umplere, pe un telefon cu ecran îngust, jumătatea
   // axei abia depășea un singur pas de 1cm, deci apărea cel mult o
   // diviziune (sau niciuna).
-  const marginX = W * 0.20, marginY = H * 0.20;
+  const marginX = W * 0.20, marginY = H * 0.08;
   const plotW = Math.max(W - marginX * 2, 50);
   const plotH = Math.max(H - marginY * 2, 50);
   const originX = marginX + plotW / 2;
@@ -6949,18 +7003,26 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   const xAxis = [toScreen(originX - halfW, originY), toScreen(originX + halfW, originY)];
   const yAxis = [toScreen(originX, originY + halfH), toScreen(originX, originY - halfH)];
 
-  // Diviziuni la fiecare 1 cm, simetric față de origine, fără numerotare
-  // (eticheta fiecărei diviziuni rămâne goală — vezi randarea tipului
-  // 'function' în drawStrokeOn, care pur și simplu nu desenează text pentru
-  // o etichetă goală).
+  // Diviziuni la fiecare 1 cm, simetric față de origine — DOAR până la
+  // marginea REALĂ, vizibilă a zonei de desen (plotW/2, plotH/2), nu până
+  // la minimul GARANTAT (halfW/halfH, care poate fi mai mare). Dincolo de
+  // marginea reală, toScreen() plafonează (clamp) poziția, iar mai multe
+  // valori distincte de "d" ar ajunge la EXACT aceeași poziție de ecran —
+  // se suprapuneau vizual, iar diviziunile "din mijloc" deveneau invizibile
+  // sub cele plafonate. Eticheta fiecărei diviziuni e goală implicit (vezi
+  // randarea tipului 'function' în drawStrokeOn) — dar arată numărul
+  // diviziunii dacă bifa "123" e activă.
   const xTicks = [], yTicks = [];
-  for (let d = PX_PER_CM; d <= halfW; d += PX_PER_CM) {
-    xTicks.push({ ...toScreen(originX + d, originY), label: '' });
-    xTicks.push({ ...toScreen(originX - d, originY), label: '' });
+  const halfWVisible = plotW / 2, halfHVisible = plotH / 2;
+  for (let d = PX_PER_CM; d <= halfWVisible; d += PX_PER_CM) {
+    const n = Math.round(d / PX_PER_CM);
+    xTicks.push({ ...toScreen(originX + d, originY), label: axesShowNumbers ? String(n) : '' });
+    xTicks.push({ ...toScreen(originX - d, originY), label: axesShowNumbers ? String(-n) : '' });
   }
-  for (let d = PX_PER_CM; d <= halfH; d += PX_PER_CM) {
-    yTicks.push({ ...toScreen(originX, originY + d), label: '' });
-    yTicks.push({ ...toScreen(originX, originY - d), label: '' });
+  for (let d = PX_PER_CM; d <= halfHVisible; d += PX_PER_CM) {
+    const n = Math.round(d / PX_PER_CM);
+    yTicks.push({ ...toScreen(originX, originY + d), label: axesShowNumbers ? String(-n) : '' });
+    yTicks.push({ ...toScreen(originX, originY - d), label: axesShowNumbers ? String(n) : '' });
   }
 
   const stroke = {
@@ -6973,7 +7035,9 @@ function plotEmptyAxesOnCanvas(strokeColor) {
     xAxis, yAxis,
     xTicks, yTicks,
     extremes: [],
-    tickFontSize: 12 / fnScaleComp
+    tickFontSize: 12 / fnScaleComp,
+    isEmptyAxes: true,
+    axesOrigin: toScreen(originX, originY)
   };
   pushStroke(page, stroke);
   const idx = page.strokes.length - 1;
@@ -6982,6 +7046,11 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   selectedStrokes.clear();
   selectedImages.clear();
   selectedStrokes.add(idx);
+
+  trackedAxesStroke = stroke;
+  trackedAxesPage = page;
+  trackedAxesSurface = activeSurface;
+  updateAxesTogglePosition();
 
   redrawStrokes();
   drawSelectionHighlights();
@@ -9613,6 +9682,9 @@ document.getElementById('btn-finish-polygon').onclick = () => {
 document.getElementById('btn-erase').onclick = () => setTool('erase');
 document.getElementById('btn-text').onclick = () => setTool('text');
 document.getElementById('btn-function').onclick = () => openFunctionModal();
+document.getElementById('axes-numbers-check').addEventListener('change', (e) => {
+  axesShowNumbers = e.target.checked;
+});
 document.getElementById('btn-axes').onclick = () => {
   // Ne asigurăm că suprafața activă (și deci drawC) e cea EFECTIV vizibilă
   // acum, la fel ca la f(x) — altfel dimensiunile calculate ar fi greșite.
@@ -10875,6 +10947,37 @@ async function checkAutosaveOnStartup() {
 
 document.getElementById('btn-save-session').onclick = saveSession;
 document.getElementById('btn-new').onclick = resetToFirstOpenState;
+
+// Ceas cu ora sistemului — comutabil, actualizat în fiecare secundă cât timp
+// e vizibil (fără temporizator activ deloc cât timp e ascuns).
+let clockTimer = null;
+let clockVisible = false;
+function updateClockDisplay() {
+  const el = document.getElementById('clock-display');
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  el.textContent = `${hh}:${mm}:${ss}`;
+}
+function setClockVisible(visible) {
+  clockVisible = visible;
+  const el = document.getElementById('clock-display');
+  const btn = document.getElementById('btn-clock');
+  if (visible) {
+    updateClockDisplay();
+    el.style.display = 'block';
+    btn.classList.add('active');
+    clearInterval(clockTimer);
+    clockTimer = setInterval(updateClockDisplay, 1000);
+  } else {
+    el.style.display = 'none';
+    btn.classList.remove('active');
+    clearInterval(clockTimer);
+    clockTimer = null;
+  }
+}
+document.getElementById('btn-clock').onclick = () => setClockVisible(!clockVisible);
 document.getElementById('btn-load-session').onclick = () => {
   document.getElementById('session-file-input').click();
 };
@@ -13188,7 +13291,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v237</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v242</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13308,7 +13411,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v237</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v242</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
