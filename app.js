@@ -5634,6 +5634,7 @@ function loadMultipleImages(files) {
       undoStack.push({ type: 'imageAdd', page, img: imgData });
       redoStack = [];
       loaded++;
+      URL.revokeObjectURL(objectUrl);
 
       if (loaded < total) {
         addPage();
@@ -5648,11 +5649,13 @@ function loadMultipleImages(files) {
     };
     img.onerror = () => {
       loaded++;
+      URL.revokeObjectURL(objectUrl);
       if (loaded === total) {
         showToast(trMsg(`⚠ ${total - files.length + loaded} imagini încărcate, unele au eșuat`));
       }
     };
-    img.src = URL.createObjectURL(file);
+    const objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
   });
 }
 
@@ -8539,6 +8542,50 @@ confirmModalBackdrop.addEventListener('pointerdown', (e) => {
   if (e.target === confirmModalBackdrop) closeConfirmModal(false);
 });
 
+// Resetează aplicația la starea de la prima deschidere — o tablă nouă,
+// goală, fără fișă PDF încărcată, fără istoric de anulare, cu setările
+// implicite de fundal/liniatură. Distructiv — cere confirmare înainte.
+async function resetToFirstOpenState() {
+  const ok = await customConfirm(LANG === 'en'
+    ? 'This will clear everything (all pages, the loaded PDF, undo history) and start fresh, as if you just opened the app. This cannot be undone. Continue?'
+    : 'Aceasta va șterge tot (toate paginile, fișa PDF încărcată, istoricul de anulare) și va reporni curat, ca la prima deschidere. Nu se poate anula. Continui?');
+  if (!ok) return;
+
+  // Tabla — o singură pagină goală.
+  pages = [{ strokes: [], images: [] }];
+  currentPageIdx = 0;
+  imageIdCounter = 0;
+  boardUndoStack.length = 0; boardRedoStack.length = 0;
+  undoStack = boardUndoStack; redoStack = boardRedoStack;
+  selectedStrokes.clear(); selectedImages.clear();
+  strokeClipboard = [];
+
+  // Fișa PDF — se închide complet, dacă era deschisă.
+  pdfDoc = null; loadedPdfArrayBuffer = null; pdfTotalPages = 0;
+  pdfModeActive = false; pdfSplitMode = false;
+  pdfPanes.top = makePdfPane(); pdfPanes.bottom = makePdfPane();
+  document.getElementById('btn-toggle-pdf-mode').disabled = true;
+  document.getElementById('btn-pdf-split').disabled = true;
+  setBoardMode(false);
+  activatePane('board');
+
+  // Vizualizare — panoramare/zoom resetate.
+  boardZoom = 1; boardPanX = 0; boardPanY = 0;
+
+  // Fundal/liniatură — valorile implicite.
+  bgColor = '#000000';
+  boardRuling = 'none';
+  rulingOpacity = 0.2;
+  document.body.classList.toggle('dark-board', isColorDark(bgColor));
+
+  initCanvas();
+  drawBg();
+  redrawStrokes();
+  renderImages();
+  updateStatus();
+  showToast(LANG === 'en' ? '✓ Fresh start' : '✓ Repornit curat');
+}
+
 // "Sari la pagina" — util mai ales la o fișă PDF cu multe pagini, unde a
 // ajunge la o pagină cu număr mare doar din "următoarea" ar fi extrem de
 // lent. Se deschide apăsând direct pe numărul paginii curente, din bara de
@@ -9702,12 +9749,19 @@ document.getElementById('file-input').onchange = e => {
     if (h > maxH) { w = w * maxH / h; h = maxH; }
     let x, y, finalW, finalH;
     if (isPdfPane) {
-      x = (40 - ct.offX) / ct.scale;
-      y = (40 - ct.offY) / ct.scale;
+      x = (viewportW / 2 - ct.offX) / ct.scale - w / 2;
+      y = (viewportH / 2 - ct.offY) / ct.scale - h / 2;
       finalW = w / ct.scale;
       finalH = h / ct.scale;
     } else {
-      x = 40; y = 40; finalW = w; finalH = h;
+      // Convertim prin zoom-ul/panoramarea curentă a tablei — la fel ca la
+      // lipirea unei imagini din clipboard — altfel, dacă utilizatorul
+      // făcuse scroll/zoom, imaginea încărcată apărea complet în afara
+      // zonei vizibile curente.
+      const z = boardZoom || 1;
+      x = (viewportW / 2 - boardPanX) / z - w / 2;
+      y = (viewportH / 2 - boardPanY) / z - h / 2;
+      finalW = w; finalH = h;
     }
     addImageToPage(page, img, x, y, finalW, finalH);
     const imgData = page.images[page.images.length - 1];
@@ -9720,8 +9774,10 @@ document.getElementById('file-input').onchange = e => {
     updateStatus();
     showSelectionInfo('🖼 Imagine încărcată - trage colțul pentru redimensionare (Delete pentru ștergere)');
     showToast(LANG === 'en' ? '✓ Image loaded' : '✓ Imagine încărcată');
+    URL.revokeObjectURL(objectUrl);
   };
-  img.src = URL.createObjectURL(f);
+  const objectUrl = URL.createObjectURL(f);
+  img.src = objectUrl;
   e.target.value = '';
 };
 
@@ -10196,8 +10252,10 @@ document.addEventListener('paste', (e) => {
     updateStatus();
     showSelectionInfo('🖼 Imagine lipită - trage colțul pentru redimensionare (Delete pentru ștergere)');
     showToast(LANG === 'en' ? '✓ Image from clipboard added' : '✓ Imagine din clipboard adăugată');
+    URL.revokeObjectURL(objectUrl);
   };
-  img.src = URL.createObjectURL(imageFile);
+  const objectUrl = URL.createObjectURL(imageFile);
+  img.src = objectUrl;
 });
 
 // Ascunde/arată complet bara principală de instrumente (care se poate
@@ -10574,11 +10632,39 @@ async function buildSessionData() {
 async function saveSession() {
   const sessionData = await buildSessionData();
   const json = JSON.stringify(sessionData);
+  const ts = new Date().toISOString().slice(0,19).replace('T','_').replace(/:/g,'-');
+  const suggestedName = `whiteboard_${ts}.wbs`;
+
+  // Browserele bazate pe Chromium (Chrome, Brave, Edge) suportă alegerea
+  // directă a locației și numelui fișierului, printr-o fereastră nativă de
+  // salvare — la fel ca "Salvează ca..." dintr-un program obișnuit. Pe
+  // browsere care nu suportă asta (ex. Firefox), revenim automat la
+  // descărcarea directă în folderul implicit, ca înainte.
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'Sesiune tablă', accept: { 'application/json': ['.wbs'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiunea a fost salvată!');
+      return;
+    } catch (err) {
+      // Utilizatorul a apăsat "Anulează" în fereastra de salvare — nu facem
+      // nimic (nu revenim la descărcarea automată, ca să nu pară că am
+      // ignorat alegerea lui).
+      if (err && err.name === 'AbortError') return;
+      // Orice altă eroare neașteptată — continuăm cu descărcarea directă,
+      // ca variantă de rezervă.
+    }
+  }
+
   const blob = new Blob([json], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  const ts = new Date().toISOString().slice(0,19).replace('T','_').replace(/:/g,'-');
-  a.download = `whiteboard_${ts}.wbs`;
+  a.download = suggestedName;
   a.click();
   URL.revokeObjectURL(a.href);
   showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiunea a fost salvată!');
@@ -10788,6 +10874,7 @@ async function checkAutosaveOnStartup() {
 }
 
 document.getElementById('btn-save-session').onclick = saveSession;
+document.getElementById('btn-new').onclick = resetToFirstOpenState;
 document.getElementById('btn-load-session').onclick = () => {
   document.getElementById('session-file-input').click();
 };
@@ -11214,7 +11301,7 @@ let lastSnapGuideName = null;
 const geoGuides = {
   ruler:      { visible: false, x: 160, y: 160, angle: 0,             length: 700, thickness: 50 },
   setsquare:  { visible: false, x: 520, y: 560, angle: 0,             width: 420, height: 420 },
-  protractor: { visible: false, x: 360, y: 600, angle: 0,             radius: 260, arcAngle: 60, arcRadiusScale: 0.45 },
+  protractor: { visible: false, x: 360, y: 600, angle: 0,             radius: 260, arcAngle: 30, arcRadiusScale: 0.45 },
   compass:    { visible: false, x: 520, y: 380, angle: -Math.PI * 0.65, radius: 160 }
 };
 
@@ -11646,19 +11733,19 @@ function buildGeoProtractor() {
   // a raportorului) — un reper vizual de aliniere, ca la un raportor real,
   // util pentru poziționarea precisă peste un unghi deja desenat. Pur
   // decorativ — nu afectează deloc rotirea sau pivotul.
-  const alignCross = geoEl('line', { stroke: '#5a5a5a', 'stroke-width': 1.2, 'pointer-events': 'none' });
+  const alignCross = geoEl('line', { stroke: '#90ee90', 'stroke-width': 1.5, 'pointer-events': 'none' });
   g.appendChild(alignCross);
 
   // Linie roz dedicată pe linia de bază (0°-180°) — mult mai vizibilă decât
   // conturul discret al corpului, utilă pentru alinierea precisă peste un
   // desen deja existent.
-  const baseline = geoEl('line', { stroke: '#ff1493', 'stroke-width': 2, 'pointer-events': 'none' });
+  const baseline = geoEl('line', { stroke: '#90ee90', 'stroke-width': 2, 'pointer-events': 'none' });
   g.appendChild(baseline);
 
   // Segment permanent, de la centrul (pivotul) raportorului până la mânerul
   // verde — arată clar direcția unghiului curent, tot timpul, nu doar cât
   // timp se trage mânerul.
-  const vertexLine = geoEl('line', { stroke: '#2d9d4f', 'stroke-width': 1.5,
+  const vertexLine = geoEl('line', { stroke: '#90ee90', 'stroke-width': 2,
     opacity: '0.85', 'pointer-events': 'none' });
   g.appendChild(vertexLine);
 
@@ -13101,7 +13188,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v229</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v237</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13221,7 +13308,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v229</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v237</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>

@@ -30,6 +30,11 @@
   --tw-accent-glow: rgba(10, 132, 255, 0.55);
   --tw-modal-bg: #2c2c2e;
   --tw-modal-text: #f0f0f2;
+  --tw-calc-btn-bg: #3a3a3d;
+  --tw-calc-btn-hover: #48484c;
+  --tw-calc-btn-active: #555559;
+  --tw-calc-border: rgba(255,255,255,0.14);
+  --tw-calc-expr: #9a9aa0;
 }
 :root[data-theme="light"] {
   --tw-bg-app: #ffffff;
@@ -46,6 +51,11 @@
   --tw-accent-glow: rgba(10, 132, 255, 0.35);
   --tw-modal-bg: #ffffff;
   --tw-modal-text: #222222;
+  --tw-calc-btn-bg: #f7f7fa;
+  --tw-calc-btn-hover: #ececf4;
+  --tw-calc-btn-active: #d8d8e4;
+  --tw-calc-border: #d0d0d8;
+  --tw-calc-expr: #888888;
 }
 
 #app { background: var(--tw-bg-app); }
@@ -123,6 +133,17 @@ input:focus-visible {
     .tool-group { display: flex; align-items: center; gap: 3px; row-gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
     .sep { width: 0.5px; height: 20px; background: #d0d0d5; margin: 0 2px; flex-shrink: 0; }
     button.tool { background: transparent; border: 0.5px solid #b8b8bd; border-radius: 7px; padding: clamp(3px, 0.4vw, 6px) clamp(4px, 0.55vw, 8px); font-size: clamp(10px, 0.85vw, 12px); color: #444; cursor: pointer; display: flex; align-items: center; gap: 3px; transition: background 0.1s; white-space: nowrap; min-width: clamp(22px, 2.1vw, 30px); min-height: clamp(22px, 2.1vw, 30px); justify-content: center; touch-action: manipulation; }
+    /* Pe dispozitive cu atingere ca metodă principală (telefon, tablă
+       Horizon) — spre deosebire de laptop, unde mouse-ul e precis —
+       mărim zona minimă de atingere a butoanelor, apropiată de
+       recomandările standard (44px iOS / 48px Material), pentru degete,
+       nu pentru un cursor fin. Detectat prin "pointer: coarse", nu doar
+       prin lățimea ecranului, ca să nu afecteze o fereastră mică de
+       laptop (unde mouse-ul rămâne principalul mod de interacțiune). */
+    @media (pointer: coarse) {
+      button.tool { min-width: 38px; min-height: 38px; }
+      .color-btn { width: 26px; height: 26px; }
+    }
     button.tool:hover { background: #e2e2e8; }
     button.tool.active { background: #d0e0f5; color: #0055cc; border-color: #a0c0e8; }
     button.tool:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -294,6 +315,23 @@ input:focus-visible {
     
     #status-bar { height: 36px; background: #f0f0f4; border-top: 1px solid #c8c8cd; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 12px; color: #444; user-select: none; position: relative; }
     #status-quick-access { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; }
+    /* Pe ecrane înguste (telefon), rândul întâi de butoane poate deveni mai
+       lat decât ecranul — permitem derularea orizontală, la fel ca la
+       rândurile 2/3 (bara principală de instrumente), păstrând totuși
+       butoanele centrate cât timp încap fără derulare. */
+    @media (max-width: 700px) {
+      #status-quick-access {
+        position: static;
+        left: auto; top: auto; transform: none;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        justify-content: safe center;
+        margin: 0 auto;
+        scrollbar-width: none;
+      }
+      #status-quick-access::-webkit-scrollbar { display: none; }
+    }
     #status-quick-access .qa-sep { width: 1px; height: 18px; background: #c8c8cd; margin: 0 2px; }
     #status-quick-access .page-btn { display: flex; align-items: center; justify-content: center; }
     #status-quick-access #page-num { display: inline-flex; align-items: center; justify-content: center; min-height: clamp(22px, 2.1vw, 30px); padding: 0 4px; font-size: 12px; font-weight: 600; color: #444; white-space: nowrap; flex-shrink: 0; }
@@ -391,7 +429,7 @@ input:focus-visible {
       top: 70px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(255,255,255,0.98);
+      background: var(--tw-modal-bg);
       border: 2px solid #0055cc;
       border-radius: 10px;
       padding: 10px;
@@ -404,24 +442,25 @@ input:focus-visible {
       justify-content: space-between;
       font-size: 13px;
       font-weight: 600;
-      color: #333;
+      color: var(--tw-modal-text);
       margin-bottom: 6px;
       padding-bottom: 6px;
-      border-bottom: 1px solid #e8e8f0;
+      border-bottom: 1px solid var(--tw-calc-border);
     }
     #calc-overlay .calc-header button {
-      border: 1px solid #d0d0d8;
-      background: #fff;
+      border: 1px solid var(--tw-calc-border);
+      background: var(--tw-calc-btn-bg);
+      color: var(--tw-modal-text);
       border-radius: 5px;
       width: 24px;
       height: 24px;
       cursor: pointer;
       font-size: 12px;
     }
-    #calc-overlay .calc-header button:hover { background: #f0f0f8; }
+    #calc-overlay .calc-header button:hover { background: var(--tw-calc-btn-hover); }
     #calc-overlay .calc-expr {
       font-size: 12px;
-      color: #888;
+      color: var(--tw-calc-expr);
       text-align: right;
       min-height: 16px;
       padding: 0 4px;
@@ -431,7 +470,7 @@ input:focus-visible {
       font-weight: 600;
       text-align: right;
       padding: 6px 6px 10px;
-      color: #111;
+      color: var(--tw-modal-text);
       word-break: break-all;
       font-family: 'Courier New', monospace;
     }
@@ -444,21 +483,28 @@ input:focus-visible {
     #calc-overlay .calc-grid-3col { grid-template-columns: repeat(3, 1fr); }
     #calc-overlay .calc-btn.calc-trig { background: #f3ecff; color: #6a3fc2; font-size: 13px; padding: 7px 0; }
     #calc-overlay .calc-btn.calc-trig:hover { background: #e6d9ff; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig { background: #3d2f5c; color: #c9a8ff; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig:hover { background: #4d3b70; }
     #calc-overlay .calc-btn {
       font-size: 16px;
       padding: 10px 0;
-      border: 1px solid #d0d0d8;
+      border: 1px solid var(--tw-calc-border);
       border-radius: 8px;
-      background: #f7f7fa;
+      background: var(--tw-calc-btn-bg);
+      color: var(--tw-modal-text);
       cursor: pointer;
       transition: background 0.1s;
     }
-    #calc-overlay .calc-btn:hover { background: #ececf4; }
-    #calc-overlay .calc-btn:active { background: #d8d8e4; }
+    #calc-overlay .calc-btn:hover { background: var(--tw-calc-btn-hover); }
+    #calc-overlay .calc-btn:active { background: var(--tw-calc-btn-active); }
     #calc-overlay .calc-btn.calc-op { background: #eef2ff; color: #0055cc; font-weight: 600; }
     #calc-overlay .calc-btn.calc-op:hover { background: #dde6ff; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op { background: #1f3357; color: #7db3ff; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op:hover { background: #2a4270; }
     #calc-overlay .calc-btn.calc-fn { background: #fff0ee; color: #cc3300; }
     #calc-overlay .calc-btn.calc-fn:hover { background: #ffe0da; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn { background: #4a2620; color: #ff9478; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn:hover { background: #5c3128; }
     #calc-overlay .calc-btn.calc-eq { background: #0055cc; color: #fff; font-weight: 600; }
     #calc-overlay .calc-btn.calc-eq:hover { background: #0044aa; }
     #calc-overlay .calc-insert {
@@ -1028,6 +1074,7 @@ input:focus-visible {
     </div>
     <div class="sep"></div>
     <div class="tool-group">
+      <button class="tool" id="btn-new" title="Nou — pornește curat, ca la prima deschidere (șterge tot ce e pe tablă)" style="color:#8a8a8a; border-color:#8a8a8a;"><i class="ti ti-file-plus"></i></button>
       <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
       <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
       <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
