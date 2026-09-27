@@ -261,6 +261,7 @@ input:focus-visible {
       border-radius: 2px;
       border: 2px solid white;
       display: none;
+      touch-action: none;
     }
     .image-item.selected .resizer {
       display: block;
@@ -283,6 +284,7 @@ input:focus-visible {
       text-align: center;
       display: none;
       z-index: 10;
+      touch-action: manipulation;
     }
     .image-item.selected .img-lock-btn,
     .image-item.locked .img-lock-btn {
@@ -910,7 +912,7 @@ input:focus-visible {
     </div>
 
     <svg id="guide-svg"></svg>
-    <label id="axes-numbers-toggle" title="Arată numerele pe axe" style="position:absolute; display:none; align-items:center; gap:3px; font-size:11px; cursor:pointer; user-select:none; padding:3px 5px; background:rgba(30,30,34,0.85); border:1px solid #666; border-radius:5px; color:#fff; z-index:15; pointer-events:auto;">
+    <label id="axes-numbers-toggle" title="Arată numerele pe sistemul de axe selectat — trage de aici ca s-o muți" style="position:fixed; top:70px; left:70%; display:none; align-items:center; gap:4px; font-size:11px; cursor:move; user-select:none; touch-action:none; padding:4px 6px; background:rgba(30,30,34,0.9); border:1px solid #666; border-radius:6px; color:#fff; z-index:15;">
       <input type="checkbox" id="axes-numbers-check" style="margin:0; width:14px; height:14px; cursor:pointer;">
       <span style="white-space:nowrap;">123</span>
     </label>
@@ -1081,6 +1083,7 @@ input:focus-visible {
       <button class="tool" id="btn-new" title="Nou — pornește curat, ca la prima deschidere (șterge tot ce e pe tablă)" style="color:#8a8a8a; border-color:#8a8a8a;"><i class="ti ti-file-plus"></i></button>
       <button class="tool" id="btn-clock" title="Arată/ascunde ora sistemului"><i class="ti ti-clock"></i></button>
       <button class="tool" id="btn-pdf" style="color:#b30000; border-color:#b30000;"><i class="ti ti-file-export"></i></button>
+      <button class="tool" id="btn-screen-capture" title="Captură de ecran cu selecție — alege o zonă și o adaugă pe tablă" style="color:#0a8a5c; border-color:#0a8a5c;"><i class="ti ti-crop"></i></button>
       <button class="tool" id="btn-save-session" style="color:#006644; border-color:#006644;"><i class="ti ti-device-floppy"></i></button>
       <button class="tool" id="btn-load-session" style="color:#664400; border-color:#664400;"><i class="ti ti-folder-open"></i></button>
       <button class="tool" id="btn-sessions-list" title="Sesiuni salvate (mai multe, cu nume)" style="color:#1a5fb4; border-color:#1a5fb4;"><i class="ti ti-list-details"></i></button>
@@ -1126,6 +1129,10 @@ input:focus-visible {
 </div>
 
 <div id="toast"></div>
+<div id="capture-overlay" style="display:none; position:fixed; inset:0; z-index:500; background:#000; cursor:crosshair;">
+  <canvas id="capture-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+  <div id="capture-hint" style="position:fixed; top:16px; left:50%; transform:translateX(-50%); background:rgba(20,20,24,0.85); color:#fff; padding:8px 16px; border-radius:8px; font-size:14px; pointer-events:none;">Trage pentru a selecta zona dorită, apoi apasă Enter (sau atinge din nou) — Esc pentru anulare</div>
+</div>
 <div id="clock-display" style="display:none; position:fixed; top:46px; right:14px; z-index:30; font-size:20px; font-weight:600; color:#fff; background:rgba(30,30,34,0.75); padding:5px 12px; border-radius:8px; font-variant-numeric:tabular-nums; pointer-events:none; user-select:none;"></div>
 <div id="angle-readout"></div>
 

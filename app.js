@@ -578,10 +578,10 @@ let protractorPhase = 0;
 
 let bgColor = '#000000';
 let boardRuling = 'none'; // 'none' | 'grid' | 'dictando' | 'music'
-// Arată/ascunde numerele pe sistemul de axe xOy gol — controlat printr-o
-// mică bifă flotantă, poziționată direct peste ultimul sistem de axe
-// inserat (urmărește panoramarea/zoom-ul), nu un buton fix din bara de
-// instrumente.
+// Arată/ascunde numerele pe sistemul de axe xOy selectat curent — printr-o
+// mică fereastră plutitoare, mutabilă liber (nu mai încearcă să se lipească
+// automat de origine — se dovedise prea fragil, mai ales cu mai multe
+// sisteme de axe pe aceeași pagină).
 let axesShowNumbers = false;
 let trackedAxesStroke = null;
 let trackedAxesPage = null;
@@ -589,29 +589,59 @@ let trackedAxesSurface = null;
 
 function updateAxesTogglePosition() {
   const toggle = document.getElementById('axes-numbers-toggle');
-  if (!trackedAxesStroke || !trackedAxesPage) { toggle.style.display = 'none'; return; }
-  // Ascundem bifa dacă axele urmărite nu mai sunt pe pagina curentă (ex.
-  // utilizatorul a schimbat pagina) sau dacă au fost șterse între timp.
+  const check = document.getElementById('axes-numbers-check');
   const page = getCurrentPage();
+
+  // Dacă printre desenele SELECTATE curent se află un sistem de axe (chiar
+  // dacă există mai multe, inserate separat, pe aceeași pagină) — urmărim
+  // ACELA, nu neapărat ultimul inserat.
+  if (page) {
+    for (const idx of selectedStrokes) {
+      const s = page.strokes[idx];
+      if (s && s.isEmptyAxes) {
+        trackedAxesStroke = s;
+        trackedAxesPage = page;
+        trackedAxesSurface = activeSurface;
+        break;
+      }
+    }
+  }
+
+  if (!trackedAxesStroke || !trackedAxesPage) { toggle.style.display = 'none'; return; }
   if (page !== trackedAxesPage || !page.strokes.includes(trackedAxesStroke) || trackedAxesSurface !== activeSurface) {
     toggle.style.display = 'none';
     return;
   }
-  const o = trackedAxesStroke.axesOrigin;
-  let screenX, screenY;
-  if (trackedAxesSurface === 'board') {
-    const z = boardZoom || 1;
-    screenX = o.x * z + boardPanX;
-    screenY = o.y * z + boardPanY;
-  } else {
-    const ct = getPaneContentTransform(trackedAxesSurface);
-    screenX = o.x * ct.scale + ct.offX;
-    screenY = o.y * ct.scale + ct.offY;
-  }
+  // Sincronizăm starea bifei cu etichetele REALE ale sistemului de axe
+  // urmărit acum — poate diferi de la un sistem la altul.
+  const hasNumbers = trackedAxesStroke.xTicks.some(t => t.label !== '');
+  check.checked = hasNumbers;
+  axesShowNumbers = hasNumbers;
   toggle.style.display = 'flex';
-  toggle.style.left = (screenX + 8) + 'px';
-  toggle.style.top = (screenY + 8) + 'px';
 }
+
+// Fereastra bifei se poate muta liber, prin tragere — la fel ca fereastra
+// calculatorului sau a sesiunilor salvate — și rămâne acolo unde o pui,
+// indiferent de zoom/panoramare (nu mai e "prinsă" automat de axe).
+(function initAxesToggleDrag() {
+  const toggle = document.getElementById('axes-numbers-toggle');
+  let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  toggle.addEventListener('pointerdown', (e) => {
+    if (e.target.id === 'axes-numbers-check') return; // click pe bifă, nu tragere
+    e.preventDefault();
+    dragging = true;
+    toggle.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY;
+    const rect = toggle.getBoundingClientRect();
+    startLeft = rect.left; startTop = rect.top;
+  });
+  toggle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    toggle.style.left = (startLeft + (e.clientX - startX)) + 'px';
+    toggle.style.top = (startTop + (e.clientY - startY)) + 'px';
+  });
+  toggle.addEventListener('pointerup', () => { dragging = false; });
+})();
 
 document.getElementById('axes-numbers-check').addEventListener('change', (e) => {
   axesShowNumbers = e.target.checked;
@@ -621,13 +651,24 @@ document.getElementById('axes-numbers-check').addEventListener('change', (e) => 
   // sistemul de axe deja desenat, fără să fie nevoie să-l ștergi și să
   // inserezi altul nou.
   const st = trackedAxesStroke;
+  // Soluție de rezervă, în trei trepte, pentru compatibilitate cu sisteme
+  // de axe inserate cu versiuni mai vechi ale aplicației — indiferent ce
+  // lipsește, NU mai afișăm niciodată literal "undefined":
+  // 1) folosim valoarea stocată direct pe diviziune, dacă există;
+  // 2) altfel, o calculăm din poziție, dacă avem originea axelor;
+  // 3) altfel, lăsăm eticheta goală (mai bine goală decât "undefined").
+  function safeLabel(v) {
+    return (axesShowNumbers && v !== undefined && !isNaN(v)) ? String(v) : '';
+  }
   st.xTicks.forEach((t) => {
-    const dCm = Math.round((t.x - st.axesOrigin.x) / PX_PER_CM);
-    t.label = axesShowNumbers ? String(dCm) : '';
+    const v = (t.value !== undefined) ? t.value
+      : (st.axesOrigin ? Math.round((t.x - st.axesOrigin.x) / PX_PER_CM) : undefined);
+    t.label = safeLabel(v);
   });
   st.yTicks.forEach((t) => {
-    const dCm = Math.round((st.axesOrigin.y - t.y) / PX_PER_CM);
-    t.label = axesShowNumbers ? String(dCm) : '';
+    const v = (t.value !== undefined) ? t.value
+      : (st.axesOrigin ? Math.round((st.axesOrigin.y - t.y) / PX_PER_CM) : undefined);
+    t.label = safeLabel(v);
   });
   redrawStrokes();
 });
@@ -2104,6 +2145,11 @@ function handleImagePointerDown(e) {
     resizeOrigW = imgData.w;
     resizeOrigH = imgData.h;
     e.preventDefault();
+    // Capturăm evenimentul, la fel ca la mutare — fără asta, mișcarea
+    // ulterioară a degetului/mouse-ului, în afara zonei inițiale a
+    // mânerului (ceea ce se întâmplă mereu la o redimensionare reală),
+    // putea fi interpretată greșit de browser, mai ales pe ecran tactil.
+    e.target.setPointerCapture(e.pointerId);
     return;
   }
   
@@ -2194,6 +2240,7 @@ document.addEventListener('pointermove', (e) => {
 });
 
 document.addEventListener('pointerup', () => {
+  const wasResizing = isImageResize, wasDragging = isImageDrag;
   if (isImageResize) {
     isImageResize = false;
     if (resizeImageId !== null) {
@@ -2227,6 +2274,13 @@ document.addEventListener('pointerup', () => {
       }
     }
     imageDragStartPositions.clear();
+  }
+  if (wasResizing || wasDragging) {
+    // Ne asigurăm că starea finală (poziție/dimensiune) e desenată imediat,
+    // fără să așteptăm limitarea prin cadru — altfel, ultima mișcare ar
+    // putea rămâne nedesenată dacă utilizatorul eliberează exact între
+    // două cadre.
+    renderImages();
   }
 });
 
@@ -3447,10 +3501,11 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
       out.segments = (orig.segments || []).map(seg => seg.map(pt => sp(pt.x, pt.y)));
       out.xAxis = (orig.xAxis || []).map(pt => sp(pt.x, pt.y));
       out.yAxis = (orig.yAxis || []).map(pt => sp(pt.x, pt.y));
-      out.xTicks = (orig.xTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
-      out.yTicks = (orig.yTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
+      out.xTicks = (orig.xTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label, value: t.value }));
+      out.yTicks = (orig.yTicks || []).map(t => ({ ...sp(t.x, t.y), label: t.label, value: t.value }));
       out.extremes = (orig.extremes || []).map(t => ({ ...sp(t.x, t.y), label: t.label, axis: t.axis }));
       out.roots = (orig.roots || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
+      if (orig.axesOrigin) out.axesOrigin = sp(orig.axesOrigin.x, orig.axesOrigin.y);
       break;
     }
     case 'solid3d': {
@@ -3955,10 +4010,11 @@ function offsetStrokeInPlace(s, dx, dy) {
     if (s.segments) s.segments = s.segments.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
     if (s.xAxis) s.xAxis = s.xAxis.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
     if (s.yAxis) s.yAxis = s.yAxis.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
-    if (s.xTicks) s.xTicks = s.xTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
-    if (s.yTicks) s.yTicks = s.yTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    if (s.xTicks) s.xTicks = s.xTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
+    if (s.yTicks) s.yTicks = s.yTicks.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
     if (s.extremes) s.extremes = s.extremes.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
     if (s.roots) s.roots = s.roots.map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    if (s.axesOrigin) s.axesOrigin = { x: s.axesOrigin.x + dx, y: s.axesOrigin.y + dy };
   } else if (s.points) {
     s.points.forEach(pt => { pt.x += dx; pt.y += dy; });
   }
@@ -4011,10 +4067,11 @@ function snapshotStrokePosition(stroke) {
       segments: (stroke.segments || []).map(seg => seg.map(p => ({ x: p.x, y: p.y }))),
       xAxis: (stroke.xAxis || []).map(p => ({ x: p.x, y: p.y })),
       yAxis: (stroke.yAxis || []).map(p => ({ x: p.x, y: p.y })),
-      xTicks: (stroke.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
-      yTicks: (stroke.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+      xTicks: (stroke.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value })),
+      yTicks: (stroke.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value })),
       extremes: (stroke.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis })),
-      roots: (stroke.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }))
+      roots: (stroke.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+      axesOrigin: stroke.axesOrigin ? { x: stroke.axesOrigin.x, y: stroke.axesOrigin.y } : null
     };
   }
   return null;
@@ -4048,8 +4105,8 @@ function restoreStrokePosition(stroke, snap) {
     stroke.segments = snap.segments.map(seg => seg.map(p => ({ x: p.x, y: p.y })));
     stroke.xAxis = (snap.xAxis || []).map(p => ({ x: p.x, y: p.y }));
     stroke.yAxis = (snap.yAxis || []).map(p => ({ x: p.x, y: p.y }));
-    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
-    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
+    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value }));
+    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value }));
     stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis }));
     stroke.roots = (snap.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }));
   } else if (stroke.points && snap.points) {
@@ -4088,10 +4145,11 @@ function applyStrokePositionOffset(stroke, snap, dx, dy) {
     stroke.segments = snap.segments.map(seg => seg.map(p => ({ x: p.x + dx, y: p.y + dy })));
     stroke.xAxis = (snap.xAxis || []).map(p => ({ x: p.x + dx, y: p.y + dy }));
     stroke.yAxis = (snap.yAxis || []).map(p => ({ x: p.x + dx, y: p.y + dy }));
-    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
-    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    stroke.xTicks = (snap.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
+    stroke.yTicks = (snap.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
     stroke.extremes = (snap.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
     stroke.roots = (snap.roots || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+    if (snap.axesOrigin) stroke.axesOrigin = { x: snap.axesOrigin.x + dx, y: snap.axesOrigin.y + dy };
   } else if (stroke.points && snap.points) {
     stroke.points = snap.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
   }
@@ -4353,7 +4411,8 @@ function handlePointerDown(e) {
               xTicks: (s.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
               yTicks: (s.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
               extremes: (s.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis })),
-              roots: (s.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label }))
+              roots: (s.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+              axesOrigin: s.axesOrigin ? { x: s.axesOrigin.x, y: s.axesOrigin.y } : null
             });
           } else if (s.points && s.points.length > 0) {
             dragStartPositions.set(si, { points: s.points.map(pt => ({ x: pt.x, y: pt.y })) });
@@ -4648,10 +4707,12 @@ function handlePointerMove(e) {
         s.segments = start.segments.map(seg => seg.map(pt => ({ x: pt.x + dx, y: pt.y + dy })));
         s.xAxis = (start.xAxis || []).map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
         s.yAxis = (start.yAxis || []).map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
-        s.xTicks = (start.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
-        s.yTicks = (start.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+        s.xTicks = (start.xTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
+        s.yTicks = (start.yTicks || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, value: t.value }));
         s.extremes = (start.extremes || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label, axis: t.axis }));
         s.roots = (start.roots || []).map(t => ({ x: t.x + dx, y: t.y + dy, label: t.label }));
+        if (start.axesOrigin) s.axesOrigin = { x: start.axesOrigin.x + dx, y: start.axesOrigin.y + dy };
+        if (s === trackedAxesStroke) updateAxesTogglePosition();
       } else if (s.points) {
         for (let i = 0; i < s.points.length; i++) {
           const orig = start.points && start.points[i];
@@ -5659,6 +5720,13 @@ async function deletePage() {
 // ================================================================
 // FUNCȚII PENTRU ÎNCĂRCARE IMAGINI
 // ================================================================
+// NOTĂ: NU eliberăm URL-urile de obiect (blob) create la încărcarea
+// imaginilor — rămân valide pe toată durata sesiunii. Redesenarea (la
+// mutare/redimensionare) recreează elementul <img> de fiecare dată, iar un
+// URL de obiect eliberat nu mai poate fi refolosit — imaginea ar dispărea
+// exact la prima interacțiune. Acceptăm compromisul (o mică urmă de memorie
+// per imagine încărcată, nesemnificativă practic), mult preferabil față de
+// o imagine care dispare sau o aplicație care se blochează.
 
 function loadMultipleImages(files) {
   if (!files || files.length === 0) return;
@@ -5672,7 +5740,7 @@ function loadMultipleImages(files) {
     currentPage = getCurrentPage();
   }
   
-  Array.from(files).forEach((file, idx) => {
+Array.from(files).forEach((file, idx) => {
     const img = new Image();
     img.onload = () => {
       const maxW = wrap.clientWidth * 0.8;
@@ -5688,7 +5756,6 @@ function loadMultipleImages(files) {
       undoStack.push({ type: 'imageAdd', page, img: imgData });
       redoStack = [];
       loaded++;
-      URL.revokeObjectURL(objectUrl);
 
       if (loaded < total) {
         addPage();
@@ -5703,7 +5770,6 @@ function loadMultipleImages(files) {
     };
     img.onerror = () => {
       loaded++;
-      URL.revokeObjectURL(objectUrl);
       if (loaded === total) {
         showToast(trMsg(`⚠ ${total - files.length + loaded} imagini încărcate, unele au eșuat`));
       }
@@ -7016,13 +7082,13 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   const halfWVisible = plotW / 2, halfHVisible = plotH / 2;
   for (let d = PX_PER_CM; d <= halfWVisible; d += PX_PER_CM) {
     const n = Math.round(d / PX_PER_CM);
-    xTicks.push({ ...toScreen(originX + d, originY), label: axesShowNumbers ? String(n) : '' });
-    xTicks.push({ ...toScreen(originX - d, originY), label: axesShowNumbers ? String(-n) : '' });
+    xTicks.push({ ...toScreen(originX + d, originY), label: axesShowNumbers ? String(n) : '', value: n });
+    xTicks.push({ ...toScreen(originX - d, originY), label: axesShowNumbers ? String(-n) : '', value: -n });
   }
   for (let d = PX_PER_CM; d <= halfHVisible; d += PX_PER_CM) {
     const n = Math.round(d / PX_PER_CM);
-    yTicks.push({ ...toScreen(originX, originY + d), label: axesShowNumbers ? String(-n) : '' });
-    yTicks.push({ ...toScreen(originX, originY - d), label: axesShowNumbers ? String(n) : '' });
+    yTicks.push({ ...toScreen(originX, originY + d), label: axesShowNumbers ? String(-n) : '', value: -n });
+    yTicks.push({ ...toScreen(originX, originY - d), label: axesShowNumbers ? String(n) : '', value: n });
   }
 
   const stroke = {
@@ -9846,7 +9912,6 @@ document.getElementById('file-input').onchange = e => {
     updateStatus();
     showSelectionInfo('🖼 Imagine încărcată - trage colțul pentru redimensionare (Delete pentru ștergere)');
     showToast(LANG === 'en' ? '✓ Image loaded' : '✓ Imagine încărcată');
-    URL.revokeObjectURL(objectUrl);
   };
   const objectUrl = URL.createObjectURL(f);
   img.src = objectUrl;
@@ -10324,7 +10389,6 @@ document.addEventListener('paste', (e) => {
     updateStatus();
     showSelectionInfo('🖼 Imagine lipită - trage colțul pentru redimensionare (Delete pentru ștergere)');
     showToast(LANG === 'en' ? '✓ Image from clipboard added' : '✓ Imagine din clipboard adăugată');
-    URL.revokeObjectURL(objectUrl);
   };
   const objectUrl = URL.createObjectURL(imageFile);
   img.src = objectUrl;
@@ -10589,6 +10653,159 @@ document.getElementById('pdf-export-btn').addEventListener('click', async () => 
     btn.disabled = false;
   }
 });
+
+// Captură de ecran cu selecție — utilizatorul alege ce să distribuie
+// (ecran/fereastră/filă), aplicația prinde un singur cadru, apoi
+// utilizatorul trage un dreptunghi peste zona dorită, care se adaugă pe
+// tablă ca imagine. Oprim imediat distribuirea după prinderea cadrului —
+// nu rămâne activă în fundal.
+async function startScreenCapture() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    showToast(LANG === 'en'
+      ? '⚠ Screen capture isn\'t available on this device (common on phones) — take a native screenshot instead, then use "Load image" or paste it'
+      : '⚠ Captura de ecran nu e disponibilă pe acest dispozitiv (frecvent pe telefon) — fă o captură nativă, apoi încarc-o cu „Încarcă imagine" sau lipește-o', 5000);
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never' } });
+  } catch (err) {
+    // Pe telefon (inclusiv Brave), acest API practic nu există — browser-ul
+    // aruncă o eroare (NotSupportedError/NotAllowedError), nu doar la
+    // anularea explicită a utilizatorului (AbortError). Distingem cele
+    // două cazuri, ca să nu eșuăm silențios pe telefon.
+    if (err && err.name === 'AbortError') return; // utilizatorul chiar a anulat
+    showToast(LANG === 'en'
+      ? '⚠ Screen capture isn\'t available on this device (common on phones) — take a native screenshot instead, then use "Load image" or paste it'
+      : '⚠ Captura de ecran nu e disponibilă pe acest dispozitiv (frecvent pe telefon) — fă o captură nativă, apoi încarc-o cu „Încarcă imagine" sau lipește-o', 5000);
+    return;
+  }
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  await video.play();
+  await new Promise(r => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
+
+  const cw = video.videoWidth, ch = video.videoHeight;
+  const frameCanvas = document.createElement('canvas');
+  frameCanvas.width = cw; frameCanvas.height = ch;
+  frameCanvas.getContext('2d').drawImage(video, 0, 0, cw, ch);
+
+  // Oprim distribuirea IMEDIAT după prinderea cadrului — nu are rost să
+  // rămână activă cât timp utilizatorul doar selectează zona.
+  stream.getTracks().forEach(t => t.stop());
+
+  openCaptureSelection(frameCanvas);
+}
+
+function openCaptureSelection(frameCanvas) {
+  const overlay = document.getElementById('capture-overlay');
+  const canvas = document.getElementById('capture-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  overlay.style.display = 'block';
+
+  // Scalăm cadrul prins ca să încapă pe ecran, păstrând raportul.
+  const scale = Math.min(canvas.width / frameCanvas.width, canvas.height / frameCanvas.height);
+  const drawW = frameCanvas.width * scale, drawH = frameCanvas.height * scale;
+  const offX = (canvas.width - drawW) / 2, offY = (canvas.height - drawH) / 2;
+
+  function redraw(sel) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(frameCanvas, offX, offY, drawW, drawH);
+    if (sel) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(sel.x, sel.y, sel.w, sel.h);
+      ctx.drawImage(frameCanvas,
+        (sel.x - offX) / scale, (sel.y - offY) / scale, sel.w / scale, sel.h / scale,
+        sel.x, sel.y, sel.w, sel.h);
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+      ctx.restore();
+    }
+  }
+  redraw(null);
+
+  let startX = 0, startY = 0, selection = null, dragging = false;
+  function toSel(x0, y0, x1, y1) {
+    return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+  }
+  function onDown(e) {
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    selection = null;
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    selection = toSel(startX, startY, e.clientX, e.clientY);
+    redraw(selection);
+  }
+  function onUp() { dragging = false; }
+  function finish() {
+    if (!selection || selection.w < 4 || selection.h < 4) { cancel(); return; }
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = Math.round(selection.w / scale);
+    cropCanvas.height = Math.round(selection.h / scale);
+    cropCanvas.getContext('2d').drawImage(frameCanvas,
+      (selection.x - offX) / scale, (selection.y - offY) / scale, selection.w / scale, selection.h / scale,
+      0, 0, cropCanvas.width, cropCanvas.height);
+    cleanup();
+    const img = new Image();
+    img.onload = () => {
+      const isPdfPane = !!pdfPanes[activeSurface];
+      const page = getCurrentPage();
+      let x, y, w = img.naturalWidth, h = img.naturalHeight;
+      const maxDim = 500;
+      if (w > maxDim || h > maxDim) { const s = maxDim / Math.max(w, h); w *= s; h *= s; }
+      if (isPdfPane) {
+        const els = getPaneEls(activeSurface);
+        const rect = els.root.getBoundingClientRect();
+        const ct = getPaneContentTransform(activeSurface);
+        x = (rect.width / 2 - ct.offX) / ct.scale - w / 2;
+        y = (rect.height / 2 - ct.offY) / ct.scale - h / 2;
+        w /= ct.scale; h /= ct.scale;
+      } else {
+        const z = boardZoom || 1;
+        x = (wrap.clientWidth / 2 - boardPanX) / z - w / 2;
+        y = (wrap.clientHeight / 2 - boardPanY) / z - h / 2;
+      }
+      const id = addImageToPage(page, img, x, y, w, h);
+      const imgData = page.images[page.images.length - 1];
+      undoStack.push({ type: 'imageAdd', page, img: imgData });
+      redoStack = [];
+      setTool('select');
+      selectedImages.clear();
+      selectedImages.add(id);
+      updateImageSelection();
+      renderImages();
+      updateStatus();
+      showToast(LANG === 'en' ? '✓ Capture added' : '✓ Captură adăugată');
+    };
+    img.src = cropCanvas.toDataURL('image/png');
+  }
+  function cancel() { cleanup(); }
+  function cleanup() {
+    overlay.style.display = 'none';
+    canvas.removeEventListener('pointerdown', onDown);
+    canvas.removeEventListener('pointermove', onMove);
+    canvas.removeEventListener('pointerup', onUp);
+    canvas.removeEventListener('dblclick', finish);
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') cancel();
+    else if (e.key === 'Enter') finish();
+  }
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('dblclick', finish);
+  document.addEventListener('keydown', onKey);
+}
+document.getElementById('btn-screen-capture').onclick = startScreenCapture;
 
 document.getElementById('btn-pdf').onclick = () => {
   const { jsPDF } = window.jspdf;
@@ -13291,7 +13508,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v242</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v261</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13332,7 +13549,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Corp 3D interactiv</b> — creează un corp pe care îl poți roti liber (ca în Blender) înainte să-l inserezi; sliderul de desfășurare are și un buton ▶ care animă automat asamblarea/desfacerea corpului.</li>
   <li><b>Mijlocul unui segment</b> — atinge un segment existent ca să-i marchezi mijlocul.</li>
   <li><b>Spațiu vertical</b> — ca în Xournal++: trage în sus sau în jos oriunde pe tablă; tot ce se află sub punctul unde ai atins se deplasează cu tine, inserând (la tragere în jos) sau eliminând (la tragere în sus) spațiu vertical. Ce e deasupra punctului rămâne pe loc.</li>
-  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic, utilizabile atât pe tablă cât și peste o fișă PDF (rămân la aceeași mărime, fixe pe ecran — nu se scalează/deplasează cu zoom-ul sau derularea fișei; la deschidere apar centrate pe zona pe care lucrezi). Fiecare are un buton X pentru închidere rapidă, o cruce pentru mutare și un mâner albastru pentru rotire (lângă diviziunea 0). Raportorul are și un buton de resetare la orizontală. Echerul are două mânere de scalare independente (unul pentru fiecare catetă), ca să poți face un triunghi nu neapărat isoscel. Rigla și echerul au o mică margine (2mm) fără nicio gradație chiar la început, ca la instrumentele fizice reale. Dublu-click pe riglă, echer sau raportor comută lipirea de punct, fără să mai fie nevoie de un buton separat. Diviziunile sunt colorate pentru contrast: albastru (ca instrumentul) pe tablă, verde deschis pe fișa PDF. Pe calculator, tastele săgeți deplasează fin instrumentul cu care ai interacționat ultima dată (dacă niciunul nu a fost folosit recent, săgețile panoramează tabla).</li>
+  <li><b>Riglă, echer, raportor, compas</b> — instrumente de desen tehnic, utilizabile atât pe tablă cât și peste o fișă PDF (rămân la aceeași mărime, fixe pe ecran — nu se scalează/deplasează cu zoom-ul sau derularea fișei; la deschidere apar centrate pe zona pe care lucrezi). Fiecare are un buton X pentru închidere rapidă, o cruce pentru mutare și un mâner albastru pentru rotire (lângă diviziunea 0). Raportorul are și un buton de resetare la orizontală. Echerul are două mânere de scalare independente (unul pentru fiecare catetă), ca să poți face un triunghi nu neapărat isoscel. Rigla și echerul au o mică margine (2mm) fără nicio gradație chiar la început, ca la instrumentele fizice reale. Dublu-click pe riglă, echer sau raportor comută lipirea de punct, fără să mai fie nevoie de un buton separat. Diviziunile sunt colorate pentru contrast: albe pe tablă, negre pe fișa PDF (corpul instrumentului rămâne gri deschis, semi-transparent, pe ambele suprafețe). Pe calculator, tastele săgeți deplasează fin instrumentul cu care ai interacționat ultima dată (dacă niciunul nu a fost folosit recent, săgețile panoramează tabla).</li>
   <li>Pentru precizie pe ecran tactil: cu <b>Linie</b> (sau linie întreruptă/săgeată) trasă pe muchia riglei/echerului apar două puncte mari, reglabile — trage-le fin, apoi atinge ✓ (sau oriunde pe tablă) ca să desenezi segmentul, ori ✕ / Escape ca să anulezi.</li>
   <li><b>Creionul de pe riglă/echer</b> — un buton mic (albastru) pornește direct un segment cu capetele la diviziunile 0 și 3 cm, cu numărul curent și distanța totală afișate lângă puncte (poate merge și sub 0, în negativ, dacă tragi punctul dincolo de diviziunea 0). Echerul are câte un creion lângă fiecare dintre cele 3 muchii (bază, catetă, ipotenuză) — atingi direct pe cel de care ai nevoie. Desenează linie continuă sau întreruptă, după unealta selectată (Linie / Linie întreruptă).</li>
 </ul>
@@ -13369,9 +13586,12 @@ const HELP_CONTENT_HTML = `
 <h4>Fișier și istoric</h4>
 <ul>
   <li><b>Anulează / Refă</b> — undo/redo pentru orice acțiune.</li>
+  <li><b>Nou</b> — pornește curat, ca la prima deschidere a aplicației (șterge tot ce e pe tablă, cu confirmare înainte — nu se poate anula după).</li>
   <li><b>Șterge tot</b> — golește pagina curentă.</li>
   <li><b>Exportă PDF</b> — salvează tabla curentă ca document PDF.</li>
-  <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior.</li>
+  <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior. Pe Chrome/Brave/Edge, salvarea îți lasă să alegi exact locul și numele fișierului (fereastra nativă „Salvează ca...").</li>
+  <li><b>Captură de ecran</b> (🔲) — alege ce vrei să distribui (ecran/fereastră/filă), apoi trage un dreptunghi peste zona dorită, care se adaugă direct pe tablă ca imagine. Necesită Chrome/Brave/Edge pe calculator — de obicei nu funcționează pe telefon (limitare a platformei mobile, nu a aplicației).</li>
+  <li><b>Ceas</b> (🕐) — arată/ascunde ora sistemului, actualizată live, în colțul din dreapta-sus.</li>
 </ul>
 
 <h4>Pagini și fundal</h4>
@@ -13411,7 +13631,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v242</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v261</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -13452,7 +13672,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Interactive 3D solid</b> — create a solid you can rotate freely (like in Blender) before inserting it; the unfolding slider also has a ▶ button that automatically animates the assembly/unfolding of the solid.</li>
   <li><b>Segment midpoint</b> — tap an existing segment to mark its midpoint.</li>
   <li><b>Vertical space</b> — like in Xournal++: drag up or down anywhere on the board; everything below where you touched moves with you, inserting (dragging down) or removing (dragging up) vertical space. Anything above the touch point stays put.</li>
-  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools, usable both on the board and over a PDF sheet (they stay the same size, fixed on screen — not scaled/moved by the sheet's zoom or scrolling; they appear centered on whichever area you're working on when opened). Each has an X button to close it quickly, a cross for moving it, and a blue handle for rotating it (near the 0 mark). The protractor also has a reset-to-horizontal button. The set square has two independent scale handles (one per leg), so it doesn't have to stay isosceles. The ruler and set square have a small blank margin (2mm) with no graduation right at the start, like on real physical tools. Double-clicking the ruler, set square, or protractor toggles snap-to-point, no separate button needed. Graduations are colored for contrast: blue (matching the tool) on the board, light green on a PDF sheet. On a computer, arrow keys nudge the tool you last interacted with (if none was used recently, the arrows pan the board instead).</li>
+  <li><b>Ruler, set square, protractor, compass</b> — technical drawing tools, usable both on the board and over a PDF sheet (they stay the same size, fixed on screen — not scaled/moved by the sheet's zoom or scrolling; they appear centered on whichever area you're working on when opened). Each has an X button to close it quickly, a cross for moving it, and a blue handle for rotating it (near the 0 mark). The protractor also has a reset-to-horizontal button. The set square has two independent scale handles (one per leg), so it doesn't have to stay isosceles. The ruler and set square have a small blank margin (2mm) with no graduation right at the start, like on real physical tools. Double-clicking the ruler, set square, or protractor toggles snap-to-point, no separate button needed. Graduations are colored for contrast: white on the board, black on a PDF sheet (the tool's body stays light gray, semi-transparent, on both surfaces). On a computer, arrow keys nudge the tool you last interacted with (if none was used recently, the arrows pan the board instead).</li>
   <li>For precision on touchscreens: a <b>Line</b> (or dashed line/arrow) drawn along the edge of the ruler/set square shows two large, adjustable points — drag them to fine-tune, then tap ✓ (or anywhere on the board) to draw the segment, or ✕ / Escape to cancel.</li>
   <li><b>Pencil button on the ruler/set square</b> — a small blue button starts a segment right away, with endpoints at the 0 and 3 cm marks and the current number plus total distance shown next to the points (it can go below 0, negative, if you drag a point past the 0 mark). The set square has one pencil next to each of its 3 edges (base, leg, hypotenuse) — just tap the one you need. Draws a solid or dashed line depending on the selected tool (Line / Dashed line).</li>
 </ul>
@@ -13489,9 +13709,12 @@ const HELP_CONTENT_HTML_EN = `
 <h4>File and history</h4>
 <ul>
   <li><b>Undo / Redo</b> — undo/redo any action.</li>
+  <li><b>New</b> — starts fresh, as if you just opened the app (clears everything on the board, with a confirmation first — can't be undone afterward).</li>
   <li><b>Clear all</b> — clears the current page.</li>
   <li><b>Export PDF</b> — saves the current board as a PDF document.</li>
-  <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later.</li>
+  <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later. On Chrome/Brave/Edge, saving lets you pick the exact file location and name (native "Save As" window).</li>
+  <li><b>Screen capture</b> (🔲) — pick what to share (screen/window/tab), then drag a rectangle over the area you want, which gets added directly to the board as an image. Requires Chrome/Brave/Edge on a computer — usually doesn't work on phones (a mobile platform limitation, not the app's).</li>
+  <li><b>Clock</b> (🕐) — shows/hides the system time, updated live, in the top-right corner.</li>
 </ul>
 
 <h4>Pages and background</h4>
