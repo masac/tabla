@@ -1067,6 +1067,7 @@ input:focus-visible {
     <div class="sep"></div>
     <div class="tool-group">
       <button class="tool" id="btn-upload"><i class="ti ti-photo-up"></i></button>
+      <button class="tool" id="btn-image-search" title="Caută o imagine (Wikimedia Commons, gratuit)"><i class="ti ti-photo-search"></i></button>
       <input type="file" id="file-input" accept="image/*" style="display:none">
       <button class="tool" id="btn-upload-multi" style="color:#006600; border-color:#006600;"><i class="ti ti-photos"></i> +</button>
       <button class="tool" id="btn-calculator" title="Calculator"><i class="ti ti-calculator"></i></button>
@@ -1129,9 +1130,21 @@ input:focus-visible {
 </div>
 
 <div id="toast"></div>
+<div id="image-search-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(680px, 92vw); max-height:82vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.4);">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+      <input type="text" id="image-search-input" placeholder="Caută o imagine (ex. triunghi, celula, hartă...)" style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid #555; background:#2a2a2e; color:#fff; font-size:14px;">
+      <button id="image-search-go" class="tool" style="background:#2d7dd2; color:#fff; border-color:#2d7dd2;">Caută</button>
+      <button id="image-search-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div id="image-search-status" style="color:#999; font-size:12px; margin-bottom:6px;">Rezultate de la Wikimedia Commons — imagini libere, cu sursă și licență documentate.</div>
+    <div id="image-search-results" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:8px; overflow-y:auto; flex:1;"></div>
+  </div>
+</div>
+
 <div id="capture-overlay" style="display:none; position:fixed; inset:0; z-index:500; background:#000; cursor:crosshair;">
   <canvas id="capture-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
-  <div id="capture-hint" style="position:fixed; top:16px; left:50%; transform:translateX(-50%); background:rgba(20,20,24,0.85); color:#fff; padding:8px 16px; border-radius:8px; font-size:14px; pointer-events:none;">Trage pentru a selecta zona dorită, apoi apasă Enter (sau atinge din nou) — Esc pentru anulare</div>
+  <div id="capture-hint" style="position:fixed; top:16px; left:50%; transform:translateX(-50%); background:rgba(20,20,24,0.85); color:#fff; padding:8px 16px; border-radius:8px; font-size:14px; pointer-events:none;">Trage pentru a selecta zona dorită, apoi apasă Enter, dublu-clic pe ea, sau apasă în afara ei — Esc pentru anulare</div>
 </div>
 <div id="clock-display" style="display:none; position:fixed; top:46px; right:14px; z-index:30; font-size:20px; font-weight:600; color:#fff; background:rgba(30,30,34,0.75); padding:5px 12px; border-radius:8px; font-variant-numeric:tabular-nums; pointer-events:none; user-select:none;"></div>
 <div id="angle-readout"></div>

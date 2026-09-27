@@ -9863,6 +9863,251 @@ document.getElementById('ruling-opacity-plus').onclick = () => {
 syncRulingColorPicker();
 
 document.getElementById('btn-upload').onclick = () => document.getElementById('file-input').click();
+
+// Căutare de imagini gratuite, prin Wikimedia Commons — API public, fără
+// cheie necesară, cu suport CORS (parametrul origin=*). Rezultatele includ
+// mereu sursa și licența, verificabile pe pagina fișierului.
+const imgSearchBackdrop = document.getElementById('image-search-backdrop');
+const imgSearchInput = document.getElementById('image-search-input');
+const imgSearchGo = document.getElementById('image-search-go');
+const imgSearchClose = document.getElementById('image-search-close');
+const imgSearchStatus = document.getElementById('image-search-status');
+const imgSearchResults = document.getElementById('image-search-results');
+
+document.getElementById('btn-image-search').onclick = () => {
+  imgSearchBackdrop.style.display = 'flex';
+  imgSearchInput.value = '';
+  imgSearchResults.innerHTML = '';
+  imgSearchStatus.textContent = LANG === 'en'
+    ? 'Results from Wikimedia Commons — free images, with documented source and license.'
+    : 'Rezultate de la Wikimedia Commons — imagini libere, cu sursă și licență documentate.';
+  setTimeout(() => imgSearchInput.focus(), 50);
+};
+imgSearchClose.onclick = () => { imgSearchBackdrop.style.display = 'none'; };
+imgSearchBackdrop.addEventListener('pointerdown', (e) => {
+  if (e.target === imgSearchBackdrop) imgSearchBackdrop.style.display = 'none';
+});
+
+async function runImageSearch() {
+  const q = imgSearchInput.value.trim();
+  if (!q) return;
+  imgSearchResults.innerHTML = '';
+  imgSearchStatus.textContent = LANG === 'en' ? 'Searching…' : 'Se caută…';
+  try {
+    const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search'
+      + '&gsrsearch=' + encodeURIComponent(q + ' filetype:bitmap')
+      + '&gsrnamespace=6&gsrlimit=24&prop=imageinfo&iiprop=url|size|extmetadata'
+      + '&iiurlwidth=900&format=json&origin=*';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const pages = (data.query && data.query.pages) ? Object.values(data.query.pages) : [];
+    if (pages.length === 0) {
+      imgSearchStatus.textContent = LANG === 'en' ? 'No results found.' : 'Niciun rezultat găsit.';
+      return;
+    }
+    imgSearchStatus.textContent = LANG === 'en'
+      ? `${pages.length} results — click one to add it, or drag it onto the board`
+      : `${pages.length} rezultate — apasă pe una ca s-o adaugi, sau trage-o direct pe tablă`;
+    pages.forEach(p => {
+      const info = p.imageinfo && p.imageinfo[0];
+      if (!info || !info.thumburl) return;
+      const cell = document.createElement('div');
+      cell.style.cssText = 'cursor:pointer; border-radius:6px; overflow:hidden; background:#000; aspect-ratio:1; display:flex; align-items:center; justify-content:center; border:2px solid transparent;';
+      const thumb = document.createElement('img');
+      thumb.src = info.thumburl;
+      thumb.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; pointer-events:none;';
+      thumb.loading = 'lazy';
+      thumb.draggable = false;
+      cell.appendChild(thumb);
+      cell.onmouseenter = () => cell.style.borderColor = '#2d7dd2';
+      cell.onmouseleave = () => cell.style.borderColor = 'transparent';
+      cell.title = p.title ? p.title.replace(/^File:/, '') : '';
+      cell.onclick = () => {
+        if (cell.dataset.justDragged === '1') { cell.dataset.justDragged = ''; return; }
+        insertSearchedImage(info.thumburl || info.url, cell);
+      };
+      startCustomImageDrag(cell, info.thumburl || info.url);
+      imgSearchResults.appendChild(cell);
+    });
+  } catch (err) {
+    console.warn(err);
+    imgSearchStatus.textContent = LANG === 'en'
+      ? '⚠ Search failed — check your internet connection.'
+      : '⚠ Căutarea a eșuat — verifică legătura la internet.';
+  }
+}
+imgSearchGo.onclick = runImageSearch;
+imgSearchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runImageSearch(); });
+
+async function insertSearchedImage(imageUrl, cellEl) {
+  const origHtml = cellEl.innerHTML;
+  cellEl.innerHTML = '<div style="color:#fff;font-size:11px;">…</div>';
+  try {
+    const resp = await fetch(imageUrl);
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const maxW = wrap.clientWidth * 0.5;
+      const maxH = wrap.clientHeight * 0.5;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxW) { h = h * maxW / w; w = maxW; }
+      if (h > maxH) { w = w * maxH / h; h = maxH; }
+
+      const isPdfPane = !!pdfPanes[activeSurface];
+      const page = getCurrentPage();
+      let x, y;
+      if (isPdfPane) {
+        const els = getPaneEls(activeSurface);
+        const rect = els.root.getBoundingClientRect();
+        const ct = getPaneContentTransform(activeSurface);
+        x = (rect.width / 2 - ct.offX) / ct.scale - w / 2;
+        y = (rect.height / 2 - ct.offY) / ct.scale - h / 2;
+      } else {
+        const z = boardZoom || 1;
+        x = (wrap.clientWidth / 2 - boardPanX) / z - w / 2;
+        y = (wrap.clientHeight / 2 - boardPanY) / z - h / 2;
+      }
+      const id = addImageToPage(page, img, x, y, w, h);
+      const imgData = page.images[page.images.length - 1];
+      undoStack.push({ type: 'imageAdd', page, img: imgData });
+      redoStack = [];
+      setTool('select');
+      selectedImages.clear();
+      selectedImages.add(id);
+      updateImageSelection();
+      updateStatus();
+      imgSearchBackdrop.style.display = 'none';
+      showToast(LANG === 'en' ? '✓ Image added' : '✓ Imagine adăugată');
+    };
+    img.src = objectUrl;
+  } catch (err) {
+    console.warn(err);
+    cellEl.innerHTML = origHtml;
+    showToast(LANG === 'en' ? '⚠ Could not load this image' : '⚠ Imaginea nu a putut fi încărcată');
+  }
+}
+async function insertSearchedImageAtPosition(imageUrl, screenX, screenY) {
+  try {
+    const resp = await fetch(imageUrl);
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const surf = pdfSplitMode ? geoDetectSurfaceForScreenPoint({ x: screenX, y: screenY }) : activeSurface;
+      const isPdfPane = !!pdfPanes[surf];
+      const maxDim = isPdfPane
+        ? getPaneEls(surf).root.getBoundingClientRect().width * 0.5
+        : wrap.clientWidth * 0.5;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > maxDim) { const s = maxDim / Math.max(w, h); w *= s; h *= s; }
+
+      const contentScale = isPdfPane ? getPaneContentTransform(surf).scale : (boardZoom || 1);
+      const center = geoScreenToContent({ x: screenX, y: screenY }, surf);
+      const x = center.x - (w / contentScale) / 2;
+      const y = center.y - (h / contentScale) / 2;
+      const finalW = w / contentScale, finalH = h / contentScale;
+
+      const wasActive = activeSurface;
+      if (surf !== activeSurface) activatePane(surf);
+      const page = getCurrentPage();
+      const id = addImageToPage(page, img, x, y, finalW, finalH);
+      const imgData = page.images[page.images.length - 1];
+      undoStack.push({ type: 'imageAdd', page, img: imgData });
+      redoStack = [];
+      setTool('select');
+      selectedImages.clear();
+      selectedImages.add(id);
+      updateImageSelection();
+      renderImages();
+      updateStatus();
+      showToast(LANG === 'en' ? '✓ Image added' : '✓ Imagine adăugată');
+    };
+    img.src = objectUrl;
+  } catch (err) {
+    console.warn(err);
+    showToast(LANG === 'en' ? '⚠ Could not load this image' : '⚠ Imaginea nu a putut fi încărcată');
+  }
+}
+// Zona de "drop" acoperă tot spațiul de lucru — la tragerea unei imagini
+// din lista de rezultate a căutării, o inserăm exact la poziția unde a
+// fost lăsată, pe suprafața (tablă sau PDF) de sub acel punct. Fereastra
+// de căutare rămâne deschisă, ca să poți trage mai multe imagini, una
+// după alta, fără să repeți căutarea.
+// Tragere proprie, prin evenimente pointer — HTML5 drag-and-drop nativ are
+// suport foarte inconsecvent pe ecrane tactile (multe browsere de telefon
+// nu declanșează deloc 'dragstart' la o simplă atingere). Acest sistem
+// funcționează identic pe mouse și pe deget.
+function startCustomImageDrag(cell, fullUrl) {
+  let startX = 0, startY = 0, dragging = false, ghost = null;
+  const THRESHOLD = 8;
+
+  function makeGhost(x, y) {
+    const srcImg = cell.querySelector('img');
+    if (!srcImg) return null;
+    const g = document.createElement('img');
+    g.src = srcImg.src;
+    g.style.cssText = 'position:fixed; width:70px; height:70px; object-fit:contain; border-radius:8px; border:2px solid #2d7dd2; box-shadow:0 4px 16px rgba(0,0,0,0.5); pointer-events:none; z-index:600; opacity:0.9;';
+    g.style.left = (x - 35) + 'px';
+    g.style.top = (y - 35) + 'px';
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function onDown(e) {
+    startX = e.clientX; startY = e.clientY;
+    dragging = false;
+    cell.setPointerCapture(e.pointerId);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+  function onMove(e) {
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!dragging && Math.hypot(dx, dy) > THRESHOLD) {
+      dragging = true;
+      // Odată pornită tragerea reală, reducem transparența ferestrei de
+      // căutare, ca să se vadă tabla dedesubt, exact unde se va lăsa
+      // imaginea.
+      imgSearchBackdrop.style.opacity = '0.15';
+      ghost = makeGhost(e.clientX, e.clientY);
+    }
+    if (dragging && ghost) {
+      ghost.style.left = (e.clientX - 35) + 'px';
+      ghost.style.top = (e.clientY - 35) + 'px';
+    }
+  }
+  function onUp(e) {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    imgSearchBackdrop.style.opacity = '1';
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (dragging) {
+      cell.dataset.justDragged = '1';
+      // Am tras cu adevărat — inserăm la poziția unde s-a eliberat
+      // degetul/mouse-ul, indiferent dacă e peste fereastra de căutare sau
+      // peste tablă (dacă fereastra a rămas peste acel punct, oricum era
+      // aproape invizibilă cât timp trăgeam, deci utilizatorul a țintit
+      // spre ce se vedea dedesubt).
+      insertSearchedImageAtPosition(fullUrl, e.clientX, e.clientY);
+    }
+    // Dacă NU s-a tras (doar o apăsare simplă, sub prag), lăsăm click-ul
+    // normal al celulei să se ocupe de inserare, ca înainte.
+  }
+  cell.addEventListener('pointerdown', onDown);
+}
+
+document.getElementById('workspace').addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+document.getElementById('workspace').addEventListener('drop', (e) => {
+  const raw = e.dataTransfer.getData('text/plain');
+  if (!raw || !raw.startsWith('wb-search-image:')) return;
+  e.preventDefault();
+  const url = raw.slice('wb-search-image:'.length);
+  insertSearchedImageAtPosition(url, e.clientX, e.clientY);
+});
+
 document.getElementById('file-input').onchange = e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -10733,7 +10978,17 @@ function openCaptureSelection(frameCanvas) {
   function toSel(x0, y0, x1, y1) {
     return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
   }
+  function isInsideSel(x, y, sel) {
+    return sel && x >= sel.x && x <= sel.x + sel.w && y >= sel.y && y <= sel.y + sel.h;
+  }
   function onDown(e) {
+    // Dacă există deja o selecție validă (dintr-o tragere anterioară) și
+    // utilizatorul apasă în AFARA ei, considerăm asta drept confirmare —
+    // inserăm direct selecția curentă, fără să mai fie nevoie de dublu-clic.
+    if (selection && selection.w >= 4 && selection.h >= 4 && !isInsideSel(e.clientX, e.clientY, selection)) {
+      finish();
+      return;
+    }
     dragging = true;
     startX = e.clientX; startY = e.clientY;
     selection = null;
@@ -13508,7 +13763,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v261</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v267</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13580,6 +13835,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
+  <li><b>Caută imagine</b> (🔍🖼) — caută direct pe Wikimedia Commons (imagini libere, cu sursă și licență documentate) și adaugă rezultatul ales direct pe tablă, fără să mai treci prin browser.</li>
   <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 3 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b>, atât în ecran complet cât și în modul split. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. Apasă direct pe numărul paginii (ex. „3/50") ca să sari instant la orice pagină, fără să treci pagină cu pagină — util mai ales la o fișă cu multe pagini. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă. Butonul de descărcare (⬇) din bara fișei exportă un fișier PDF nou, cu fișa originală și tot ce ai scris peste ea îmbinate într-un singur document — util pentru a trimite mai departe o fișă rezolvată; fișa încărcată în aplicație nu se modifică niciodată.</li>
 </ul>
 
@@ -13631,7 +13887,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v261</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v267</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -13703,6 +13959,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
+  <li><b>Search image</b> (🔍🖼) — search directly on Wikimedia Commons (free images, with documented source and license) and add the chosen result straight to the board, without leaving the app.</li>
   <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the pencil thickness automatically set to 2 and the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. The color switches automatically between white (on the board) and red (on the sheet) every time you move from one surface to the other — but if you manually pick a color from the panel, it stays fixed on both surfaces instead of switching automatically. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below. In split mode, you can freely drag the ruler/set square/protractor/compass from one area to the other — the resulting drawing always goes onto whichever surface the tool is actually over at that moment, regardless of where it was first opened. There, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet (including with the geometric tools) stays attached to the PDF content (keeps its position when panning, scales with zoom), and the line thickness stays visually identical to the board's. The download button (⬇) in the sheet's toolbar exports a new PDF file, combining the original sheet and everything you wrote over it into a single document — handy for sending along a solved worksheet; the sheet loaded in the app is never modified.</li>
 </ul>
 
