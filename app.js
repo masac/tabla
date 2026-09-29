@@ -5625,7 +5625,9 @@ function setTool(t) {
       }
   
   tool = t;
-  const allTools = ['btn-pen','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select','btn-vspace'];
+  const neonCv = document.getElementById('neon-canvas');
+  if (neonCv) neonCv.style.pointerEvents = (t === 'neon') ? 'auto' : 'none';
+  const allTools = ['btn-pen','btn-neon','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select','btn-vspace'];
   allTools.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -5728,6 +5730,33 @@ async function deletePage() {
 // per imagine încărcată, nesemnificativă practic), mult preferabil față de
 // o imagine care dispare sau o aplicație care se blochează.
 
+// Reduce automat dimensiunea unei imagini încărcate, dacă depășește o
+// limită rezonabilă pentru afișare pe tablă (poze făcute cu telefonul pot
+// avea ușor 4000+ pixeli lățime — mult peste ce se poate vedea vreodată pe
+// ecran, dar suficient să încetinească vizibil aplicația la mutare sau
+// redimensionare). Întoarce aceeași imagine, neschimbată, dacă e deja
+// suficient de mică.
+const MAX_UPLOADED_IMAGE_DIM = 1600;
+function compressImageForBoard(img) {
+  return new Promise((resolve) => {
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if (Math.max(w, h) <= MAX_UPLOADED_IMAGE_DIM) { resolve(img); return; }
+    try {
+      const scale = MAX_UPLOADED_IMAGE_DIM / Math.max(w, h);
+      const c = document.createElement('canvas');
+      c.width = Math.round(w * scale);
+      c.height = Math.round(h * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const small = new Image();
+      small.onload = () => resolve(small);
+      small.onerror = () => resolve(img); // dacă ceva eșuează, folosim originalul
+      small.src = c.toDataURL('image/jpeg', 0.88);
+    } catch (e) {
+      resolve(img); // ex. eroare "tainted canvas" pe o sursă externă — pastram originalul
+    }
+  });
+}
+
 function loadMultipleImages(files) {
   if (!files || files.length === 0) return;
   
@@ -5742,16 +5771,17 @@ function loadMultipleImages(files) {
   
 Array.from(files).forEach((file, idx) => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
+      const finalImg = await compressImageForBoard(img);
       const maxW = wrap.clientWidth * 0.8;
       const maxH = wrap.clientHeight * 0.7;
-      let w = img.naturalWidth * 1.5;
-      let h = img.naturalHeight * 1.5;
+      let w = finalImg.naturalWidth * 1.5;
+      let h = finalImg.naturalHeight * 1.5;
       if (w > maxW) { h = h * maxW / w; w = maxW; }
       if (h > maxH) { w = w * maxH / h; h = maxH; }
       
       const page = getCurrentPage();
-      const id = addImageToPage(page, img, 40, 40, w, h);
+      const id = addImageToPage(page, finalImg, 40, 40, w, h);
       const imgData = page.images[page.images.length - 1];
       undoStack.push({ type: 'imageAdd', page, img: imgData });
       redoStack = [];
@@ -6172,131 +6202,6 @@ function drawCompassBody(ctx2, center, tip, color) {
   ctx2.stroke();
   ctx2.fillStyle = '#202020';
   ctx2.beginPath(); ctx2.arc(tip.x + cosPA*16.5, tip.y + sinPA*16.5, 1.4, 0, Math.PI*2); ctx2.fill();
-
-  ctx2.restore();
-}
-
-function drawCompassRadiusPreview(ctx2, center, currentPoint, color, size) {
-  if (!center || !currentPoint) return;
-  const radius = Math.sqrt((currentPoint.x - center.x)**2 + (currentPoint.y - center.y)**2);
-  if (radius < 2) return;
-
-  ctx2.save();
-  ctx2.setLineDash([8, 6]);
-  ctx2.strokeStyle = color;
-  ctx2.lineWidth = 1.5;
-  ctx2.globalAlpha = 0.35;
-  ctx2.beginPath();
-  ctx2.arc(center.x, center.y, radius, 0, Math.PI * 2);
-  ctx2.stroke();
-  ctx2.setLineDash([]);
-  ctx2.globalAlpha = 1;
-
-  drawCompassBody(ctx2, center, currentPoint, color);
-
-  const angle = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
-  const midX = center.x + radius/2 * Math.cos(angle);
-  const midY = center.y + radius/2 * Math.sin(angle);
-  const perpA = angle + Math.PI/2;
-  const off = 18;
-  const lx = midX + off * Math.cos(perpA);
-  const ly = midY + off * Math.sin(perpA);
-  const txt = 'r = ' + (radius/50).toFixed(2) + ' cm';
-  ctx2.font = 'bold 13px sans-serif';
-  const tw = ctx2.measureText(txt).width;
-  ctx2.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx2.strokeStyle = color; ctx2.lineWidth = 1;
-  ctx2.beginPath(); ctx2.roundRect(lx - tw/2 - 4, ly - 10, tw + 8, 20, 4); ctx2.fill(); ctx2.stroke();
-  ctx2.fillStyle = color;
-  ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
-  ctx2.fillText(txt, lx, ly);
-
-  ctx2.restore();
-  showMathInfo((LANG === 'en' ? '⭕ Radius: ' : '⭕ Rază: ') + (radius/50).toFixed(2) + (LANG === 'en' ? ' cm  |  Left click = confirm radius  |  Double-click = full circle' : ' cm  |  Click stânga = confirmare rază  |  Dublu-click = cerc complet'));
-}
-
-function drawCompassArcPreview(ctx2, center, radiusPoint, currentPoint, color, size) {
-  ctx2.save();
-
-  const radius = Math.sqrt((radiusPoint.x - center.x)**2 + (radiusPoint.y - center.y)**2);
-  if (radius < 2) { ctx2.restore(); return; }
-
-  const startAngle = Math.atan2(radiusPoint.y - center.y, radiusPoint.x - center.x);
-  let endAngle = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
-  if (endAngle < startAngle) endAngle += 2 * Math.PI;
-  let angleDiff = endAngle - startAngle;
-  if (angleDiff < 0) angleDiff += 2 * Math.PI;
-
-  let interiorAngle = angleDiff;
-  let displayStart = startAngle, displayEnd = endAngle;
-  if (interiorAngle > Math.PI) {
-    interiorAngle = 2 * Math.PI - interiorAngle;
-    displayStart = endAngle;
-    displayEnd = startAngle + 2 * Math.PI;
-  }
-
-  ctx2.setLineDash([6, 8]);
-  ctx2.strokeStyle = color;
-  ctx2.lineWidth = 1;
-  ctx2.globalAlpha = 0.2;
-  ctx2.beginPath();
-  ctx2.arc(center.x, center.y, radius, 0, Math.PI * 2);
-  ctx2.stroke();
-  ctx2.setLineDash([]);
-  ctx2.globalAlpha = 1;
-
-  ctx2.strokeStyle = color;
-  ctx2.lineWidth = (size || 2) + 1;
-  ctx2.lineCap = 'round';
-  ctx2.beginPath();
-  ctx2.arc(center.x, center.y, radius, displayStart, displayEnd);
-  ctx2.stroke();
-
-  ctx2.setLineDash([4, 4]);
-  ctx2.lineWidth = 1;
-  ctx2.globalAlpha = 0.45;
-  ctx2.beginPath();
-  ctx2.moveTo(center.x, center.y);
-  ctx2.lineTo(center.x + radius * Math.cos(startAngle), center.y + radius * Math.sin(startAngle));
-  ctx2.stroke();
-  ctx2.beginPath();
-  ctx2.moveTo(center.x, center.y);
-  ctx2.lineTo(center.x + radius * Math.cos(endAngle), center.y + radius * Math.sin(endAngle));
-  ctx2.stroke();
-  ctx2.setLineDash([]);
-  ctx2.globalAlpha = 1;
-
-  const drawAngle = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
-  const pencilPoint = {
-    x: center.x + radius * Math.cos(drawAngle),
-    y: center.y + radius * Math.sin(drawAngle)
-  };
-  drawCompassBody(ctx2, center, pencilPoint, color);
-
-  const midA = (displayStart + displayEnd) / 2;
-  const deg = interiorAngle * 180 / Math.PI;
-  const labelR = radius + 28;
-  const lx = center.x + labelR * Math.cos(midA);
-  const ly = center.y + labelR * Math.sin(midA);
-  const txt = deg.toFixed(1) + '°';
-  ctx2.font = 'bold 14px sans-serif';
-  const tw = ctx2.measureText(txt).width;
-  ctx2.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx2.strokeStyle = color; ctx2.lineWidth = 1.5;
-  ctx2.beginPath(); ctx2.roundRect(lx - tw/2 - 5, ly - 11, tw + 10, 22, 5); ctx2.fill(); ctx2.stroke();
-  ctx2.fillStyle = color;
-  ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
-  ctx2.fillText(txt, lx, ly);
-
-  const rxl = center.x + (radius + 16) * Math.cos(startAngle);
-  const ryl = center.y + (radius + 16) * Math.sin(startAngle);
-  const rtxt = 'r = ' + (radius/50).toFixed(2) + ' cm';
-  ctx2.font = '11px sans-serif';
-  ctx2.fillStyle = color;
-  ctx2.textAlign = 'left'; ctx2.textBaseline = 'bottom';
-  ctx2.fillText(rtxt, rxl + 4, ryl - 2);
-
-  showMathInfo((LANG === 'en' ? '⭕ Radius: ' : '⭕ Rază: ') + (radius/50).toFixed(2) + (LANG === 'en' ? ' cm  |  Arc: ' : ' cm  |  Arc: ') + deg.toFixed(1) + (LANG === 'en' ? '°  |  Double-click = full circle' : '°  |  Dublu-click = cerc complet'));
 
   ctx2.restore();
 }
@@ -6960,11 +6865,6 @@ function applyNonFracNatural(expr) {
 
 // Formă inline (pe un singur rând) — folosită pentru mesajele toast sau alte
 // locuri unde nu se poate desena o fracție cu bară orizontală.
-function expressionToNatural(expr) {
-  const s = replaceLatexFrac(expr, (a, b) => `(${applyNonFracNatural(a)})/(${applyNonFracNatural(b)})`);
-  return applyNonFracNatural(s);
-}
-
 // Împarte expresia în segmente pentru randare ca "etichetă matematică": text
 // simplu, sau fracții adevărate (cu bară orizontală, numărător deasupra,
 // numitor dedesubt) — vezi tipul de stroke 'mathlabel' din drawStrokeOn.
@@ -7028,7 +6928,7 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   // limita rămâne fereastra browserului, ca înainte.
   const safeLimit = fnPane
     ? getPaneEls(activeSurface).root.getBoundingClientRect()
-    : { width: window.innerWidth, height: window.innerHeight };
+    : document.getElementById('workspace').getBoundingClientRect();
   if (safeLimit.width > 50) W = Math.min(W, safeLimit.width);
   if (safeLimit.height > 50) H = Math.min(H, safeLimit.height);
   // Zona de desenare e mult mai generoasă decât la un grafic normal (60%
@@ -7037,11 +6937,28 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   // încapă vizibil; la 25% umplere, pe un telefon cu ecran îngust, jumătatea
   // axei abia depășea un singur pas de 1cm, deci apărea cel mult o
   // diviziune (sau niciuna).
-  const marginX = W * 0.20, marginY = H * 0.08;
-  const plotW = Math.max(W - marginX * 2, 50);
-  const plotH = Math.max(H - marginY * 2, 50);
-  const originX = marginX + plotW / 2;
-  const originY = marginY + plotH / 2;
+  // Sistemul de axe se plasează în pătrimea din stânga-sus a ecranului
+  // (împărțind zona vizibilă în 4 zone egale, 2x2) — nu în centrul întregului
+  // ecran. Originea ajunge astfel în centrul acelei pătrimi.
+  const quadW = W / 2, quadH = H / 2;
+  // Folosim aceeași dimensiune pentru ambele axe (cea mai mică dintre
+  // jumătatea lățimii și jumătatea înălțimii) — altfel, pe telefon (ecran
+  // mult mai înalt decât lat), pătrimea brută ar fi un dreptunghi foarte
+  // alungit pe verticală, iar axa Y ar ieși nefiresc de lungă față de axa X.
+  const quadSize = Math.min(quadW, quadH);
+  // DIAGNOSTIC TEMPORAR — arată valorile reale calculate pe acest dispozitiv,
+  // ca să găsim exact unde apare discrepanța. Se elimină după depanare.
+  showToast(`DEBUG: W=${W.toFixed(0)} H=${H.toFixed(0)} quadW=${quadW.toFixed(0)} quadH=${quadH.toFixed(0)} quadSize=${quadSize.toFixed(0)}`, 8000);
+  // Marginea e raportată la dimensiunea PĂTRIMII (nu la tot ecranul, cum era
+  // greșit înainte) — altfel, pe un ecran de telefon (unde pătrimea e mult
+  // mai mică decât ecranul întreg), marginea calculată din ecranul întreg
+  // devenea disproporționat de mare față de pătrime, lăsând prea puțin loc
+  // efectiv pentru axe și diviziuni.
+  const marginX = quadSize * 0.04, marginY = quadSize * 0.04;
+  const plotW = Math.max(quadSize - marginX * 2, 50);
+  const plotH = Math.max(quadSize - marginY * 2, 50);
+  const originX = quadSize / 2;
+  const originY = quadSize / 2;
   const SELECTION_SAFE_PAD = 50;
 
   function canvasPxToContent(px, py) {
@@ -7061,11 +6978,12 @@ function plotEmptyAxesOnCanvas(strokeColor) {
     return canvasPxToContent(px, py);
   }
 
-  // Garantăm minim 20 de diviziuni pe fiecare axă (10 de fiecare parte a
-  // originii, deci minim 10cm jumătate de axă) — indiferent de cât de mic
-  // ar fi ecranul.
-  const halfW = Math.max(plotW / 2, PX_PER_CM * 10);
-  const halfH = Math.max(plotH / 2, PX_PER_CM * 10);
+  // Garantăm minim 5 diviziuni de fiecare parte a originii, pe ambele axe,
+  // la fel de lungi — dacă pătrimea calculată ar da mai puțin de-atât,
+  // preferăm cele 5 diviziuni (cerință explicită), chiar dacă asta ar
+  // depăși ușor pătrimea pe ecrane foarte mici.
+  const halfW = Math.max(plotW / 2, PX_PER_CM * 5);
+  const halfH = Math.max(plotH / 2, PX_PER_CM * 5);
   const xAxis = [toScreen(originX - halfW, originY), toScreen(originX + halfW, originY)];
   const yAxis = [toScreen(originX, originY + halfH), toScreen(originX, originY - halfH)];
 
@@ -7079,7 +6997,7 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   // randarea tipului 'function' în drawStrokeOn) — dar arată numărul
   // diviziunii dacă bifa "123" e activă.
   const xTicks = [], yTicks = [];
-  const halfWVisible = plotW / 2, halfHVisible = plotH / 2;
+  const halfWVisible = halfW, halfHVisible = halfH;
   for (let d = PX_PER_CM; d <= halfWVisible; d += PX_PER_CM) {
     const n = Math.round(d / PX_PER_CM);
     xTicks.push({ ...toScreen(originX + d, originY), label: axesShowNumbers ? String(n) : '', value: n });
@@ -7566,9 +7484,6 @@ function solidRegularNGon(n, R, phaseDeg) {
 }
 function solidRectBase(halfW, halfD) {
   return [{ x: -halfW, z: -halfD }, { x: halfW, z: -halfD }, { x: halfW, z: halfD }, { x: -halfW, z: halfD }];
-}
-function solidTrapezoidBase(w1, w2, d) {
-  return [{ x: -w1 / 2, z: -d / 2 }, { x: w1 / 2, z: -d / 2 }, { x: w2 / 2, z: d / 2 }, { x: -w2 / 2, z: d / 2 }];
 }
 // Triunghi cu muchia din spate perfect orizontală (cele două vârfuri din spate au aceeași adâncime)
 // și vârful din față deplasat spre dreapta cu shiftX.
@@ -8516,37 +8431,6 @@ const NET_SHAPES = {
   con: { label: 'Con (desfășurare)', build: () => buildConeNet(50, 120), curved: 'con', params: { R: 50, G: 120 } },
   trunchiCon: { label: 'Trunchi de con (desfășurare)', build: () => buildConeFrustumNet(55, 28, 95), curved: 'trunchiCon', params: { R1: 55, R2: 28, Gf: 95 } }
 };
-
-function buildNetIconSVG(shapeKey, size) {
-  const spec = NET_SHAPES[shapeKey];
-  const built = spec.build();
-  const allPts = [];
-  built.visible.forEach(s => allPts.push(...s));
-  built.hidden.forEach(s => allPts.push(...s));
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  allPts.forEach(p => {
-    if (p.x < minX) minX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y > maxY) maxY = p.y;
-  });
-  const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
-  const pad = 2;
-  const scale = Math.min((size - 2 * pad) / w, (size - 2 * pad) / h);
-  const offX = pad - minX * scale + (size - 2 * pad - w * scale) / 2;
-  const offY = pad - minY * scale + (size - 2 * pad - h * scale) / 2;
-  const tp = p => ({ x: p.x * scale + offX, y: p.y * scale + offY });
-  let lines = '';
-  built.hidden.forEach(seg => {
-    const a = tp(seg[0]), b = tp(seg[1]);
-    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke-dasharray="2,2"/>`;
-  });
-  built.visible.forEach(seg => {
-    const a = tp(seg[0]), b = tp(seg[1]);
-    lines += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
-  });
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">${lines}</svg>`;
-}
 
 async function insertSolidNet(shapeKey) {
   const spec = NET_SHAPES[shapeKey];
@@ -9736,6 +9620,110 @@ document.getElementById('btn-3d').addEventListener('click', () => open3DViewer()
 
 
 document.getElementById('btn-pen').onclick = () => setTool('pen');
+document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'pen' : 'neon');
+
+// Instrument „neon" — evidențiere temporară, ca un marker luminos. Desenează
+// direct în coordonate de ECRAN (nu de conținut) — nu urmărește panoramarea/
+// zoom-ul tablei, exact ca un pointer laser fizic, ținut deasupra ecranului.
+// Fiecare traseu dispare singur, treptat, la câteva secunde după ce a fost
+// desenat — nu rămâne niciodată permanent și nu se salvează în sesiune.
+(function initNeonTool() {
+  const neonCanvas = document.getElementById('neon-canvas');
+  const neonCtx = neonCanvas.getContext('2d');
+  const NEON_LIFETIME_MS = 2000;
+  const NEON_FADE_MS = 700; // ultima portiune din viata, in care se estompeaza treptat
+  const NEON_COLOR = '#ff2fb0';
+  let neonStrokes = [];
+  let neonCurrent = null;
+  let neonTickTimer = null;
+  let neonOffsetX = 0, neonOffsetY = 0;
+
+  // Canvas-ul acoperă STRICT zona de lucru (#workspace), NU tot ecranul —
+  // altfel, cât timp instrumentul e activ, ar sta deasupra barei de
+  // instrumente și ar bloca inclusiv clicul pe propriul buton de oprire.
+  function resizeNeonCanvas() {
+    const rect = document.getElementById('workspace').getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    neonOffsetX = rect.left; neonOffsetY = rect.top;
+    neonCanvas.style.left = rect.left + 'px';
+    neonCanvas.style.top = rect.top + 'px';
+    neonCanvas.style.width = rect.width + 'px';
+    neonCanvas.style.height = rect.height + 'px';
+    neonCanvas.width = Math.round(rect.width * dpr);
+    neonCanvas.height = Math.round(rect.height * dpr);
+    neonCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resizeNeonCanvas();
+  window.addEventListener('resize', resizeNeonCanvas);
+
+  function drawNeonStroke(stroke, opacity) {
+    if (stroke.points.length < 2) return;
+    neonCtx.save();
+    neonCtx.globalAlpha = opacity;
+    neonCtx.lineCap = 'round';
+    neonCtx.lineJoin = 'round';
+    // Halo exterior, difuz — efectul de "lumina neon" propriu-zis.
+    neonCtx.shadowColor = NEON_COLOR;
+    neonCtx.shadowBlur = 35;
+    neonCtx.strokeStyle = NEON_COLOR;
+    neonCtx.lineWidth = 6;
+    neonCtx.beginPath();
+    neonCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    for (let i = 1; i < stroke.points.length; i++) neonCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    neonCtx.stroke();
+    // Miez interior, alb, strălucitor — dă senzația de tub de neon aprins.
+    neonCtx.shadowBlur = 15;
+    neonCtx.strokeStyle = '#ffffff';
+    neonCtx.lineWidth = 2;
+    neonCtx.stroke();
+    neonCtx.restore();
+  }
+
+  function neonTick() {
+    const now = Date.now();
+    neonStrokes = neonStrokes.filter(s => now - s.createdAt < NEON_LIFETIME_MS);
+    neonCtx.clearRect(0, 0, neonCanvas.width, neonCanvas.height);
+    neonStrokes.forEach(s => {
+      const age = now - s.createdAt;
+      const remaining = NEON_LIFETIME_MS - age;
+      const opacity = remaining < NEON_FADE_MS ? Math.max(0, remaining / NEON_FADE_MS) : 1;
+      drawNeonStroke(s, opacity);
+    });
+    if (neonCurrent) drawNeonStroke(neonCurrent, 1);
+    if (neonStrokes.length === 0 && !neonCurrent) {
+      clearInterval(neonTickTimer);
+      neonTickTimer = null;
+    }
+  }
+  function ensureNeonTicking() {
+    if (!neonTickTimer) neonTickTimer = setInterval(neonTick, 50);
+  }
+
+  function neonPointFromEvent(e) {
+    return { x: e.clientX - neonOffsetX, y: e.clientY - neonOffsetY };
+  }
+  neonCanvas.addEventListener('pointerdown', (e) => {
+    if (tool !== 'neon') return;
+    neonCanvas.setPointerCapture(e.pointerId);
+    neonCurrent = { points: [neonPointFromEvent(e)], createdAt: 0 };
+    ensureNeonTicking();
+  });
+  neonCanvas.addEventListener('pointermove', (e) => {
+    if (tool !== 'neon' || !neonCurrent) return;
+    neonCurrent.points.push(neonPointFromEvent(e));
+    neonTick();
+  });
+  function finishNeonStroke() {
+    if (!neonCurrent) return;
+    neonCurrent.createdAt = Date.now();
+    if (neonCurrent.points.length >= 2) neonStrokes.push(neonCurrent);
+    neonCurrent = null;
+    ensureNeonTicking();
+  }
+  neonCanvas.addEventListener('pointerup', finishNeonStroke);
+  neonCanvas.addEventListener('pointercancel', finishNeonStroke);
+})();
+
 document.getElementById('btn-line').onclick = () => setTool('line');
 document.getElementById('btn-dashed').onclick = () => setTool('dashed');
 document.getElementById('btn-arrow').onclick = () => setTool('arrow');
@@ -9788,6 +9776,72 @@ document.getElementById('btn-recenter-board').onclick = () => {
 document.getElementById('btn-compass').onclick = () => toggleGeoGuide('compass', 'btn-compass');
 document.getElementById('btn-prev-page').onclick = () => { prevPage(); };
 document.getElementById('btn-next-page').onclick = () => { nextPage(); };
+
+// Mod „prezentare" — derulare automată printre paginile lecției curente, la
+// un interval configurabil (câmpul alăturat, în secunde), utilă pentru o
+// recapitulare rapidă cu clasa la finalul orei. Revine la prima pagină după
+// ultima (buclă continuă), și se poate opri oricând.
+const presentIntervalInput = document.getElementById('present-interval-input');
+function getPresentIntervalMs() {
+  let sec = parseInt(presentIntervalInput.value, 10);
+  if (!sec || sec < 1) sec = 5;
+  return sec * 1000;
+}
+function restartPresentTimerIfRunning() {
+  if (presentTimer) { clearInterval(presentTimer); presentTimer = setInterval(advancePresentPage, getPresentIntervalMs()); }
+}
+function changePresentInterval(delta) {
+  let sec = parseInt(presentIntervalInput.value, 10);
+  if (!sec || sec < 1) sec = 5;
+  sec = Math.min(300, Math.max(1, sec + delta));
+  presentIntervalInput.value = sec;
+  restartPresentTimerIfRunning();
+}
+document.getElementById('present-interval-minus').onclick = () => changePresentInterval(-1);
+document.getElementById('present-interval-plus').onclick = () => changePresentInterval(1);
+let presentTimer = null;
+function stopPresentMode() {
+  if (presentTimer) { clearInterval(presentTimer); presentTimer = null; }
+  const btn = document.getElementById('btn-present');
+  btn.classList.remove('active');
+  btn.innerHTML = '<i class="ti ti-presentation"></i>';
+}
+function advancePresentPage() {
+  if (currentPageIdx >= pages.length - 1) {
+    // Revenim la prima pagină — NU folosim nextPage() aici, care la
+    // ultima pagină ADAUGĂ una nouă, goală, în loc să reia bucla.
+    currentPageIdx = 0;
+  } else {
+    currentPageIdx++;
+  }
+  drawBg();
+  redrawStrokes();
+  renderImages();
+  updateStatus();
+  selectedStrokes.clear();
+  selectedImages.clear();
+  updateImageSelection();
+  hideSelectionInfo();
+}
+function startPresentMode() {
+  const btn = document.getElementById('btn-present');
+  btn.classList.add('active');
+  btn.innerHTML = '<i class="ti ti-player-pause"></i>';
+  presentTimer = setInterval(advancePresentPage, getPresentIntervalMs());
+}
+document.getElementById('btn-present').onclick = () => {
+  if (presentTimer) stopPresentMode();
+  else startPresentMode();
+};
+// Dacă utilizatorul schimbă intervalul CÂT TIMP prezentarea rulează deja,
+// repornim cronometrul cu noua valoare, imediat — altfel, schimbarea ar
+// rămâne fără efect până la următoarea pornire manuală.
+presentIntervalInput.addEventListener('change', restartPresentTimerIfRunning);
+// Orice navigare manuală (pagină anterioară/următoare, sau clic direct pe o
+// pagină din listă) oprește prezentarea automată — evită confuzia unei
+// pagini care "sare" singură peste alegerea manuală a utilizatorului.
+document.getElementById('btn-prev-page').addEventListener('click', () => { if (presentTimer) stopPresentMode(); });
+document.getElementById('btn-next-page').addEventListener('click', () => { if (presentTimer) stopPresentMode(); });
 document.getElementById('btn-del-page').onclick = () => { deletePage(); };
 document.getElementById('color-pick').oninput = e => { color = e.target.value; colorManuallyPicked = true; };
 document.getElementById('size-minus').onclick = () => setCurrentSize(getCurrentSize() - 1);
@@ -9867,17 +9921,68 @@ document.getElementById('btn-upload').onclick = () => document.getElementById('f
 // Căutare de imagini gratuite, prin Wikimedia Commons — API public, fără
 // cheie necesară, cu suport CORS (parametrul origin=*). Rezultatele includ
 // mereu sursa și licența, verificabile pe pagina fișierului.
+//
+// Selecție cu bife: pe ecrane mici, tragerea (drag & drop) dintr-o grilă de
+// rezultate e greoaie și imprecisă — în loc de asta, utilizatorul bifează
+// una sau mai multe imagini dorite, apoi apasă un singur buton, care le
+// adaugă pe toate simultan, distribuite uniform pe tablă.
 const imgSearchBackdrop = document.getElementById('image-search-backdrop');
 const imgSearchInput = document.getElementById('image-search-input');
 const imgSearchGo = document.getElementById('image-search-go');
 const imgSearchClose = document.getElementById('image-search-close');
 const imgSearchStatus = document.getElementById('image-search-status');
 const imgSearchResults = document.getElementById('image-search-results');
+const imgSearchAddBtn = document.getElementById('image-search-add-btn');
+
+let imgSearchSelected = new Map(); // id (titlu) -> {thumburl, fullurl, title}
+
+function updateImgSearchAddBtn() {
+  const n = imgSearchSelected.size;
+  imgSearchAddBtn.style.display = n > 0 ? 'inline-flex' : 'none';
+  imgSearchAddBtn.textContent = (LANG === 'en' ? `Add ${n} selected` : `Adaugă ${n} selectate`);
+}
+
+function buildImageResultCell(thumburl, fullurl, title) {
+  const cell = document.createElement('div');
+  cell.style.cssText = 'cursor:pointer; position:relative; border-radius:6px; overflow:hidden; background:#000; aspect-ratio:1; display:flex; align-items:center; justify-content:center; border:2px solid transparent;';
+  const thumb = document.createElement('img');
+  thumb.src = thumburl;
+  thumb.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; pointer-events:none;';
+  thumb.loading = 'lazy';
+  thumb.draggable = false;
+  cell.appendChild(thumb);
+
+  const check = document.createElement('div');
+  check.className = 'img-search-check';
+  check.style.cssText = 'position:absolute; top:4px; right:4px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.55); border:2px solid #fff; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; pointer-events:none;';
+  cell.appendChild(check);
+
+  const key = fullurl;
+  function setSelected(on) {
+    if (on) {
+      imgSearchSelected.set(key, { thumburl, fullurl, title });
+      cell.style.borderColor = '#2d7dd2';
+      check.style.background = '#2d7dd2';
+      check.textContent = '✓';
+    } else {
+      imgSearchSelected.delete(key);
+      cell.style.borderColor = 'transparent';
+      check.style.background = 'rgba(0,0,0,0.55)';
+      check.textContent = '';
+    }
+    updateImgSearchAddBtn();
+  }
+  cell.title = title || '';
+  cell.onclick = () => setSelected(!imgSearchSelected.has(key));
+  return cell;
+}
 
 document.getElementById('btn-image-search').onclick = () => {
   imgSearchBackdrop.style.display = 'flex';
   imgSearchInput.value = '';
   imgSearchResults.innerHTML = '';
+  imgSearchSelected = new Map();
+  updateImgSearchAddBtn();
   imgSearchStatus.textContent = LANG === 'en'
     ? 'Results from Wikimedia Commons — free images, with documented source and license.'
     : 'Rezultate de la Wikimedia Commons — imagini libere, cu sursă și licență documentate.';
@@ -9892,6 +9997,8 @@ async function runImageSearch() {
   const q = imgSearchInput.value.trim();
   if (!q) return;
   imgSearchResults.innerHTML = '';
+  imgSearchSelected = new Map();
+  updateImgSearchAddBtn();
   imgSearchStatus.textContent = LANG === 'en' ? 'Searching…' : 'Se caută…';
   try {
     const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search'
@@ -9906,28 +10013,13 @@ async function runImageSearch() {
       return;
     }
     imgSearchStatus.textContent = LANG === 'en'
-      ? `${pages.length} results — click one to add it, or drag it onto the board`
-      : `${pages.length} rezultate — apasă pe una ca s-o adaugi, sau trage-o direct pe tablă`;
+      ? `${pages.length} results — tap to select one or more, then add them all at once`
+      : `${pages.length} rezultate — atinge pentru a selecta una sau mai multe, apoi adaugă-le pe toate deodată`;
     pages.forEach(p => {
       const info = p.imageinfo && p.imageinfo[0];
       if (!info || !info.thumburl) return;
-      const cell = document.createElement('div');
-      cell.style.cssText = 'cursor:pointer; border-radius:6px; overflow:hidden; background:#000; aspect-ratio:1; display:flex; align-items:center; justify-content:center; border:2px solid transparent;';
-      const thumb = document.createElement('img');
-      thumb.src = info.thumburl;
-      thumb.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; pointer-events:none;';
-      thumb.loading = 'lazy';
-      thumb.draggable = false;
-      cell.appendChild(thumb);
-      cell.onmouseenter = () => cell.style.borderColor = '#2d7dd2';
-      cell.onmouseleave = () => cell.style.borderColor = 'transparent';
-      cell.title = p.title ? p.title.replace(/^File:/, '') : '';
-      cell.onclick = () => {
-        if (cell.dataset.justDragged === '1') { cell.dataset.justDragged = ''; return; }
-        insertSearchedImage(info.thumburl || info.url, cell);
-      };
-      startCustomImageDrag(cell, info.thumburl || info.url);
-      imgSearchResults.appendChild(cell);
+      const title = p.title ? p.title.replace(/^File:/, '') : '';
+      imgSearchResults.appendChild(buildImageResultCell(info.thumburl, info.thumburl || info.url, title));
     });
   } catch (err) {
     console.warn(err);
@@ -9939,180 +10031,99 @@ async function runImageSearch() {
 imgSearchGo.onclick = runImageSearch;
 imgSearchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runImageSearch(); });
 
-async function insertSearchedImage(imageUrl, cellEl) {
-  const origHtml = cellEl.innerHTML;
-  cellEl.innerHTML = '<div style="color:#fff;font-size:11px;">…</div>';
+// Adaugă TOATE imaginile bifate deodată, distribuite uniform într-o grilă pe
+// tablă (sau pe fișa PDF curentă) — funcționează la fel de bine indiferent
+// de dimensiunea ecranului, spre deosebire de tragerea individuală.
+async function addSelectedSearchedImages() {
+  const items = Array.from(imgSearchSelected.values());
+  if (items.length === 0) return;
+  imgSearchAddBtn.disabled = true;
+  imgSearchAddBtn.textContent = LANG === 'en' ? 'Adding…' : 'Se adaugă…';
   try {
-    const resp = await fetch(imageUrl);
-    const blob = await resp.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const maxW = wrap.clientWidth * 0.5;
-      const maxH = wrap.clientHeight * 0.5;
+    const isPdfPane = !!pdfPanes[activeSurface];
+    let viewportW, viewportH, ct;
+    if (isPdfPane) {
+      const els = getPaneEls(activeSurface);
+      const rect = els.root.getBoundingClientRect();
+      viewportW = rect.width; viewportH = rect.height;
+      ct = getPaneContentTransform(activeSurface);
+    } else {
+      viewportW = wrap.clientWidth; viewportH = wrap.clientHeight;
+    }
+    const scale = isPdfPane ? ct.scale : (boardZoom || 1);
+    const offX = isPdfPane ? ct.offX : boardPanX;
+    const offY = isPdfPane ? ct.offY : boardPanY;
+
+    // Așezăm imaginile într-o grilă aproximativ pătrată, care umple zona
+    // vizibilă curentă.
+    const n = items.length;
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const cellW = (viewportW * 0.85) / cols;
+    const cellH = (viewportH * 0.8) / rows;
+    const marginX = viewportW * 0.075, marginY = viewportH * 0.1;
+
+    const page = getCurrentPage();
+    let lastId = null;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const row = Math.floor(i / cols), col = i % cols;
+      const cellScreenX = marginX + col * cellW;
+      const cellScreenY = marginY + row * cellH;
+
+      let blob;
+      try {
+        const resp = await fetch(it.fullurl);
+        blob = await resp.blob();
+      } catch (e) { continue; }
+      const objectUrl = URL.createObjectURL(blob);
+      const img = await new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => resolve(null);
+        im.src = objectUrl;
+      });
+      if (!img) continue;
+
       let w = img.naturalWidth, h = img.naturalHeight;
+      const pad = 0.85; // spatiu mic intre celule
+      const maxW = cellW * pad, maxH = cellH * pad;
       if (w > maxW) { h = h * maxW / w; w = maxW; }
       if (h > maxH) { w = w * maxH / h; h = maxH; }
 
-      const isPdfPane = !!pdfPanes[activeSurface];
-      const page = getCurrentPage();
-      let x, y;
-      if (isPdfPane) {
-        const els = getPaneEls(activeSurface);
-        const rect = els.root.getBoundingClientRect();
-        const ct = getPaneContentTransform(activeSurface);
-        x = (rect.width / 2 - ct.offX) / ct.scale - w / 2;
-        y = (rect.height / 2 - ct.offY) / ct.scale - h / 2;
-      } else {
-        const z = boardZoom || 1;
-        x = (wrap.clientWidth / 2 - boardPanX) / z - w / 2;
-        y = (wrap.clientHeight / 2 - boardPanY) / z - h / 2;
-      }
-      const id = addImageToPage(page, img, x, y, w, h);
-      const imgData = page.images[page.images.length - 1];
-      undoStack.push({ type: 'imageAdd', page, img: imgData });
-      redoStack = [];
-      setTool('select');
-      selectedImages.clear();
-      selectedImages.add(id);
-      updateImageSelection();
-      updateStatus();
-      imgSearchBackdrop.style.display = 'none';
-      showToast(LANG === 'en' ? '✓ Image added' : '✓ Imagine adăugată');
-    };
-    img.src = objectUrl;
-  } catch (err) {
-    console.warn(err);
-    cellEl.innerHTML = origHtml;
-    showToast(LANG === 'en' ? '⚠ Could not load this image' : '⚠ Imaginea nu a putut fi încărcată');
-  }
-}
-async function insertSearchedImageAtPosition(imageUrl, screenX, screenY) {
-  try {
-    const resp = await fetch(imageUrl);
-    const blob = await resp.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const surf = pdfSplitMode ? geoDetectSurfaceForScreenPoint({ x: screenX, y: screenY }) : activeSurface;
-      const isPdfPane = !!pdfPanes[surf];
-      const maxDim = isPdfPane
-        ? getPaneEls(surf).root.getBoundingClientRect().width * 0.5
-        : wrap.clientWidth * 0.5;
-      let w = img.naturalWidth, h = img.naturalHeight;
-      if (Math.max(w, h) > maxDim) { const s = maxDim / Math.max(w, h); w *= s; h *= s; }
+      const screenX = cellScreenX + (cellW - w) / 2;
+      const screenY = cellScreenY + (cellH - h) / 2;
+      const x = (screenX - offX) / scale;
+      const y = (screenY - offY) / scale;
+      const finalW = w / scale, finalH = h / scale;
 
-      const contentScale = isPdfPane ? getPaneContentTransform(surf).scale : (boardZoom || 1);
-      const center = geoScreenToContent({ x: screenX, y: screenY }, surf);
-      const x = center.x - (w / contentScale) / 2;
-      const y = center.y - (h / contentScale) / 2;
-      const finalW = w / contentScale, finalH = h / contentScale;
-
-      const wasActive = activeSurface;
-      if (surf !== activeSurface) activatePane(surf);
-      const page = getCurrentPage();
       const id = addImageToPage(page, img, x, y, finalW, finalH);
       const imgData = page.images[page.images.length - 1];
       undoStack.push({ type: 'imageAdd', page, img: imgData });
-      redoStack = [];
+      lastId = id;
+    }
+    redoStack = [];
+    if (lastId !== null) {
       setTool('select');
       selectedImages.clear();
-      selectedImages.add(id);
-      updateImageSelection();
       renderImages();
       updateStatus();
-      showToast(LANG === 'en' ? '✓ Image added' : '✓ Imagine adăugată');
-    };
-    img.src = objectUrl;
-  } catch (err) {
-    console.warn(err);
-    showToast(LANG === 'en' ? '⚠ Could not load this image' : '⚠ Imaginea nu a putut fi încărcată');
+    }
+    imgSearchBackdrop.style.display = 'none';
+    showToast(LANG === 'en' ? `✓ ${items.length} images added` : `✓ ${items.length} imagini adăugate`);
+  } finally {
+    imgSearchAddBtn.disabled = false;
+    updateImgSearchAddBtn();
   }
 }
-// Zona de "drop" acoperă tot spațiul de lucru — la tragerea unei imagini
-// din lista de rezultate a căutării, o inserăm exact la poziția unde a
-// fost lăsată, pe suprafața (tablă sau PDF) de sub acel punct. Fereastra
-// de căutare rămâne deschisă, ca să poți trage mai multe imagini, una
-// după alta, fără să repeți căutarea.
-// Tragere proprie, prin evenimente pointer — HTML5 drag-and-drop nativ are
-// suport foarte inconsecvent pe ecrane tactile (multe browsere de telefon
-// nu declanșează deloc 'dragstart' la o simplă atingere). Acest sistem
-// funcționează identic pe mouse și pe deget.
-function startCustomImageDrag(cell, fullUrl) {
-  let startX = 0, startY = 0, dragging = false, ghost = null;
-  const THRESHOLD = 8;
-
-  function makeGhost(x, y) {
-    const srcImg = cell.querySelector('img');
-    if (!srcImg) return null;
-    const g = document.createElement('img');
-    g.src = srcImg.src;
-    g.style.cssText = 'position:fixed; width:70px; height:70px; object-fit:contain; border-radius:8px; border:2px solid #2d7dd2; box-shadow:0 4px 16px rgba(0,0,0,0.5); pointer-events:none; z-index:600; opacity:0.9;';
-    g.style.left = (x - 35) + 'px';
-    g.style.top = (y - 35) + 'px';
-    document.body.appendChild(g);
-    return g;
-  }
-
-  function onDown(e) {
-    startX = e.clientX; startY = e.clientY;
-    dragging = false;
-    cell.setPointerCapture(e.pointerId);
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-  }
-  function onMove(e) {
-    const dx = e.clientX - startX, dy = e.clientY - startY;
-    if (!dragging && Math.hypot(dx, dy) > THRESHOLD) {
-      dragging = true;
-      // Odată pornită tragerea reală, reducem transparența ferestrei de
-      // căutare, ca să se vadă tabla dedesubt, exact unde se va lăsa
-      // imaginea.
-      imgSearchBackdrop.style.opacity = '0.15';
-      ghost = makeGhost(e.clientX, e.clientY);
-    }
-    if (dragging && ghost) {
-      ghost.style.left = (e.clientX - 35) + 'px';
-      ghost.style.top = (e.clientY - 35) + 'px';
-    }
-  }
-  function onUp(e) {
-    document.removeEventListener('pointermove', onMove);
-    document.removeEventListener('pointerup', onUp);
-    imgSearchBackdrop.style.opacity = '1';
-    if (ghost) { ghost.remove(); ghost = null; }
-    if (dragging) {
-      cell.dataset.justDragged = '1';
-      // Am tras cu adevărat — inserăm la poziția unde s-a eliberat
-      // degetul/mouse-ul, indiferent dacă e peste fereastra de căutare sau
-      // peste tablă (dacă fereastra a rămas peste acel punct, oricum era
-      // aproape invizibilă cât timp trăgeam, deci utilizatorul a țintit
-      // spre ce se vedea dedesubt).
-      insertSearchedImageAtPosition(fullUrl, e.clientX, e.clientY);
-    }
-    // Dacă NU s-a tras (doar o apăsare simplă, sub prag), lăsăm click-ul
-    // normal al celulei să se ocupe de inserare, ca înainte.
-  }
-  cell.addEventListener('pointerdown', onDown);
-}
-
-document.getElementById('workspace').addEventListener('dragover', (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-});
-document.getElementById('workspace').addEventListener('drop', (e) => {
-  const raw = e.dataTransfer.getData('text/plain');
-  if (!raw || !raw.startsWith('wb-search-image:')) return;
-  e.preventDefault();
-  const url = raw.slice('wb-search-image:'.length);
-  insertSearchedImageAtPosition(url, e.clientX, e.clientY);
-});
+imgSearchAddBtn.onclick = addSelectedSearchedImages;
 
 document.getElementById('file-input').onchange = e => {
   const f = e.target.files[0];
   if (!f) return;
   const img = new Image();
-  img.onload = () => {
+  img.onload = async () => {
+    const img2 = await compressImageForBoard(img);
     const page = getCurrentPage();
     const isPdfPane = !!pdfPanes[activeSurface];
     let viewportW, viewportH, ct;
@@ -10126,8 +10137,8 @@ document.getElementById('file-input').onchange = e => {
     }
     const maxW = viewportW * 0.7;
     const maxH = viewportH * 0.6;
-    let w = img.naturalWidth * 1.5;
-    let h = img.naturalHeight * 1.5;
+    let w = img2.naturalWidth * 1.5;
+    let h = img2.naturalHeight * 1.5;
     if (w > maxW) { h = h * maxW / w; w = maxW; }
     if (h > maxH) { w = w * maxH / h; h = maxH; }
     let x, y, finalW, finalH;
@@ -10146,7 +10157,7 @@ document.getElementById('file-input').onchange = e => {
       y = (viewportH / 2 - boardPanY) / z - h / 2;
       finalW = w; finalH = h;
     }
-    addImageToPage(page, img, x, y, finalW, finalH);
+    addImageToPage(page, img2, x, y, finalW, finalH);
     const imgData = page.images[page.images.length - 1];
     undoStack.push({ type: 'imageAdd', page, img: imgData });
     redoStack = [];
@@ -10570,7 +10581,8 @@ document.addEventListener('paste', (e) => {
   e.preventDefault();
 
   const img = new Image();
-  img.onload = () => {
+  img.onload = async () => {
+    const img2 = await compressImageForBoard(img);
     const isPdfPane = !!pdfPanes[activeSurface];
     let viewportW, viewportH, ct;
     if (isPdfPane) {
@@ -10583,8 +10595,8 @@ document.addEventListener('paste', (e) => {
     }
     const maxW = viewportW * 0.7;
     const maxH = viewportH * 0.6;
-    let w = img.naturalWidth;
-    let h = img.naturalHeight;
+    let w = img2.naturalWidth;
+    let h = img2.naturalHeight;
     if (w > maxW) { h = h * maxW / w; w = maxW; }
     if (h > maxH) { w = w * maxH / h; h = maxH; }
 
@@ -10621,7 +10633,7 @@ document.addEventListener('paste', (e) => {
     }
 
     const page = getCurrentPage();
-    const id = addImageToPage(page, img, x, y, finalW, finalH);
+    const id = addImageToPage(page, img2, x, y, finalW, finalH);
     const imgData = page.images[page.images.length - 1];
 
     undoStack.push({ type: 'imageAdd', page, img: imgData });
@@ -11421,7 +11433,24 @@ document.getElementById('btn-save-session').onclick = saveSession;
 document.getElementById('btn-new').onclick = resetToFirstOpenState;
 
 // Ceas cu ora sistemului — comutabil, actualizat în fiecare secundă cât timp
-// e vizibil (fără temporizator activ deloc cât timp e ascuns).
+// e vizibil (fără temporizator activ deloc cât timp e ascuns). Doar două
+// poziții posibile (stânga-sus / dreapta-sus) — se schimbă atingând direct
+// ceasul, și se reține pentru viitor. Implicit: stânga-sus. Colțul din
+// dreapta stă mai jos decât cel din stânga, ca să nu se suprapună peste
+// butonul de ecran complet, aflat acolo.
+const CLOCK_POSITIONS = ['top-left', 'top-right'];
+const CLOCK_POSITION_KEY = 'wb-clock-position';
+function getClockPosition() {
+  const saved = localStorage.getItem(CLOCK_POSITION_KEY);
+  return CLOCK_POSITIONS.includes(saved) ? saved : 'top-left';
+}
+function applyClockPosition(pos) {
+  const el = document.getElementById('clock-display');
+  el.style.top = el.style.bottom = el.style.left = el.style.right = '';
+  const hGap = '14px';
+  if (pos === 'top-left') { el.style.top = '10px'; el.style.left = hGap; }
+  else { el.style.top = '46px'; el.style.right = hGap; } // dreapta-sus: mai jos, sub butonul fullscreen
+}
 let clockTimer = null;
 let clockVisible = false;
 function updateClockDisplay() {
@@ -11437,6 +11466,7 @@ function setClockVisible(visible) {
   const el = document.getElementById('clock-display');
   const btn = document.getElementById('btn-clock');
   if (visible) {
+    applyClockPosition(getClockPosition());
     updateClockDisplay();
     el.style.display = 'block';
     btn.classList.add('active');
@@ -11450,6 +11480,12 @@ function setClockVisible(visible) {
   }
 }
 document.getElementById('btn-clock').onclick = () => setClockVisible(!clockVisible);
+document.getElementById('clock-display').addEventListener('click', () => {
+  const current = getClockPosition();
+  const next = CLOCK_POSITIONS[(CLOCK_POSITIONS.indexOf(current) + 1) % CLOCK_POSITIONS.length];
+  localStorage.setItem(CLOCK_POSITION_KEY, next);
+  applyClockPosition(next);
+});
 document.getElementById('btn-load-session').onclick = () => {
   document.getElementById('session-file-input').click();
 };
@@ -11573,6 +11609,27 @@ function closeSessionsOverlay() {
 }
 document.getElementById('btn-sessions-list').onclick = openSessionsOverlay;
 document.getElementById('sessions-close').onclick = closeSessionsOverlay;
+// Prag orientativ pentru avertizare proactivă — majoritatea browserelor
+// permit ~5-10MB per site în localStorage; avertizăm din timp, înainte ca
+// salvarea să eșueze brusc, fără explicație.
+const SESSIONS_WARN_COUNT = 15;
+const SESSIONS_WARN_SIZE_MB = 4;
+function getSavedSessionsSizeMB() {
+  try {
+    const raw = localStorage.getItem(SAVED_SESSIONS_KEY) || '';
+    return raw.length / (1024 * 1024);
+  } catch (e) { return 0; }
+}
+function maybeWarnAboutSessionsStorage() {
+  const list = getSavedSessionsList();
+  const sizeMB = getSavedSessionsSizeMB();
+  if (list.length >= SESSIONS_WARN_COUNT || sizeMB >= SESSIONS_WARN_SIZE_MB) {
+    showToast(LANG === 'en'
+      ? `⚠ ${list.length} saved sessions (~${sizeMB.toFixed(1)} MB) — consider deleting old ones before storage runs out`
+      : `⚠ ${list.length} sesiuni salvate (~${sizeMB.toFixed(1)} MB) — ia în calcul ștergerea celor vechi, înainte să se umple spațiul`, 5000);
+  }
+}
+
 document.getElementById('sessions-save-btn').onclick = async () => {
   const input = document.getElementById('sessions-name-input');
   let name = input.value.trim();
@@ -11582,6 +11639,7 @@ document.getElementById('sessions-save-btn').onclick = async () => {
     input.value = '';
     renderSessionsList();
     showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiune salvată!');
+    maybeWarnAboutSessionsStorage();
   } catch (e) {
     // Cel mai probabil spațiul de stocare al browserului e depășit (sesiuni
     // cu multe imagini mari) — sugerăm ștergerea unor sesiuni vechi.
@@ -11981,23 +12039,6 @@ function geoBuildResetHorizButton() {
 
 // Buton de oglindire (flip) orizontal/vertical — pentru echer, ca să poți
 // alege rapid în ce colț stă unghiul drept.
-function geoBuildFlipButton(horizontal) {
-  const g = geoEl('g', { class: 'guide-handle' });
-  g.appendChild(geoEl('circle', { r: 10, fill: '#7a5cff', stroke: '#ffffff', 'stroke-width': 1.5 }));
-  if (horizontal) {
-    g.appendChild(geoEl('path', { d: 'M -5 -4 L 0 -4 M -5 4 L 0 4 M 5 -4 L 0 -4 M 5 4 L 0 4',
-      stroke: '#ffffff', 'stroke-width': 1.4, 'stroke-linecap': 'round' }));
-    g.appendChild(geoEl('path', { d: 'M -6 -4 L -3 -4 L -4.5 -1.5 Z M 6 4 L 3 4 L 4.5 1.5 Z', fill: '#ffffff' }));
-    g.appendChild(geoEl('line', { x1: 0, y1: -6, x2: 0, y2: 6, stroke: '#ffffff', 'stroke-width': 1, 'stroke-dasharray': '1.5,1.5' }));
-  } else {
-    g.appendChild(geoEl('path', { d: 'M -4 -6 L -4 0 M 4 -6 L 4 0 M -4 6 L -4 0 M 4 6 L 4 0',
-      stroke: '#ffffff', 'stroke-width': 1.4, 'stroke-linecap': 'round' }));
-    g.appendChild(geoEl('path', { d: 'M -4 -7 L -4 -4 L -1.5 -5.5 Z M 4 7 L 4 4 L 1.5 5.5 Z', fill: '#ffffff' }));
-    g.appendChild(geoEl('line', { x1: -6, y1: 0, x2: 6, y2: 0, stroke: '#ffffff', 'stroke-width': 1, 'stroke-dasharray': '1.5,1.5' }));
-  }
-  return g;
-}
-
 function buildGeoRuler() {
   const g = geoEl('g', { class: 'guide', id: 'guide-ruler' });
   const body = geoEl('rect', { class: 'guide-body',
@@ -13763,7 +13804,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v267</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v282</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13787,6 +13828,7 @@ const HELP_CONTENT_HTML = `
 <h4>Desen</h4>
 <ul>
   <li><b>Creion</b> — desen liber cu mâna.</li>
+  <li><b>Neon</b> (✨) — evidențiere temporară, ca un marker luminos — desenul apare colorat, cu efect de lumină intens, apoi se șterge singur, treptat, în 2 secunde. Nu se salvează niciodată. Apasă din nou butonul ca să revii la creion.</li>
   <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
   <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi apasă bifa (✓) ca să închizi forma.</li>
@@ -13835,7 +13877,7 @@ const HELP_CONTENT_HTML = `
 <h4>Imagini și fișe PDF</h4>
 <ul>
   <li><b>Încarcă imagine</b> (una sau mai multe) — le poți plasa oriunde pe tablă.</li>
-  <li><b>Caută imagine</b> (🔍🖼) — caută direct pe Wikimedia Commons (imagini libere, cu sursă și licență documentate) și adaugă rezultatul ales direct pe tablă, fără să mai treci prin browser.</li>
+  <li><b>Caută imagine</b> (🔍🖼) — caută direct pe Wikimedia Commons (imagini libere, cu sursă și licență documentate); bifează una sau mai multe, apoi apasă „Adaugă selectate" — se distribuie automat, uniform, pe tablă.</li>
   <li><b>Fișă PDF</b> — încarcă un test/fișă de lucru ca fundal. La încărcare, fișa ocupă <b>tot ecranul</b>, cu grosimea creionului setată automat la 3 și <b>creionul roșu</b> activ imediat (contrastează bine cu textul negru pe alb tipic unui PDF) — bara ei de control (săgeți/zoom/pagini) rămâne <b>mereu vizibilă</b>, atât în ecran complet cât și în modul split. Culoarea comută automat între alb (pe tablă) și roșu (pe fișă) de fiecare dată când treci de pe o suprafață pe alta — dar dacă alegi manual o culoare din panou, aceea rămâne fixă pe ambele suprafețe, fără să mai comute automat. Fiecare pagină a fișei își păstrează propriile adnotări, separat de celelalte pagini. Cu două degete poți oricând plimba/mări fișa (pinch), fără să afecteze desenul. Pe laptop: <b>Ctrl+click și trage</b> panoramează, <b>Ctrl+rotița</b> mărește/micșorează (centrat pe cursor), rotița simplă sau <b>săgețile sus/jos</b> derulează fișa — dacă ajungi la finalul sau începutul paginii curente, se trece automat la pagina următoare/anterioară (derulare continuă a întregii fișe, nu doar pagină cu pagină); fiecare pagină nouă se deschide cu vârful ei vizibil, iar <b>click dreapta ținut apăsat</b> șterge temporar (apare un mic pătrățel alb) — la eliberare revii automat la unealta pe care o foloseai. Butonul de separare (⬓) arată tabla neagră dedesubt, împărțind ecranul — la separare, fereastra PDF trece automat în modul plimbare (devine zonă de navigare), iar pe tabla de jos poți scrie imediat. Apasă direct pe numărul paginii (ex. „3/50") ca să sari instant la orice pagină, fără să treci pagină cu pagină — util mai ales la o fișă cu multe pagini. În modul separat, poți muta liber riglă/echer/raportor/compas dintr-o zonă în alta — desenul rezultat merge întotdeauna pe suprafața pe care se află efectiv instrumentul în acel moment, indiferent unde a fost deschis inițial. Tot ce desenezi peste fișă (inclusiv cu instrumentele geometrice) rămâne lipit de conținutul PDF-ului (își păstrează poziția la panoramare și se scalează la zoom), iar grosimea liniei rămâne identică vizual cu cea de pe tablă. Butonul de descărcare (⬇) din bara fișei exportă un fișier PDF nou, cu fișa originală și tot ce ai scris peste ea îmbinate într-un singur document — util pentru a trimite mai departe o fișă rezolvată; fișa încărcată în aplicație nu se modifică niciodată.</li>
 </ul>
 
@@ -13847,7 +13889,8 @@ const HELP_CONTENT_HTML = `
   <li><b>Exportă PDF</b> — salvează tabla curentă ca document PDF.</li>
   <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior. Pe Chrome/Brave/Edge, salvarea îți lasă să alegi exact locul și numele fișierului (fereastra nativă „Salvează ca...").</li>
   <li><b>Captură de ecran</b> (🔲) — alege ce vrei să distribui (ecran/fereastră/filă), apoi trage un dreptunghi peste zona dorită, care se adaugă direct pe tablă ca imagine. Necesită Chrome/Brave/Edge pe calculator — de obicei nu funcționează pe telefon (limitare a platformei mobile, nu a aplicației).</li>
-  <li><b>Ceas</b> (🕐) — arată/ascunde ora sistemului, actualizată live, în colțul din dreapta-sus.</li>
+  <li><b>Ceas</b> (🕐) — arată/ascunde ora sistemului, actualizată live, implicit în colțul din stânga-sus. Atinge direct ceasul ca să-l muți în dreapta-sus (poziționat puțin mai jos acolo, ca să nu se suprapună peste butonul de ecran complet) — alegerea se reține pentru data viitoare.</li>
+  <li><b>Prezentare</b> (lângă culorile de fundal) — derulează automat printre paginile lecției, în buclă continuă, la intervalul ales cu butoanele +/- sau tastat direct (implicit 5 secunde) — util pentru o recapitulare rapidă cu clasa. Orice navigare manuală oprește derularea.</li>
 </ul>
 
 <h4>Pagini și fundal</h4>
@@ -13887,7 +13930,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v267</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v282</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -13911,6 +13954,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Drawing</h4>
 <ul>
   <li><b>Pencil</b> — free-hand drawing.</li>
+  <li><b>Neon</b> (✨) — temporary highlight, like a glowing marker — the stroke appears colored, with an intense light effect, then erases itself gradually within 2 seconds. Never saved. Tap the button again to switch back to the pencil.</li>
   <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
   <li><b>Circle</b> — drag from the center outward.</li>
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then press the check mark (✓) to close the shape.</li>
@@ -13959,7 +14003,7 @@ const HELP_CONTENT_HTML_EN = `
 <h4>Images and PDF sheets</h4>
 <ul>
   <li><b>Load image</b> (one or several) — place them anywhere on the board.</li>
-  <li><b>Search image</b> (🔍🖼) — search directly on Wikimedia Commons (free images, with documented source and license) and add the chosen result straight to the board, without leaving the app.</li>
+  <li><b>Search image</b> (🔍🖼) — search directly on Wikimedia Commons (free images, with documented source and license); tick one or more, then tap "Add selected" — they're placed automatically, evenly spread across the board.</li>
   <li><b>PDF sheet</b> — load a test/worksheet as background. On load, the sheet takes up <b>the whole screen</b>, with the pencil thickness automatically set to 2 and the <b>red pencil</b> active right away (contrasts well with the black-on-white text typical of a PDF) — its control bar (arrows/zoom/pages) stays <b>always visible</b> while the sheet is full-screen. The color switches automatically between white (on the board) and red (on the sheet) every time you move from one surface to the other — but if you manually pick a color from the panel, it stays fixed on both surfaces instead of switching automatically. Each page of the sheet keeps its own annotations, separate from the other pages. Two fingers always pan/zoom the sheet (pinch) without affecting drawing. On a laptop: <b>Ctrl+click and drag</b> pans, <b>Ctrl+wheel</b> zooms (centered on the cursor), the plain wheel or the <b>up/down arrow keys</b> scroll the sheet — reaching the end or start of the current page automatically moves to the next/previous page (continuous scrolling through the whole sheet, not just page by page); each new page opens with its top visible, and <b>holding right-click</b> erases temporarily (a small white square appears) — release to go back to whichever tool you were using. The split button (⬓) shows the black board below, splitting the screen — once split, the PDF window switches automatically to pan mode (becomes a navigation area), and you can write right away on the board below. In split mode, you can freely drag the ruler/set square/protractor/compass from one area to the other — the resulting drawing always goes onto whichever surface the tool is actually over at that moment, regardless of where it was first opened. There, the PDF's control bar hides after 10 seconds of inactivity and comes back when you tap the divider. Anything you draw over the sheet (including with the geometric tools) stays attached to the PDF content (keeps its position when panning, scales with zoom), and the line thickness stays visually identical to the board's. The download button (⬇) in the sheet's toolbar exports a new PDF file, combining the original sheet and everything you wrote over it into a single document — handy for sending along a solved worksheet; the sheet loaded in the app is never modified.</li>
 </ul>
 
@@ -13971,7 +14015,8 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Export PDF</b> — saves the current board as a PDF document.</li>
   <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later. On Chrome/Brave/Edge, saving lets you pick the exact file location and name (native "Save As" window).</li>
   <li><b>Screen capture</b> (🔲) — pick what to share (screen/window/tab), then drag a rectangle over the area you want, which gets added directly to the board as an image. Requires Chrome/Brave/Edge on a computer — usually doesn't work on phones (a mobile platform limitation, not the app's).</li>
-  <li><b>Clock</b> (🕐) — shows/hides the system time, updated live, in the top-right corner.</li>
+  <li><b>Clock</b> (🕐) — shows/hides the system time, updated live, by default in the top-left corner. Tap the clock itself to move it to the top-right (positioned a bit lower there, to clear the fullscreen button) — your choice is remembered for next time.</li>
+  <li><b>Present</b> (next to the background colors) — auto-advances through the lesson's pages, looping continuously, at the interval set with the +/- buttons or typed directly (default 5 seconds) — useful for a quick recap with the class. Any manual navigation stops it.</li>
 </ul>
 
 <h4>Pages and background</h4>
