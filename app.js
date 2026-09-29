@@ -6913,100 +6913,87 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   const page = getCurrentPage();
   if (!page) throw new Error(LANG === 'en' ? 'No active page.' : 'Nu există o pagină activă.');
 
-  const rect = drawC.getBoundingClientRect();
   const fnPane = pdfPanes[activeSurface];
   const fnScaleComp = fnPane ? (fnPane.baseScale || fnPane.finalScale || 1) : 1;
-  let W = rect.width > 50 ? rect.width : wrap.clientWidth;
-  let H = rect.height > 50 ? rect.height : wrap.clientHeight;
-  // Plasă de siguranță suplimentară: indiferent ce ar reveni mai sus, W/H nu
-  // pot depăși dimensiunea reală și de încredere a suprafeței active — pe
-  // fișă PDF, limita corectă e chiar panoul PDF (rădăcina lui, aceeași
-  // folosită de getPaneContentTransform pentru conversia coordonatelor),
-  // NU fereastra întreagă a browserului: în modul split, fișa ocupă doar o
-  // parte din ecran, deci fereastra întreagă ar fi o limită mult prea mare
-  // și ar lăsa sistemul de axe să depășească vizibil panoul PDF. Pe tablă,
-  // limita rămâne fereastra browserului, ca înainte.
-  const safeLimit = fnPane
-    ? getPaneEls(activeSurface).root.getBoundingClientRect()
-    : document.getElementById('workspace').getBoundingClientRect();
-  if (safeLimit.width > 50) W = Math.min(W, safeLimit.width);
-  if (safeLimit.height > 50) H = Math.min(H, safeLimit.height);
-  // Zona de desenare e mult mai generoasă decât la un grafic normal (60%
-  // umplere, în loc de 25%) — fără nicio curbă care să concureze vizual,
-  // trebuie loc suficient ca mai multe diviziuni de 1cm (fixe, 50px) să
-  // încapă vizibil; la 25% umplere, pe un telefon cu ecran îngust, jumătatea
-  // axei abia depășea un singur pas de 1cm, deci apărea cel mult o
-  // diviziune (sau niciuna).
-  // Sistemul de axe se plasează în pătrimea din stânga-sus a ecranului
-  // (împărțind zona vizibilă în 4 zone egale, 2x2) — nu în centrul întregului
-  // ecran. Originea ajunge astfel în centrul acelei pătrimi.
-  const quadW = W / 2, quadH = H / 2;
-  // Folosim aceeași dimensiune pentru ambele axe (cea mai mică dintre
-  // jumătatea lățimii și jumătatea înălțimii) — altfel, pe telefon (ecran
-  // mult mai înalt decât lat), pătrimea brută ar fi un dreptunghi foarte
-  // alungit pe verticală, iar axa Y ar ieși nefiresc de lungă față de axa X.
-  const quadSize = Math.min(quadW, quadH);
-  // DIAGNOSTIC TEMPORAR — arată valorile reale calculate pe acest dispozitiv,
-  // ca să găsim exact unde apare discrepanța. Se elimină după depanare.
-  showToast(`DEBUG: W=${W.toFixed(0)} H=${H.toFixed(0)} quadW=${quadW.toFixed(0)} quadH=${quadH.toFixed(0)} quadSize=${quadSize.toFixed(0)}`, 8000);
-  // Marginea e raportată la dimensiunea PĂTRIMII (nu la tot ecranul, cum era
-  // greșit înainte) — altfel, pe un ecran de telefon (unde pătrimea e mult
-  // mai mică decât ecranul întreg), marginea calculată din ecranul întreg
-  // devenea disproporționat de mare față de pătrime, lăsând prea puțin loc
-  // efectiv pentru axe și diviziuni.
-  const marginX = quadSize * 0.04, marginY = quadSize * 0.04;
-  const plotW = Math.max(quadSize - marginX * 2, 50);
-  const plotH = Math.max(quadSize - marginY * 2, 50);
-  const originX = quadSize / 2;
-  const originY = quadSize / 2;
-  const SELECTION_SAFE_PAD = 50;
 
   function canvasPxToContent(px, py) {
     if (activeSurface === 'board') {
       const z = boardZoom || 1;
       return { x: (px - boardPanX) / z, y: (py - boardPanY) / z };
     }
-    if (pdfPanes[activeSurface]) {
+    if (fnPane) {
       const t = getPaneContentTransform(activeSurface);
       return { x: (px - t.offX) / t.scale, y: (py - t.offY) / t.scale };
     }
     return { x: px, y: py };
   }
-  function toScreen(px, py) {
-    px = Math.max(SELECTION_SAFE_PAD, Math.min(W - SELECTION_SAFE_PAD, px));
-    py = Math.max(SELECTION_SAFE_PAD, Math.min(H - SELECTION_SAFE_PAD, py));
-    return canvasPxToContent(px, py);
+
+  // Dimensiune de bază: 10 diviziuni de 1cm (50px) de fiecare parte a
+  // originii — 500px jumătate de axă, în condiții normale (ecran suficient
+  // de mare). Pe ecrane mai mici (telefon), se micșorează proporțional mai
+  // jos, păstrând totuși toate cele 10 diviziuni — niciodată nu se mărește
+  // peste această valoare de bază.
+  const MARGIN = 40;
+  const BASE_HALF_AXIS = PX_PER_CM * 10;
+
+  // Estimăm spațiul disponibil din mai multe surse posibile și folosim cea
+  // MAI MICĂ dintre ele — o singură sursă (ex. window.innerHeight) s-a
+  // dovedit nesigură pe unele dispozitive (raporta valori mult mai mari
+  // decât spațiul real vizibil). Folosind minimul dintre toate sursele
+  // disponibile, riscul e mereu spre "puțin mai mic decât ar putea fi",
+  // niciodată spre "prea mare, iese din ecran" — exact problema semnalată.
+  let availW = Infinity, availH = Infinity;
+  try {
+    const wsRect = document.getElementById('workspace').getBoundingClientRect();
+    if (wsRect.width > 50) availW = Math.min(availW, wsRect.width);
+    if (wsRect.height > 50) availH = Math.min(availH, wsRect.height);
+  } catch (e) {}
+  if (window.visualViewport) {
+    if (window.visualViewport.width > 50) availW = Math.min(availW, window.visualViewport.width);
+    if (window.visualViewport.height > 50) availH = Math.min(availH, window.visualViewport.height);
   }
+  if (window.innerWidth > 50) availW = Math.min(availW, window.innerWidth);
+  if (window.innerHeight > 50) availH = Math.min(availH, window.innerHeight);
+  if (fnPane) {
+    const paneRect = getPaneEls(activeSurface).root.getBoundingClientRect();
+    if (paneRect.width > 50) availW = Math.min(availW, paneRect.width);
+    if (paneRect.height > 50) availH = Math.min(availH, paneRect.height);
+  }
+  if (!isFinite(availW)) availW = 1200;
+  if (!isFinite(availH)) availH = 800;
 
-  // Garantăm minim 5 diviziuni de fiecare parte a originii, pe ambele axe,
-  // la fel de lungi — dacă pătrimea calculată ar da mai puțin de-atât,
-  // preferăm cele 5 diviziuni (cerință explicită), chiar dacă asta ar
-  // depăși ușor pătrimea pe ecrane foarte mici.
-  const halfW = Math.max(plotW / 2, PX_PER_CM * 5);
-  const halfH = Math.max(plotH / 2, PX_PER_CM * 5);
-  const xAxis = [toScreen(originX - halfW, originY), toScreen(originX + halfW, originY)];
-  const yAxis = [toScreen(originX, originY + halfH), toScreen(originX, originY - halfH)];
+  // Jumătatea de axă trebuie să încapă, cu marginea inclusă, pe latura mai
+  // scurtă dintre lățime și înălțime (ca sistemul să rămână pătrat, nu
+  // alungit pe o singură direcție).
+  const maxHalfAxis = Math.min(availW, availH) / 2 - MARGIN;
+  const HALF_AXIS = Math.max(50, Math.min(BASE_HALF_AXIS, maxHalfAxis));
+  const originScreenX = MARGIN + HALF_AXIS;
+  const originScreenY = MARGIN + HALF_AXIS;
 
-  // Diviziuni la fiecare 1 cm, simetric față de origine — DOAR până la
-  // marginea REALĂ, vizibilă a zonei de desen (plotW/2, plotH/2), nu până
-  // la minimul GARANTAT (halfW/halfH, care poate fi mai mare). Dincolo de
-  // marginea reală, toScreen() plafonează (clamp) poziția, iar mai multe
-  // valori distincte de "d" ar ajunge la EXACT aceeași poziție de ecran —
-  // se suprapuneau vizual, iar diviziunile "din mijloc" deveneau invizibile
-  // sub cele plafonate. Eticheta fiecărei diviziuni e goală implicit (vezi
-  // randarea tipului 'function' în drawStrokeOn) — dar arată numărul
-  // diviziunii dacă bifa "123" e activă.
+  const xAxis = [
+    canvasPxToContent(originScreenX - HALF_AXIS, originScreenY),
+    canvasPxToContent(originScreenX + HALF_AXIS, originScreenY)
+  ];
+  const yAxis = [
+    canvasPxToContent(originScreenX, originScreenY + HALF_AXIS),
+    canvasPxToContent(originScreenX, originScreenY - HALF_AXIS)
+  ];
+
+  // Diviziuni simetrice față de origine, exact 10 de fiecare parte — pasul
+  // dintre ele (STEP) se ajustează odată cu dimensiunea axei (mai mic pe
+  // ecrane mici), dar NUMĂRUL de diviziuni rămâne mereu 10, garantat.
+  // Fiecare diviziune își reține valoarea numerică direct (value), indiferent
+  // dacă eticheta e afișată acum sau nu (bifa "123" o poate activa oricând
+  // ulterior, fără să mai fie nevoie de recalculare din poziție, sursă a
+  // altor bug-uri anterioare).
+  const STEP = HALF_AXIS / 10;
   const xTicks = [], yTicks = [];
-  const halfWVisible = halfW, halfHVisible = halfH;
-  for (let d = PX_PER_CM; d <= halfWVisible; d += PX_PER_CM) {
-    const n = Math.round(d / PX_PER_CM);
-    xTicks.push({ ...toScreen(originX + d, originY), label: axesShowNumbers ? String(n) : '', value: n });
-    xTicks.push({ ...toScreen(originX - d, originY), label: axesShowNumbers ? String(-n) : '', value: -n });
-  }
-  for (let d = PX_PER_CM; d <= halfHVisible; d += PX_PER_CM) {
-    const n = Math.round(d / PX_PER_CM);
-    yTicks.push({ ...toScreen(originX, originY + d), label: axesShowNumbers ? String(-n) : '', value: -n });
-    yTicks.push({ ...toScreen(originX, originY - d), label: axesShowNumbers ? String(n) : '', value: n });
+  for (let n = 1; n <= 10; n++) {
+    const d = n * STEP;
+    xTicks.push({ ...canvasPxToContent(originScreenX + d, originScreenY), label: axesShowNumbers ? String(n) : '', value: n });
+    xTicks.push({ ...canvasPxToContent(originScreenX - d, originScreenY), label: axesShowNumbers ? String(-n) : '', value: -n });
+    yTicks.push({ ...canvasPxToContent(originScreenX, originScreenY + d), label: axesShowNumbers ? String(-n) : '', value: -n });
+    yTicks.push({ ...canvasPxToContent(originScreenX, originScreenY - d), label: axesShowNumbers ? String(n) : '', value: n });
   }
 
   const stroke = {
@@ -7021,7 +7008,7 @@ function plotEmptyAxesOnCanvas(strokeColor) {
     extremes: [],
     tickFontSize: 12 / fnScaleComp,
     isEmptyAxes: true,
-    axesOrigin: toScreen(originX, originY)
+    axesOrigin: canvasPxToContent(originScreenX, originScreenY)
   };
   pushStroke(page, stroke);
   const idx = page.strokes.length - 1;
@@ -9659,23 +9646,31 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
   function drawNeonStroke(stroke, opacity) {
     if (stroke.points.length < 2) return;
     neonCtx.save();
-    neonCtx.globalAlpha = opacity;
     neonCtx.lineCap = 'round';
     neonCtx.lineJoin = 'round';
-    // Halo exterior, difuz — efectul de "lumina neon" propriu-zis.
-    neonCtx.shadowColor = NEON_COLOR;
-    neonCtx.shadowBlur = 35;
+    function path() {
+      neonCtx.beginPath();
+      neonCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) neonCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    }
+    // Simulăm halo-ul luminos prin mai multe trasee simple, semi-transparente,
+    // tot mai subțiri — NU prin shadowBlur (efect de umbră difuză), care e
+    // cunoscut ca fiind foarte costisitor de calculat, mai ales pe procesoare
+    // sau plăci grafice mai slabe (exact cazul semnalat pe tabla Horizon,
+    // unde efectul rula sacadat). Desenarea directă, fără umbre, e mult mai
+    // rapidă, la un rezultat vizual foarte asemănător.
     neonCtx.strokeStyle = NEON_COLOR;
-    neonCtx.lineWidth = 6;
-    neonCtx.beginPath();
-    neonCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    for (let i = 1; i < stroke.points.length; i++) neonCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
-    neonCtx.stroke();
+    neonCtx.globalAlpha = opacity * 0.12;
+    neonCtx.lineWidth = 20; path(); neonCtx.stroke();
+    neonCtx.globalAlpha = opacity * 0.25;
+    neonCtx.lineWidth = 12; path(); neonCtx.stroke();
+    neonCtx.globalAlpha = opacity * 0.55;
+    neonCtx.lineWidth = 7; path(); neonCtx.stroke();
+    neonCtx.globalAlpha = opacity;
+    neonCtx.lineWidth = 3; path(); neonCtx.stroke();
     // Miez interior, alb, strălucitor — dă senzația de tub de neon aprins.
-    neonCtx.shadowBlur = 15;
     neonCtx.strokeStyle = '#ffffff';
-    neonCtx.lineWidth = 2;
-    neonCtx.stroke();
+    neonCtx.lineWidth = 1.5; path(); neonCtx.stroke();
     neonCtx.restore();
   }
 
@@ -13804,7 +13799,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v282</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v284</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13930,7 +13925,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v282</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v284</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
