@@ -685,6 +685,18 @@ let selectedStrokes = new Set();
 // Clipboard intern pentru copierea/lipirea desenelor selectate (Ctrl+C/V) —
 // funcționează și între pagini diferite.
 let strokeClipboard = [];
+// Urmărim momentul ultimei copieri de desene, și "amprenta" (dimensiune +
+// tip) ultimei imagini efectiv lipite — ca să distingem între "aceeași
+// imagine veche, încă în clipboard-ul sistemului" și "o imagine chiar nouă,
+// copiată de-abia acum". Fără asta: odată ce o imagine ajunge în clipboard,
+// rămâne acolo (lipirea n-o șterge) — dacă apoi copiezi un desen și
+// încerci să-l lipești, aplicația ar găsi tot vechea imagine și ar prefera-o
+// mereu, deși desenul e evident mai recent.
+let strokeClipboardTime = 0;
+let imageClipboard = [];
+let imageClipboardTime = 0;
+let lastSeenImageFingerprint = null;
+let lastPastedImageTime = 0;
 let isSelecting = false;
 let selectionStartX = 0, selectionStartY = 0;
 let lassoPoints = [];
@@ -5666,34 +5678,59 @@ function addPage() {
   updateStatus(); 
 }
 
+// Tranziție de dizolvare (fade) la schimbarea paginii — prin CSS
+// (opacitate), NU prin desenare repetată pe canvas. Efectele CSS de acest
+// tip sunt accelerate hardware în aproape toate browserele, deci rămân
+// ușoare chiar și pe un procesor mai slab — spre deosebire de un efect
+// bazat pe redesenare JS repetată (ca la instrumentul neon).
+function withPageFadeTransition(redrawFn) {
+  const el = document.getElementById('canvas-wrap');
+  el.style.opacity = '0';
+  setTimeout(() => {
+    redrawFn();
+    // O mică întârziere suplimentară înainte de a reveni la opacitate
+    // maximă, ca noul conținut să nu "sară" instant, ci să se dizolve la
+    // rândul lui, lin, spre vizibil.
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+  }, 140);
+}
+
 function prevPage() { 
   if (currentPageIdx > 0) { 
-    currentPageIdx--; 
-    drawBg(); 
-    redrawStrokes(); 
-    selectedStrokes.clear();
-    selectedImages.clear();
-    updateImageSelection();
-    hideSelectionInfo();
-    renderImages();
-    updateStatus(); 
+    withPageFadeTransition(() => {
+      currentPageIdx--; 
+      drawBg(); 
+      redrawStrokes(); 
+      selectedStrokes.clear();
+      selectedImages.clear();
+      updateImageSelection();
+      hideSelectionInfo();
+      renderImages();
+      updateStatus(); 
+    });
   }
 }
 
 function nextPage() {
   if (currentPageIdx >= pages.length - 1) {
     addPage();
+    selectedStrokes.clear();
+    selectedImages.clear();
+    updateImageSelection();
+    hideSelectionInfo();
   } else {
-    currentPageIdx++;
-    drawBg();
-    redrawStrokes();
-    renderImages();
-    updateStatus();
+    withPageFadeTransition(() => {
+      currentPageIdx++;
+      drawBg();
+      redrawStrokes();
+      renderImages();
+      updateStatus();
+      selectedStrokes.clear();
+      selectedImages.clear();
+      updateImageSelection();
+      hideSelectionInfo();
+    });
   }
-  selectedStrokes.clear();
-  selectedImages.clear();
-  updateImageSelection();
-  hideSelectionInfo();
 }
 
 async function deletePage() {
@@ -9651,26 +9688,39 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
     function path() {
       neonCtx.beginPath();
       neonCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      for (let i = 1; i < stroke.points.length; i++) neonCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      if (stroke.points.length === 2) {
+        neonCtx.lineTo(stroke.points[1].x, stroke.points[1].y);
+        return;
+      }
+      // Curbe netede (prin punctul median dintre fiecare pereche), nu linii
+      // drepte punct-cu-punct — arată mai lin, mai ales dacă punctele
+      // captate sunt mai rare (un dispozitiv mai lent prinde mai puține
+      // evenimente de mișcare pe secundă), evitând aspectul de zig-zag.
+      for (let i = 1; i < stroke.points.length - 1; i++) {
+        const midX = (stroke.points[i].x + stroke.points[i + 1].x) / 2;
+        const midY = (stroke.points[i].y + stroke.points[i + 1].y) / 2;
+        neonCtx.quadraticCurveTo(stroke.points[i].x, stroke.points[i].y, midX, midY);
+      }
+      const last = stroke.points[stroke.points.length - 1];
+      neonCtx.lineTo(last.x, last.y);
     }
     // Simulăm halo-ul luminos prin mai multe trasee simple, semi-transparente,
     // tot mai subțiri — NU prin shadowBlur (efect de umbră difuză), care e
     // cunoscut ca fiind foarte costisitor de calculat, mai ales pe procesoare
     // sau plăci grafice mai slabe (exact cazul semnalat pe tabla Horizon,
     // unde efectul rula sacadat). Desenarea directă, fără umbre, e mult mai
-    // rapidă, la un rezultat vizual foarte asemănător.
+    // rapidă, la un rezultat vizual foarte asemănător. Doar 3 straturi (nu
+    // 5) — mai puțină muncă la fiecare redesenare, esențial pe un procesor
+    // mai lent.
     neonCtx.strokeStyle = NEON_COLOR;
-    neonCtx.globalAlpha = opacity * 0.12;
-    neonCtx.lineWidth = 20; path(); neonCtx.stroke();
-    neonCtx.globalAlpha = opacity * 0.25;
-    neonCtx.lineWidth = 12; path(); neonCtx.stroke();
-    neonCtx.globalAlpha = opacity * 0.55;
+    neonCtx.globalAlpha = opacity * 0.2;
+    neonCtx.lineWidth = 16; path(); neonCtx.stroke();
+    neonCtx.globalAlpha = opacity * 0.6;
     neonCtx.lineWidth = 7; path(); neonCtx.stroke();
-    neonCtx.globalAlpha = opacity;
-    neonCtx.lineWidth = 3; path(); neonCtx.stroke();
     // Miez interior, alb, strălucitor — dă senzația de tub de neon aprins.
+    neonCtx.globalAlpha = opacity;
     neonCtx.strokeStyle = '#ffffff';
-    neonCtx.lineWidth = 1.5; path(); neonCtx.stroke();
+    neonCtx.lineWidth = 2.5; path(); neonCtx.stroke();
     neonCtx.restore();
   }
 
@@ -9705,8 +9755,15 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
   });
   neonCanvas.addEventListener('pointermove', (e) => {
     if (tool !== 'neon' || !neonCurrent) return;
+    // DOAR adăugăm punctul în listă — nu redesenăm aici. Redesenarea
+    // efectivă (costisitoare: șterge + redesenează tot canvas-ul, cu mai
+    // multe straturi) se face DOAR la ritmul fix, controlat, al
+    // cronometrului de mai jos. Altfel, pe un procesor mai lent, mișcările
+    // degetului se puteau aduna mai repede decât putea desena aplicația,
+    // creând exact efectul semnalat: întârziere, apoi „recuperare" bruscă,
+    // în salturi (zig-zag) — fiecare mișcare încerca să redeseneze imediat,
+    // suprapunându-se peste redesenările anterioare, încă neterminate.
     neonCurrent.points.push(neonPointFromEvent(e));
-    neonTick();
   });
   function finishNeonStroke() {
     if (!neonCurrent) return;
@@ -9802,21 +9859,23 @@ function stopPresentMode() {
   btn.innerHTML = '<i class="ti ti-presentation"></i>';
 }
 function advancePresentPage() {
-  if (currentPageIdx >= pages.length - 1) {
-    // Revenim la prima pagină — NU folosim nextPage() aici, care la
-    // ultima pagină ADAUGĂ una nouă, goală, în loc să reia bucla.
-    currentPageIdx = 0;
-  } else {
-    currentPageIdx++;
-  }
-  drawBg();
-  redrawStrokes();
-  renderImages();
-  updateStatus();
-  selectedStrokes.clear();
-  selectedImages.clear();
-  updateImageSelection();
-  hideSelectionInfo();
+  withPageFadeTransition(() => {
+    if (currentPageIdx >= pages.length - 1) {
+      // Revenim la prima pagină — NU folosim nextPage() aici, care la
+      // ultima pagină ADAUGĂ una nouă, goală, în loc să reia bucla.
+      currentPageIdx = 0;
+    } else {
+      currentPageIdx++;
+    }
+    drawBg();
+    redrawStrokes();
+    renderImages();
+    updateStatus();
+    selectedStrokes.clear();
+    selectedImages.clear();
+    updateImageSelection();
+    hideSelectionInfo();
+  });
 }
 function startPresentMode() {
   const btn = document.getElementById('btn-present');
@@ -10562,19 +10621,50 @@ document.addEventListener('paste', (e) => {
   if (e.target && e.target.matches('input, textarea')) return;
 
   const items = e.clipboardData && e.clipboardData.items;
-  if (!items) return;
 
   let imageFile = null;
-  for (const item of items) {
-    if (item.kind === 'file' && item.type.startsWith('image/')) {
-      imageFile = item.getAsFile();
-      break;
+  if (items) {
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        imageFile = item.getAsFile();
+        break;
+      }
     }
   }
-  if (!imageFile) return;
 
+  // Trei surse posibile de lipit — alegem întotdeauna cea mai RECENTĂ
+  // acțiune de copiere, indiferent de tip:
+  //  1. o imagine din clipboard-ul SISTEMULUI (poate rămâne acolo mult timp
+  //     după ce a fost folosită o dată — de-aici nevoia de a distinge
+  //     "conținut chiar nou" de "aceeași imagine veche, încă prezentă");
+  //  2. desene copiate intern (Ctrl+C pe o selecție de pe tablă);
+  //  3. imagini deja de pe tablă, copiate intern (Ctrl+C pe o selecție de
+  //     imagini) — până acum, acest caz nu funcționa deloc.
+  let imageFileEffectiveTime = -1;
+  if (imageFile) {
+    const fingerprint = imageFile.size + ':' + imageFile.type;
+    if (fingerprint !== lastSeenImageFingerprint) {
+      // Conținut diferit de ultima dată — e nou, tratat ca fiind cea mai
+      // recentă acțiune posibilă, indiferent ce s-a copiat intern înainte.
+      lastSeenImageFingerprint = fingerprint;
+      lastPastedImageTime = Date.now();
+    }
+    imageFileEffectiveTime = lastPastedImageTime;
+  }
+
+  const candidates = [
+    { time: imageFileEffectiveTime, run: () => pasteImageFile(imageFile) },
+    { time: strokeClipboard.length ? strokeClipboardTime : -1, run: pasteStrokesFromClipboard },
+    { time: imageClipboard.length ? imageClipboardTime : -1, run: pasteImagesFromClipboard },
+  ].filter(c => c.time >= 0);
+
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => b.time - a.time);
   e.preventDefault();
+  candidates[0].run();
+});
 
+function pasteImageFile(imageFile) {
   const img = new Image();
   img.onload = async () => {
     const img2 = await compressImageForBoard(img);
@@ -10644,7 +10734,7 @@ document.addEventListener('paste', (e) => {
   };
   const objectUrl = URL.createObjectURL(imageFile);
   img.src = objectUrl;
-});
+}
 
 // Ascunde/arată complet bara principală de instrumente (care se poate
 // întinde pe 2-3 rânduri, în funcție de lățimea ecranului) — utilă mai ales
@@ -11778,63 +11868,134 @@ document.addEventListener('keydown', e => {
     if (page && selectedStrokes.size > 0) {
       e.preventDefault();
       strokeClipboard = [...selectedStrokes].map(idx => JSON.parse(JSON.stringify(page.strokes[idx])));
+      strokeClipboardTime = Date.now();
       showToast(strokeClipboard.length > 1
         ? (LANG === 'en' ? `✓ ${strokeClipboard.length} strokes copied` : `✓ ${strokeClipboard.length} desene copiate`)
         : (LANG === 'en' ? '✓ Stroke copied' : '✓ Desen copiat'));
-    }
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && strokeClipboard.length > 0) {
-    const page = getCurrentPage();
-    if (page) {
+    } else if (page && selectedImages.size > 0) {
+      // Copiem și imaginile selectate de pe tablă — până acum, Ctrl+C nu
+      // făcea nimic pentru imagini (verifica doar desenele), făcând
+      // imposibilă copierea/lipirea unei imagini deja inserate în altă
+      // parte a tablei sau pe altă pagină.
       e.preventDefault();
-      // Bbox-ul combinat al desenelor copiate, ca să le putem repoziționa
-      // pe toate împreună, păstrând poziția lor relativă unele față de
-      // altele.
-      let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
-      for (const s of strokeClipboard) {
-        const b = getStrokeBoundingBox(s);
-        gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
-        gx1 = Math.max(gx1, b.x + b.w); gy1 = Math.max(gy1, b.y + b.h);
-      }
-      const groupCx = (gx0 + gx1) / 2, groupCy = (gy0 + gy1) / 2;
-
-      // Centrul zonei vizibile curente, convertit în coordonate de
-      // conținut — la fel ca la lipirea unei imagini.
-      const isPdfPane = !!pdfPanes[activeSurface];
-      let targetX, targetY;
-      if (isPdfPane) {
-        const els = getPaneEls(activeSurface);
-        const rect = els.root.getBoundingClientRect();
-        const ct = getPaneContentTransform(activeSurface);
-        targetX = (rect.width / 2 - ct.offX) / ct.scale;
-        targetY = (rect.height / 2 - ct.offY) / ct.scale;
-      } else {
-        const z = boardZoom || 1;
-        targetX = (wrap.clientWidth / 2 - boardPanX) / z;
-        targetY = (wrap.clientHeight / 2 - boardPanY) / z;
-      }
-      const dx = targetX - groupCx, dy = targetY - groupCy;
-
-      const newIndices = [];
-      strokeClipboard.forEach(s => {
-        const copy = JSON.parse(JSON.stringify(s));
-        offsetStrokeInPlace(copy, dx, dy);
-        page.strokes.push(copy);
-        newIndices.push(page.strokes.length - 1);
-      });
-      undoStack.push({ type: 'pasteStrokes', page, items: newIndices.map(i => ({ index: i, stroke: page.strokes[i] })) });
-      redoStack = [];
-      setTool('select');
-      selectedStrokes = new Set(newIndices);
-      redrawStrokes();
-      drawSelectionHighlights();
-      updateStatus();
-      showToast(newIndices.length > 1
-        ? (LANG === 'en' ? `✓ ${newIndices.length} strokes pasted` : `✓ ${newIndices.length} desene lipite`)
-        : (LANG === 'en' ? '✓ Stroke pasted' : '✓ Desen lipit'));
+      imageClipboard = page.images
+        .filter(im => selectedImages.has(im.id))
+        .map(im => ({ img: im.img, w: im.w, h: im.h }));
+      imageClipboardTime = Date.now();
+      showToast(imageClipboard.length > 1
+        ? (LANG === 'en' ? `✓ ${imageClipboard.length} images copied` : `✓ ${imageClipboard.length} imagini copiate`)
+        : (LANG === 'en' ? '✓ Image copied' : '✓ Imagine copiată'));
     }
   }
 });
+
+// Lipirea desenelor copiate (Ctrl+C intern) se face acum DOAR prin
+// evenimentul nativ 'paste' (vezi mai jos, lângă lipirea imaginilor) — NU
+// mai printr-un handler separat de tastatură. Motivul: un handler separat,
+// declanșat direct la Ctrl+V, bloca (prin preventDefault) evenimentul nativ
+// de lipire ORI DE CÂTE ORI existau desene copiate anterior — chiar dacă
+// între timp utilizatorul copiase altceva nou (ex. o captură de ecran) în
+// clipboard-ul SISTEMULUI. Rezultatul: lipirea insera mereu desenele vechi,
+// niciodată conținutul nou, mai recent. Acum, evenimentul nativ verifică
+// întâi dacă există o imagine REALĂ în clipboard — dacă da, o lipește pe
+// aceea; doar dacă NU găsește nicio imagine, recurge la desenele copiate
+// intern, ca soluție de rezervă.
+function pasteImagesFromClipboard() {
+  if (imageClipboard.length === 0) return false;
+  const page = getCurrentPage();
+  if (!page) return false;
+
+  const isPdfPane = !!pdfPanes[activeSurface];
+  let targetX, targetY, scale;
+  if (isPdfPane) {
+    const els = getPaneEls(activeSurface);
+    const rect = els.root.getBoundingClientRect();
+    const ct = getPaneContentTransform(activeSurface);
+    targetX = (rect.width / 2 - ct.offX) / ct.scale;
+    targetY = (rect.height / 2 - ct.offY) / ct.scale;
+    scale = ct.scale;
+  } else {
+    const z = boardZoom || 1;
+    targetX = (wrap.clientWidth / 2 - boardPanX) / z;
+    targetY = (wrap.clientHeight / 2 - boardPanY) / z;
+    scale = z;
+  }
+
+  // Simplu: folosim direct dimensiunile fiecărei imagini, centrate una lângă
+  // alta în jurul punctului țintă, dacă sunt mai multe.
+  const newIds = [];
+  imageClipboard.forEach((it, i) => {
+    const x = targetX - it.w / 2 + i * 20;
+    const y = targetY - it.h / 2 + i * 20;
+    const id = addImageToPage(page, it.img, x, y, it.w, it.h);
+    const imgData = page.images[page.images.length - 1];
+    undoStack.push({ type: 'imageAdd', page, img: imgData });
+    newIds.push(id);
+  });
+  redoStack = [];
+  setTool('select');
+  selectedStrokes.clear();
+  selectedImages = new Set(newIds);
+  updateImageSelection();
+  renderImages();
+  updateStatus();
+  showToast(newIds.length > 1
+    ? (LANG === 'en' ? `✓ ${newIds.length} images pasted` : `✓ ${newIds.length} imagini lipite`)
+    : (LANG === 'en' ? '✓ Image pasted' : '✓ Imagine lipită'));
+  return true;
+}
+
+function pasteStrokesFromClipboard() {
+  if (strokeClipboard.length === 0) return false;
+  const page = getCurrentPage();
+  if (!page) return false;
+  // Bbox-ul combinat al desenelor copiate, ca să le putem repoziționa
+  // pe toate împreună, păstrând poziția lor relativă unele față de
+  // altele.
+  let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+  for (const s of strokeClipboard) {
+    const b = getStrokeBoundingBox(s);
+    gx0 = Math.min(gx0, b.x); gy0 = Math.min(gy0, b.y);
+    gx1 = Math.max(gx1, b.x + b.w); gy1 = Math.max(gy1, b.y + b.h);
+  }
+  const groupCx = (gx0 + gx1) / 2, groupCy = (gy0 + gy1) / 2;
+
+  // Centrul zonei vizibile curente, convertit în coordonate de
+  // conținut — la fel ca la lipirea unei imagini.
+  const isPdfPane = !!pdfPanes[activeSurface];
+  let targetX, targetY;
+  if (isPdfPane) {
+    const els = getPaneEls(activeSurface);
+    const rect = els.root.getBoundingClientRect();
+    const ct = getPaneContentTransform(activeSurface);
+    targetX = (rect.width / 2 - ct.offX) / ct.scale;
+    targetY = (rect.height / 2 - ct.offY) / ct.scale;
+  } else {
+    const z = boardZoom || 1;
+    targetX = (wrap.clientWidth / 2 - boardPanX) / z;
+    targetY = (wrap.clientHeight / 2 - boardPanY) / z;
+  }
+  const dx = targetX - groupCx, dy = targetY - groupCy;
+
+  const newIndices = [];
+  strokeClipboard.forEach(s => {
+    const copy = JSON.parse(JSON.stringify(s));
+    offsetStrokeInPlace(copy, dx, dy);
+    page.strokes.push(copy);
+    newIndices.push(page.strokes.length - 1);
+  });
+  undoStack.push({ type: 'pasteStrokes', page, items: newIndices.map(i => ({ index: i, stroke: page.strokes[i] })) });
+  redoStack = [];
+  setTool('select');
+  selectedStrokes = new Set(newIndices);
+  redrawStrokes();
+  drawSelectionHighlights();
+  updateStatus();
+  showToast(newIndices.length > 1
+    ? (LANG === 'en' ? `✓ ${newIndices.length} strokes pasted` : `✓ ${newIndices.length} desene lipite`)
+    : (LANG === 'en' ? '✓ Stroke pasted' : '✓ Desen lipit'));
+  return true;
+}
 
 // ================================================================
 // FULLSCREEN
@@ -13799,7 +13960,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v284</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v291</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13925,7 +14086,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v284</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v291</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
