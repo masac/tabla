@@ -988,6 +988,7 @@ input:focus-visible {
     <div class="status-segment">
       <span id="status-selection" style="color:#e67e00;display:none;"></span>
     </div>
+    <span id="save-status-indicator" style="font-size:12px; opacity:0.75; margin-right:8px; white-space:nowrap;" title="Starea salvării automate"></span>
     <div id="status-quick-access">
       <button class="tool" id="btn-toggle-toolbar" title="Ascunde/arată bara de instrumente (eliberează spațiu pe tablă)"><i class="ti ti-chevrons-down"></i></button>
       <span class="qa-sep"></span>
@@ -1028,6 +1029,7 @@ input:focus-visible {
       <button class="tool" id="btn-circle" title="Cerc (trage din centru)"><i class="ti ti-circle"></i></button>
       <button class="tool shape-tool" id="btn-rect" title="Dreptunghi"><i class="ti ti-rectangle"></i></button>
       <button class="tool shape-tool" id="btn-polygon" title="Poligon"><i class="ti ti-polygon"></i></button>
+      <button class="tool" id="btn-quad-defs" title="Paralelogram interactiv — dreptunghi, romb, pătrat"><i class="ti ti-math-symbols"></i></button>
       <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
@@ -1142,6 +1144,35 @@ input:focus-visible {
 </div>
 
 <div id="toast"></div>
+<div id="quad-defs-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(620px, 94vw); box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <span id="quad-shape-name" style="color:#fff; font-size:17px; font-weight:700;">Paralelogram</span>
+      <button id="quad-defs-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <svg id="quad-svg" viewBox="0 0 400 320" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:none;">
+      <line id="quad-side-ab" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="quad-side-bc" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="quad-side-cd" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="quad-side-da" stroke="#4da6ff" stroke-width="2.5"/>
+      <path id="quad-angle-arc" fill="none" stroke="#ffcc00" stroke-width="2"/>
+      <circle id="quad-pt-b" r="9" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
+      <circle id="quad-pt-d" r="9" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
+      <text id="quad-label-ab" fill="#ccc" font-size="13"></text>
+      <text id="quad-label-ad" fill="#ccc" font-size="13"></text>
+      <text id="quad-label-angle" fill="#ffcc00" font-size="13"></text>
+    </svg>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
+      <button id="quad-to-rect" class="tool" style="flex:1; min-width:110px;">→ Dreptunghi</button>
+      <button id="quad-to-rhombus" class="tool" style="flex:1; min-width:110px;">→ Romb</button>
+      <button id="quad-to-square" class="tool" style="flex:1; min-width:110px;">→ Pătrat</button>
+      <button id="quad-reset" class="tool" style="flex:1; min-width:110px;">↺ Resetează</button>
+      <button id="quad-level-diag" class="tool" style="flex:1; min-width:150px;">⟷ Diagonala mică orizontală</button>
+    </div>
+    <div style="color:#999; font-size:12px; text-align:center;">Trage vârfurile portocalii pentru a schimba forma — numele se actualizează live.</div>
+  </div>
+</div>
+
 <div id="image-search-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
   <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(680px, 92vw); max-height:82vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.4);">
     <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">

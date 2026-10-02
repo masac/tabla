@@ -3396,44 +3396,20 @@ function getPageForSurface(surf) {
 function snapPointToAngle(start, end) {
   const dx = end.x - start.x, dy = end.y - start.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const step = Math.PI / 12;
+  const step = Math.PI / 36; // 5° (redus de la 15°, pentru control mult mai fin)
   let angle = Math.round(Math.atan2(dy, dx) / step) * step;
   return { x: start.x + dist * Math.cos(angle), y: start.y + dist * Math.sin(angle) };
 }
 
-// Aliniere magnetică la multipli de 45° — implicit, fără să fie nevoie de
-// Shift, pentru liniile drepte (linie/săgeată/linie întreruptă): dacă
-// direcția în care tragi e deja aproape de un unghi de 45° (orizontală,
-// verticală sau diagonală), se prinde exact pe acel unghi; altfel rămâne
-// liberă, la orice unghi tras cu mâna.
-function magneticAngleSnap45(start, end) {
-  const dx = end.x - start.x, dy = end.y - start.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist < 4) return end;
-  const step = Math.PI / 4;
-  const angle = Math.atan2(dy, dx);
-  const nearest = Math.round(angle / step) * step;
-  let diff = (angle - nearest) % (2 * Math.PI);
-  if (diff > Math.PI) diff -= 2 * Math.PI;
-  if (diff < -Math.PI) diff += 2 * Math.PI;
-  const threshold = 3 * Math.PI / 180; // prag de ~3° (redus, mai puțin agresiv)
-  if (Math.abs(diff) < threshold) {
-    return { x: start.x + dist * Math.cos(nearest), y: start.y + dist * Math.sin(nearest) };
-  }
-  return end;
-}
-
-// Calculează capătul liniei/săgeții/liniei întrerupte, ținând cont — în
-// această ordine de prioritate — de: Shift (aliniere fină la 15°, ca până
-// acum), muchia unui ghidaj (riglă/echer) dacă tocmai s-a tras de-a lungul
-// ei (unghiul e deja dat de muchie, nu mai forțăm 45°), și în rest alinierea
-// magnetică implicită la 45°. Folosită identic la previzualizare și la
-// finalizarea desenului, ca ce vezi să fie exact ce se salvează.
+// Calculează capătul liniei/săgeții/liniei întrerupte — fără nicio aliniere
+// automată implicită: linia urmează exact mișcarea mâinii, la orice unghi.
+// Doar ținând Shift apăsat se activează alinierea fină la multipli de 5°.
+// (Anterior exista și o aliniere magnetică automată la 45°, activă fără
+// niciun buton apăsat — eliminată complet, fiind percepută ca o "lipire"
+// nedorită, fără control, mai ales pe ecrane tactile.)
 function computeLineEndpoint(e, p) {
   if (e.shiftKey) return snapPointToAngle(currentStroke[0], p);
-  const raw = snapToGuides(p);
-  const onGuideEdge = isStraightEdgeGuide(currentStrokeGuideName) && lastSnapGuideName === currentStrokeGuideName;
-  return onGuideEdge ? raw : magneticAngleSnap45(currentStroke[0], raw);
+  return snapToGuides(p);
 }
 
 function showMathInfo(text) {
@@ -4747,7 +4723,7 @@ function handlePointerMove(e) {
       const snapping = e.shiftKey;
       if (snapping) {
         const angle = Math.atan2(p.y - mathStartPoint.y, p.x - mathStartPoint.x);
-        const snapRad = 15 * Math.PI / 180;
+        const snapRad = 5 * Math.PI / 180;
         const snapped = Math.round(angle / snapRad) * snapRad;
         const len = Math.sqrt((p.x - mathStartPoint.x)**2 + (p.y - mathStartPoint.y)**2);
         ex = mathStartPoint.x + len * Math.cos(snapped);
@@ -5092,7 +5068,7 @@ function handlePointerUp(e) {
       let ep = p;
       if (e.shiftKey) {
         const angle = Math.atan2(p.y - mathStartPoint.y, p.x - mathStartPoint.x);
-        const snapRad = 15 * Math.PI / 180;
+        const snapRad = 5 * Math.PI / 180;
         const snapped = Math.round(angle / snapRad) * snapRad;
         const len = Math.sqrt((p.x - mathStartPoint.x)**2 + (p.y - mathStartPoint.y)**2);
         ep = { x: mathStartPoint.x + len * Math.cos(snapped), y: mathStartPoint.y + len * Math.sin(snapped) };
@@ -5639,6 +5615,7 @@ function setTool(t) {
   tool = t;
   const neonCv = document.getElementById('neon-canvas');
   if (neonCv) neonCv.style.pointerEvents = (t === 'neon') ? 'auto' : 'none';
+  if (t !== 'neon' && window.__finishNeonStroke) window.__finishNeonStroke();
   const allTools = ['btn-pen','btn-neon','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select','btn-vspace'];
   allTools.forEach(id => {
     const el = document.getElementById(id);
@@ -5683,10 +5660,16 @@ function addPage() {
 // tip sunt accelerate hardware în aproape toate browserele, deci rămân
 // ușoare chiar și pe un procesor mai slab — spre deosebire de un efect
 // bazat pe redesenare JS repetată (ca la instrumentul neon).
+let pageFadeTimeoutId = null;
 function withPageFadeTransition(redrawFn) {
   const el = document.getElementById('canvas-wrap');
+  // Dacă o tranziție anterioară e încă în curs (ex. la clicuri repetate sau
+  // derulare automată foarte rapidă), o anulăm — evită conflicte vizuale
+  // între două tranziții suprapuse.
+  if (pageFadeTimeoutId) clearTimeout(pageFadeTimeoutId);
   el.style.opacity = '0';
-  setTimeout(() => {
+  pageFadeTimeoutId = setTimeout(() => {
+    pageFadeTimeoutId = null;
     redrawFn();
     // O mică întârziere suplimentară înainte de a reveni la opacitate
     // maximă, ca noul conținut să nu "sară" instant, ci să se dizolve la
@@ -6140,108 +6123,6 @@ function drawProtractor(ctx2, vertex, ray1end, ray2end, color, size) {
   ctx2.restore();
 }
 
-function drawCompassBody(ctx2, center, tip, color) {
-  const dx = tip.x - center.x, dy = tip.y - center.y;
-  const d = Math.sqrt(dx*dx + dy*dy);
-  if (d < 1) return;
-  const ux = dx / d, uy = dy / d;
-  const nx = -uy, ny = ux;
-
-  const half = d / 2;
-  let L = Math.max(d * 0.7, 100);
-  const minL = half + 6;
-  if (L < minL) L = minL + 8;
-  L = Math.min(L, minL + 260);
-  const h = Math.sqrt(Math.max(L * L - half * half, 6));
-
-  const midx = (center.x + tip.x) / 2, midy = (center.y + tip.y) / 2;
-  const hingeX = midx + nx * h, hingeY = midy + ny * h;
-
-  ctx2.save();
-
-  function drawLeg(x1, y1, x2, y2) {
-    const a = Math.atan2(y2 - y1, x2 - x1);
-    const legW = 6.5;
-    const px = Math.cos(a + Math.PI / 2), py = Math.sin(a + Math.PI / 2);
-
-    const grad = ctx2.createLinearGradient(x1 - px * legW, y1 - py * legW, x1 + px * legW, y1 + py * legW);
-    grad.addColorStop(0,    '#6f7480');
-    grad.addColorStop(0.42, '#cdd1d9');
-    grad.addColorStop(0.55, '#f0f2f6');
-    grad.addColorStop(0.7,  '#c3c7d0');
-    grad.addColorStop(1,    '#565a64');
-
-    ctx2.save();
-    ctx2.shadowColor = 'rgba(20,20,30,0.3)';
-    ctx2.shadowBlur = 4;
-    ctx2.shadowOffsetY = 2;
-    ctx2.strokeStyle = grad;
-    ctx2.lineWidth = legW * 2;
-    ctx2.lineCap = 'round';
-    ctx2.beginPath();
-    ctx2.moveTo(x1, y1);
-    ctx2.lineTo(x2, y2);
-    ctx2.stroke();
-    ctx2.restore();
-
-    ctx2.strokeStyle = 'rgba(40,42,50,0.55)';
-    ctx2.lineWidth = 1;
-    ctx2.beginPath(); ctx2.moveTo(x1 - px*legW, y1 - py*legW); ctx2.lineTo(x2 - px*legW, y2 - py*legW); ctx2.stroke();
-    ctx2.beginPath(); ctx2.moveTo(x1 + px*legW, y1 + py*legW); ctx2.lineTo(x2 + px*legW, y2 + py*legW); ctx2.stroke();
-
-    const ex = x1 + (x2 - x1) * 0.44, ey = y1 + (y2 - y1) * 0.44;
-    const jg = ctx2.createRadialGradient(ex-2, ey-2, 1, ex, ey, legW*1.05);
-    jg.addColorStop(0, '#6a6e78');
-    jg.addColorStop(1, '#33353c');
-    ctx2.fillStyle = jg;
-    ctx2.beginPath(); ctx2.arc(ex, ey, legW*1.05, 0, Math.PI*2); ctx2.fill();
-    ctx2.strokeStyle = 'rgba(255,255,255,0.3)'; ctx2.lineWidth = 1;
-    ctx2.stroke();
-  }
-
-  drawLeg(hingeX, hingeY, center.x, center.y);
-  drawLeg(hingeX, hingeY, tip.x, tip.y);
-
-  const hingeR = 11;
-  const hg = ctx2.createRadialGradient(hingeX-3, hingeY-3, 1.5, hingeX, hingeY, hingeR);
-  hg.addColorStop(0, '#484b52');
-  hg.addColorStop(1, '#191b1f');
-  ctx2.fillStyle = hg;
-  ctx2.beginPath(); ctx2.arc(hingeX, hingeY, hingeR, 0, Math.PI*2); ctx2.fill();
-  ctx2.strokeStyle = 'rgba(0,0,0,0.45)'; ctx2.lineWidth = 1.2;
-  ctx2.stroke();
-  ctx2.fillStyle = 'rgba(255,255,255,0.28)';
-  ctx2.beginPath(); ctx2.arc(hingeX-3, hingeY-3, 3, 0, Math.PI*2); ctx2.fill();
-
-  ctx2.strokeStyle = '#15161b';
-  ctx2.lineWidth = 2;
-  ctx2.beginPath();
-  ctx2.moveTo(center.x - ux*10, center.y - uy*10);
-  ctx2.lineTo(center.x, center.y);
-  ctx2.stroke();
-  ctx2.fillStyle = '#0d0d10';
-  ctx2.beginPath(); ctx2.arc(center.x, center.y, 2.2, 0, Math.PI*2); ctx2.fill();
-
-  const pa = Math.atan2(tip.y - hingeY, tip.x - hingeX);
-  const cosPA = Math.cos(pa), sinPA = Math.sin(pa);
-  ctx2.strokeStyle = '#a7adb8';
-  ctx2.lineWidth = 6.5;
-  ctx2.lineCap = 'butt';
-  ctx2.beginPath();
-  ctx2.moveTo(tip.x, tip.y);
-  ctx2.lineTo(tip.x + cosPA*7, tip.y + sinPA*7);
-  ctx2.stroke();
-  ctx2.strokeStyle = color;
-  ctx2.lineWidth = 3.2;
-  ctx2.beginPath();
-  ctx2.moveTo(tip.x + cosPA*7, tip.y + sinPA*7);
-  ctx2.lineTo(tip.x + cosPA*16, tip.y + sinPA*16);
-  ctx2.stroke();
-  ctx2.fillStyle = '#202020';
-  ctx2.beginPath(); ctx2.arc(tip.x + cosPA*16.5, tip.y + sinPA*16.5, 1.4, 0, Math.PI*2); ctx2.fill();
-
-  ctx2.restore();
-}
 
 function isColorDark(hex) {
   const h = hex.replace('#', '');
@@ -9667,7 +9548,12 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
   // instrumente și ar bloca inclusiv clicul pe propriul buton de oprire.
   function resizeNeonCanvas() {
     const rect = document.getElementById('workspace').getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    // Limităm densitatea de pixeli la maximum 1.5 — fiind un efect temporar,
+    // nu are nevoie de claritatea maximă a unui desen permanent; pe
+    // dispozitive cu DPR mare (2 sau chiar 3, comun pe table/tablete), asta
+    // reduce semnificativ numărul de pixeli de șters/redesenat la fiecare
+    // cadru, esențial pe un procesor mai slab.
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     neonOffsetX = rect.left; neonOffsetY = rect.top;
     neonCanvas.style.left = rect.left + 'px';
     neonCanvas.style.top = rect.top + 'px';
@@ -9774,11 +9660,211 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
   }
   neonCanvas.addEventListener('pointerup', finishNeonStroke);
   neonCanvas.addEventListener('pointercancel', finishNeonStroke);
+  window.__finishNeonStroke = finishNeonStroke;
 })();
 
 document.getElementById('btn-line').onclick = () => setTool('line');
 document.getElementById('btn-dashed').onclick = () => setTool('dashed');
 document.getElementById('btn-arrow').onclick = () => setTool('arrow');
+// Instrument interactiv — paralelogram cu două vârfuri trăgibile (B și D);
+// al treilea vârf (C) se calculează automat, ca forma să rămână ÎNTOTDEAUNA
+// un paralelogram (C = B + D - A) — exact premisa comună din care pornesc
+// toate cele trei definiții. Identificăm live dacă forma curentă e chiar un
+// dreptunghi, romb sau pătrat (pe baza unghiului și lungimilor laturilor),
+// și oferim animații către fiecare transformare specială.
+(function initQuadDefs() {
+  const backdrop = document.getElementById('quad-defs-backdrop');
+  const svg = document.getElementById('quad-svg');
+  const ptB = document.getElementById('quad-pt-b');
+  const ptD = document.getElementById('quad-pt-d');
+  const nameEl = document.getElementById('quad-shape-name');
+  const A = { x: 120, y: 220 }; // vârf fix, ancoră
+
+  let B = { x: 270, y: 220 }; // |AB| = 150
+  let D = { x: 170, y: 100 }; // |AD| = 130
+
+  function getC() { return { x: B.x + D.x - A.x, y: B.y + D.y - A.y }; }
+
+  function distance(p1, p2) { return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
+  function angleBetween(vA, vB) {
+    const dot = vA.x * vB.x + vA.y * vB.y;
+    const magA = Math.hypot(vA.x, vA.y), magB = Math.hypot(vB.x, vB.y);
+    if (magA < 0.01 || magB < 0.01) return 0;
+    return Math.acos(Math.max(-1, Math.min(1, dot / (magA * magB)))) * 180 / Math.PI;
+  }
+
+  function classifyShape() {
+    const ab = distance(A, B), ad = distance(A, D);
+    const angle = angleBetween({ x: B.x - A.x, y: B.y - A.y }, { x: D.x - A.x, y: D.y - A.y });
+    const isRight = Math.abs(angle - 90) < 2;
+    const isRhombusLen = Math.abs(ab - ad) < 3;
+    let name;
+    if (isRight && isRhombusLen) name = 'Pătrat';
+    else if (isRight) name = 'Dreptunghi';
+    else if (isRhombusLen) name = 'Romb';
+    else name = 'Paralelogram';
+    return { ab, ad, angle, name };
+  }
+
+  function render() {
+    const C = getC();
+    const info = classifyShape();
+    nameEl.textContent = info.name;
+
+    // Zona vizibilă (viewBox) se recalculează la fiecare redesenare, ca să
+    // încadreze mereu toată forma curentă, indiferent de rotație sau cât de
+    // mult s-au tras vârfurile — altfel, pe un ecran mic, o rotație putea
+    // scoate ușor o parte din figură în afara cadrului fix inițial.
+    const pts = [A, B, C, D];
+    let minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+    let minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
+    const PAD = 50; // loc pentru vârfuri, etichete și arcul de unghi
+    minX -= PAD; maxX += PAD; minY -= PAD; maxY += PAD;
+    // Păstrăm proporția de afișare 5:4 (ca inițial), extinzând dimensiunea
+    // mai mică până se potrivește, în loc să deformăm conținutul.
+    const targetRatio = 5 / 4;
+    let w = maxX - minX, h = maxY - minY;
+    if (w / h > targetRatio) { const newH = w / targetRatio; minY -= (newH - h) / 2; h = newH; }
+    else { const newW = h * targetRatio; minX -= (newW - w) / 2; w = newW; }
+    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+
+    document.getElementById('quad-side-ab').setAttribute('x1', A.x); document.getElementById('quad-side-ab').setAttribute('y1', A.y);
+    document.getElementById('quad-side-ab').setAttribute('x2', B.x); document.getElementById('quad-side-ab').setAttribute('y2', B.y);
+    document.getElementById('quad-side-bc').setAttribute('x1', B.x); document.getElementById('quad-side-bc').setAttribute('y1', B.y);
+    document.getElementById('quad-side-bc').setAttribute('x2', C.x); document.getElementById('quad-side-bc').setAttribute('y2', C.y);
+    document.getElementById('quad-side-cd').setAttribute('x1', C.x); document.getElementById('quad-side-cd').setAttribute('y1', C.y);
+    document.getElementById('quad-side-cd').setAttribute('x2', D.x); document.getElementById('quad-side-cd').setAttribute('y2', D.y);
+    document.getElementById('quad-side-da').setAttribute('x1', D.x); document.getElementById('quad-side-da').setAttribute('y1', D.y);
+    document.getElementById('quad-side-da').setAttribute('x2', A.x); document.getElementById('quad-side-da').setAttribute('y2', A.y);
+
+    ptB.setAttribute('cx', B.x); ptB.setAttribute('cy', B.y);
+    ptD.setAttribute('cx', D.x); ptD.setAttribute('cy', D.y);
+
+    // Arc mic, lângă A, care arată unghiul dintre laturi.
+    const r = 26;
+    const angAB = Math.atan2(B.y - A.y, B.x - A.x);
+    const angAD = Math.atan2(D.y - A.y, D.x - A.x);
+    const p1 = { x: A.x + r * Math.cos(angAB), y: A.y + r * Math.sin(angAB) };
+    const p2 = { x: A.x + r * Math.cos(angAD), y: A.y + r * Math.sin(angAD) };
+    let delta = angAD - angAB;
+    while (delta <= -Math.PI) delta += 2 * Math.PI;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    const largeArc = Math.abs(delta) > Math.PI ? 1 : 0;
+    const sweep = delta > 0 ? 1 : 0;
+    document.getElementById('quad-angle-arc').setAttribute('d', `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} ${sweep} ${p2.x} ${p2.y}`);
+
+    const labAB = document.getElementById('quad-label-ab');
+    labAB.setAttribute('x', (A.x + B.x) / 2 + 6); labAB.setAttribute('y', (A.y + B.y) / 2 - 6);
+    labAB.textContent = info.ab.toFixed(0);
+    const labAD = document.getElementById('quad-label-ad');
+    labAD.setAttribute('x', (A.x + D.x) / 2 - 24); labAD.setAttribute('y', (A.y + D.y) / 2 - 2);
+    labAD.textContent = info.ad.toFixed(0);
+    const labAngle = document.getElementById('quad-label-angle');
+    labAngle.setAttribute('x', A.x + 34); labAngle.setAttribute('y', A.y - 8);
+    labAngle.textContent = info.angle.toFixed(0) + '°';
+  }
+
+  function svgPointFromEvent(e) {
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const x = (e.clientX - rect.left) / rect.width * vb.width + vb.x;
+    const y = (e.clientY - rect.top) / rect.height * vb.height + vb.y;
+    return { x, y };
+  }
+  function makeDraggable(el, point) {
+    el.addEventListener('pointerdown', (e) => {
+      el.setPointerCapture(e.pointerId);
+      function onMove(ev) { Object.assign(point, svgPointFromEvent(ev)); render(); }
+      function onUp() { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); }
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+    });
+  }
+  makeDraggable(ptB, B);
+  makeDraggable(ptD, D);
+
+  // Animează lin către o pereche țintă de puncte B/D (interpolare simplă),
+  // pentru butoanele de transformare.
+  function animateTo(targetB, targetD, duration = 900) {
+    const startB = { ...B }, startD = { ...D };
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out
+      B.x = startB.x + (targetB.x - startB.x) * ease;
+      B.y = startB.y + (targetB.y - startB.y) * ease;
+      D.x = startD.x + (targetD.x - startD.x) * ease;
+      D.y = startD.y + (targetD.y - startD.y) * ease;
+      render();
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  document.getElementById('btn-quad-defs').onclick = () => {
+    backdrop.style.display = 'flex';
+    render();
+  };
+  document.getElementById('quad-defs-close').onclick = () => { backdrop.style.display = 'none'; };
+  backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+
+  document.getElementById('quad-reset').onclick = () => animateTo({ x: 270, y: 220 }, { x: 170, y: 100 });
+
+  function rotatePoint(p, center, angle) {
+    const dx = p.x - center.x, dy = p.y - center.y;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
+  }
+  document.getElementById('quad-level-diag').onclick = () => {
+    // Cele două diagonale ale paralelogramului curent sunt AC și BD. Alegem
+    // cea mai mică dintre ele și rotim toată forma (în jurul vârfului
+    // ancoră A) ca ACEA diagonală să devină exact orizontală — util mai
+    // ales când forma e chiar un romb, unde diagonalele sunt perpendiculare
+    // una pe alta, un reper vizual clar.
+    const C = getC();
+    const diagAC = { x: C.x - A.x, y: C.y - A.y };
+    const diagBD = { x: D.x - B.x, y: D.y - B.y };
+    const lenAC = Math.hypot(diagAC.x, diagAC.y);
+    const lenBD = Math.hypot(diagBD.x, diagBD.y);
+    const shorter = lenAC <= lenBD ? diagAC : diagBD;
+    const currentAngle = Math.atan2(shorter.y, shorter.x);
+    animateTo(rotatePoint(B, A, -currentAngle), rotatePoint(D, A, -currentAngle));
+  };
+
+  document.getElementById('quad-to-rect').onclick = () => {
+    // Păstrăm lungimile curente ale laturilor, dar rotim D ca unghiul din A
+    // să devină exact 90° față de AB.
+    const ad = distance(A, D);
+    const angAB = Math.atan2(B.y - A.y, B.x - A.x);
+    const crossSign = ((B.x - A.x) * (D.y - A.y) - (B.y - A.y) * (D.x - A.x)) >= 0 ? 1 : -1;
+    const targetAngle = angAB + crossSign * Math.PI / 2;
+    animateTo({ x: B.x, y: B.y }, { x: A.x + ad * Math.cos(targetAngle), y: A.y + ad * Math.sin(targetAngle) });
+  };
+
+  document.getElementById('quad-to-rhombus').onclick = () => {
+    // Păstrăm unghiul și direcția lui AB, dar aducem D la aceeași lungime
+    // ca AB, de-a lungul direcției sale curente.
+    const ab = distance(A, B), ad = distance(A, D);
+    if (ad < 0.01) return;
+    const ratio = ab / ad;
+    animateTo({ x: B.x, y: B.y }, { x: A.x + (D.x - A.x) * ratio, y: A.y + (D.y - A.y) * ratio });
+  };
+
+  document.getElementById('quad-to-square').onclick = () => {
+    // Combinăm ambele: unghi de 90°, ambele laturi la aceeași lungime
+    // (media curentă), pentru o tranziție firească din orice formă.
+    const ab = distance(A, B), ad = distance(A, D);
+    const side = (ab + ad) / 2;
+    const angAB = Math.atan2(B.y - A.y, B.x - A.x);
+    const crossSign = ((B.x - A.x) * (D.y - A.y) - (B.y - A.y) * (D.x - A.x)) >= 0 ? 1 : -1;
+    const targetAngle = angAB + crossSign * Math.PI / 2;
+    animateTo(
+      { x: A.x + side * Math.cos(angAB), y: A.y + side * Math.sin(angAB) },
+      { x: A.x + side * Math.cos(targetAngle), y: A.y + side * Math.sin(targetAngle) }
+    );
+  };
+})();
+
 document.getElementById('btn-circle').onclick = () => setTool('circle');
 document.getElementById('btn-rect').onclick = () => setTool('rect');
 document.getElementById('btn-polygon').onclick = () => setTool('polygon');
@@ -11455,19 +11541,134 @@ function loadSession(file) {
 // ====================================================================
 const AUTOSAVE_KEY = 'wb-autosave-v1';
 const AUTOSAVE_TIME_KEY = 'wb-autosave-time-v1';
+
+// Autosalvarea folosește IndexedDB, nu localStorage — limita de stocare a
+// localStorage e fixă și mică (de obicei 5-10MB pe întregul site), ușor de
+// depășit după o sesiune lungă, cu multe desene și imagini; odată depășită,
+// salvarea eșua SILENȚIOS (doar în consolă), fără niciun avertisment
+// vizibil — exact cauza pierderii de lucru semnalate, după ~2 ore de
+// utilizare. IndexedDB nu are această limită strictă (practic, spațiul
+// liber de pe disc), eliminând complet acest risc.
+function openAutosaveDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('wb-autosave-db', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await openAutosaveDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', 'readonly');
+    const req = tx.objectStore('kv').get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await openAutosaveDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 let autosaveInFlight = false;
+// Marcaj simplu al schimbărilor — dacă lungimea istoricului de anulare nu
+// s-a schimbat de la ultima salvare automată, înseamnă că nimic relevant
+// nu s-a modificat între timp (utilizatorul doar privește tabla, fără să
+// deseneze) — sărim complet peste refacerea costisitoare a sesiunii
+// (codificare imagini + fișă PDF), evitând un blocaj periodic inutil, la
+// fiecare 20 de secunde, chiar și fără nicio modificare reală.
+let lastAutosaveChangeMarker = -1;
+
+let autosaveFailCount = 0;
+const AUTOSAVE_SLOTS = 3;
+let autosaveSlotIndex = 0;
+function autosaveSlotKeys(i) {
+  return { data: AUTOSAVE_KEY + '-slot' + i, time: AUTOSAVE_TIME_KEY + '-slot' + i };
+}
+
+function setSaveStatus(state) {
+  const el = document.getElementById('save-status-indicator');
+  if (!el) return;
+  if (state === 'saving') {
+    el.textContent = LANG === 'en' ? '● Saving…' : '● Se salvează…';
+    el.style.color = '#888';
+  } else if (state === 'saved') {
+    el.textContent = LANG === 'en' ? '✓ Saved' : '✓ Salvat';
+    el.style.color = '#2d9d4f';
+  } else if (state === 'error') {
+    el.textContent = LANG === 'en' ? '⚠ Save failed' : '⚠ Salvare eșuată';
+    el.style.color = '#cc3333';
+  } else {
+    el.textContent = '';
+  }
+}
+
+// Verificăm periodic (nu la fiecare salvare — costă puțin, dar nu merită
+// făcut de zeci de ori pe minut) cât spațiu de stocare mai e disponibil,
+// avertizând din timp dacă se apropie de limită — la fel ca avertismentul
+// deja existent pentru sesiunile salvate manual, dar pentru autosave.
+let lastStorageCheckTime = 0;
+async function maybeCheckStorageQuota() {
+  const now = Date.now();
+  if (now - lastStorageCheckTime < 5 * 60 * 1000) return; // cel mult o dată la 5 minute
+  lastStorageCheckTime = now;
+  try {
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    const { usage, quota } = await navigator.storage.estimate();
+    if (!quota) return;
+    const percentUsed = (usage / quota) * 100;
+    if (percentUsed >= 85) {
+      showToast(LANG === 'en'
+        ? `⚠ Storage is ${percentUsed.toFixed(0)}% full — consider deleting old saved sessions`
+        : `⚠ Spațiul de stocare e ${percentUsed.toFixed(0)}% plin — ia în calcul ștergerea unor sesiuni salvate vechi`, 6000);
+    }
+  } catch (e) {}
+}
 
 async function doAutosave() {
   if (autosaveInFlight) return;
+  // Dacă nimic relevant nu s-a schimbat de la ultima salvare automată
+  // (istoricul de anulare e neschimbat), sărim complet peste refacerea
+  // costisitoare a sesiunii — evită un blocaj periodic inutil pe un
+  // procesor mai slab, mai ales când utilizatorul doar privește tabla.
+  const currentMarker = undoStack.length + redoStack.length;
+  if (currentMarker === lastAutosaveChangeMarker) return;
   autosaveInFlight = true;
+  setSaveStatus('saving');
   try {
     const data = await buildSessionData();
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
-    localStorage.setItem(AUTOSAVE_TIME_KEY, String(Date.now()));
+    // Rotație pe 3 sloturi — nu mai scriem mereu peste SINGURA copie
+    // existentă. Dacă aplicația s-ar închide chiar în timpul scrierii (sau
+    // scrierea ar eșua la jumătate), sloturile anterioare rămân intacte, ca
+    // plasă de siguranță suplimentară.
+    const slot = autosaveSlotKeys(autosaveSlotIndex);
+    await idbSet(slot.data, data);
+    await idbSet(slot.time, Date.now());
+    await idbSet(AUTOSAVE_KEY + '-current-slot', autosaveSlotIndex);
+    autosaveSlotIndex = (autosaveSlotIndex + 1) % AUTOSAVE_SLOTS;
+    lastAutosaveChangeMarker = currentMarker;
+    autosaveFailCount = 0;
+    setSaveStatus('saved');
+    maybeCheckStorageQuota();
   } catch (e) {
-    // localStorage poate fi plin (imagini mari) sau indisponibil — nu deranjăm
-    // utilizatorul cu un toast la fiecare eșec, doar notăm în consolă.
+    // Spre deosebire de localStorage, IndexedDB practic nu are o limită
+    // strictă de spațiu — dacă totuși eșuează (ex. mod privat/incognito, sau
+    // disc plin), AVERTIZĂM vizibil, după câteva eșecuri consecutive (nu la
+    // primul, care ar putea fi doar temporar) — altfel, utilizatorul nu are
+    // nicio șansă să afle că lucrul lui nu se mai salvează.
     console.warn('Autosalvare eșuată:', e);
+    autosaveFailCount++;
+    setSaveStatus('error');
+    if (autosaveFailCount === 3) {
+      showToast(LANG === 'en'
+        ? '⚠ Auto-save is failing repeatedly — please save your work manually (Export PDF or Save session)'
+        : '⚠ Salvarea automată eșuează repetat — te rog salvează manual lucrul (Exportă PDF sau Salvează sesiunea)', 8000);
+    }
   } finally {
     autosaveInFlight = false;
   }
@@ -11481,11 +11682,50 @@ window.addEventListener('pagehide', () => { doAutosave(); });
 window.addEventListener('beforeunload', () => { doAutosave(); });
 
 async function checkAutosaveOnStartup() {
-  let raw;
-  try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return; }
-  if (!raw) return;
-  let data;
-  try { data = JSON.parse(raw); } catch (e) { return; }
+  let data = null, savedAt = 0;
+
+  // Verificăm toate cele 3 sloturi și alegem cel mai recent, valid — nu
+  // presupunem că "slotul curent" memorat e neapărat cel mai proaspăt (ex.
+  // dacă acea scriere a eșuat la jumătate).
+  try {
+    for (let i = 0; i < AUTOSAVE_SLOTS; i++) {
+      const slot = autosaveSlotKeys(i);
+      const d = await idbGet(slot.data);
+      const t = await idbGet(slot.time);
+      if (d && Array.isArray(d.pages) && t && t > savedAt) {
+        data = d; savedAt = t;
+      }
+    }
+  } catch (e) {}
+
+  // Compatibilitate cu formatul anterior (un singur slot, fără rotație) —
+  // dacă nu găsim nimic în sloturile noi, verificăm și vechea cheie unică.
+  if (!data) {
+    try {
+      const oldData = await idbGet(AUTOSAVE_KEY);
+      const oldTime = await idbGet(AUTOSAVE_TIME_KEY);
+      if (oldData) { data = oldData; savedAt = oldTime || 0; }
+    } catch (e) {}
+  }
+
+  // Migrare — dacă nu există nimic în IndexedDB, dar există o salvare veche
+  // în localStorage (dintr-o versiune și mai veche a aplicației), o preluăm
+  // de acolo — altfel, utilizatorii care actualizează ar pierde o
+  // autosalvare deja existentă.
+  if (!data) {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        data = JSON.parse(raw);
+        savedAt = parseInt(localStorage.getItem(AUTOSAVE_TIME_KEY) || '0', 10);
+        await idbSet(AUTOSAVE_KEY, data);
+        await idbSet(AUTOSAVE_TIME_KEY, savedAt);
+        localStorage.removeItem(AUTOSAVE_KEY);
+        localStorage.removeItem(AUTOSAVE_TIME_KEY);
+      }
+    } catch (e) {}
+  }
+
   if (!data || !Array.isArray(data.pages) || data.pages.length === 0) return;
   // Nu propunem restaurarea dacă sesiunea salvată automat e goală (o singură
   // pagină, fără linii/imagini) — nu are rost să deranjăm utilizatorul.
@@ -11494,8 +11734,7 @@ async function checkAutosaveOnStartup() {
 
   let whenStr = '';
   try {
-    const t = parseInt(localStorage.getItem(AUTOSAVE_TIME_KEY) || '0', 10);
-    if (t) whenStr = new Date(t).toLocaleString(LANG === 'en' ? 'en-GB' : 'ro-RO');
+    if (savedAt) whenStr = new Date(savedAt).toLocaleString(LANG === 'en' ? 'en-GB' : 'ro-RO');
   } catch (e) {}
 
   const msgRo = whenStr
@@ -13960,7 +14199,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v291</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v299</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -13988,6 +14227,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
   <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi apasă bifa (✓) ca să închizi forma.</li>
+  <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
   <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
 </ul>
 
@@ -14044,6 +14284,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Șterge tot</b> — golește pagina curentă.</li>
   <li><b>Exportă PDF</b> — salvează tabla curentă ca document PDF.</li>
   <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior. Pe Chrome/Brave/Edge, salvarea îți lasă să alegi exact locul și numele fișierului (fereastra nativă „Salvează ca...").</li>
+  <li><b>Indicator de salvare</b> — o mică etichetă discretă, în bara de stare, arată dacă lucrul e salvat automat, se salvează chiar acum, sau a apărut o eroare. Salvarea automată păstrează ultimele 3 copii, prin rotație, ca plasă suplimentară de siguranță.</li>
   <li><b>Captură de ecran</b> (🔲) — alege ce vrei să distribui (ecran/fereastră/filă), apoi trage un dreptunghi peste zona dorită, care se adaugă direct pe tablă ca imagine. Necesită Chrome/Brave/Edge pe calculator — de obicei nu funcționează pe telefon (limitare a platformei mobile, nu a aplicației).</li>
   <li><b>Ceas</b> (🕐) — arată/ascunde ora sistemului, actualizată live, implicit în colțul din stânga-sus. Atinge direct ceasul ca să-l muți în dreapta-sus (poziționat puțin mai jos acolo, ca să nu se suprapună peste butonul de ecran complet) — alegerea se reține pentru data viitoare.</li>
   <li><b>Prezentare</b> (lângă culorile de fundal) — derulează automat printre paginile lecției, în buclă continuă, la intervalul ales cu butoanele +/- sau tastat direct (implicit 5 secunde) — util pentru o recapitulare rapidă cu clasa. Orice navigare manuală oprește derularea.</li>
@@ -14086,7 +14327,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v291</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v299</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -14114,6 +14355,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
   <li><b>Circle</b> — drag from the center outward.</li>
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then press the check mark (✓) to close the shape.</li>
+  <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
   <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
 </ul>
 
@@ -14170,6 +14412,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Clear all</b> — clears the current page.</li>
   <li><b>Export PDF</b> — saves the current board as a PDF document.</li>
   <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later. On Chrome/Brave/Edge, saving lets you pick the exact file location and name (native "Save As" window).</li>
+  <li><b>Save indicator</b> — a small, discreet label in the status bar shows whether your work is saved, currently saving, or an error occurred. Auto-save keeps the last 3 copies, rotating between them, as an extra safety net.</li>
   <li><b>Screen capture</b> (🔲) — pick what to share (screen/window/tab), then drag a rectangle over the area you want, which gets added directly to the board as an image. Requires Chrome/Brave/Edge on a computer — usually doesn't work on phones (a mobile platform limitation, not the app's).</li>
   <li><b>Clock</b> (🕐) — shows/hides the system time, updated live, by default in the top-left corner. Tap the clock itself to move it to the top-right (positioned a bit lower there, to clear the fullscreen button) — your choice is remembered for next time.</li>
   <li><b>Present</b> (next to the background colors) — auto-advances through the lesson's pages, looping continuously, at the interval set with the +/- buttons or typed directly (default 5 seconds) — useful for a quick recap with the class. Any manual navigation stops it.</li>
