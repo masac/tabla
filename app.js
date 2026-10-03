@@ -4152,6 +4152,39 @@ function samePosition(a, b) {
 // FINALIZARE POLIGON
 // ================================================================
 
+// Linie orizontală de previzualizare pentru instrumentul "spațiu vertical"
+// — arată, înainte să tragi, exact înălțimea la care s-ar introduce
+// spațiul (ideea de lucru din Xournal++): cursorul se mișcă liber, iar
+// linia îl urmărește live, pe toată lățimea vizibilă a paginii.
+function drawVSpacePreviewLine(y) {
+  clearCanvas(overlayCtx, overlayC);
+  let leftX, rightX, scale;
+  if (activeSurface === 'board') {
+    const rect = drawC.getBoundingClientRect();
+    scale = boardZoom;
+    leftX = -boardPanX / scale;
+    rightX = (rect.width - boardPanX) / scale;
+  } else if (pdfPanes[activeSurface]) {
+    const els = getPaneEls(activeSurface);
+    const rect = els.root.getBoundingClientRect();
+    const t = getPaneContentTransform(activeSurface);
+    scale = t.scale;
+    leftX = -t.offX / scale;
+    rightX = (rect.width - t.offX) / scale;
+  } else {
+    return;
+  }
+  overlayCtx.save();
+  overlayCtx.strokeStyle = '#0055cc';
+  overlayCtx.lineWidth = 1.5 / scale;
+  overlayCtx.setLineDash([8 / scale, 5 / scale]);
+  overlayCtx.beginPath();
+  overlayCtx.moveTo(leftX, y);
+  overlayCtx.lineTo(rightX, y);
+  overlayCtx.stroke();
+  overlayCtx.restore();
+}
+
 function finalizePolygon() {
   if (!(tool === 'polygon' && drawing && currentStroke && currentStroke.length >= 3)) return false;
   const page = getCurrentPage();
@@ -4204,6 +4237,10 @@ function handlePointerDown(e) {
     isVSpaceDragging = true;
     drawC.setPointerCapture(e.pointerId);
     e.preventDefault();
+    // Linia apare chiar din momentul apăsării — nu la simpla plimbare a
+    // cursorului (fără nicio apăsare), ci doar cât timp degetul/mausul
+    // chiar apasă pe tablă.
+    drawVSpacePreviewLine(vspaceStartY);
     showMathInfo('↕️ 0 cm');
     return;
   }
@@ -4521,6 +4558,10 @@ function handlePointerMove(e) {
     vspaceAffectedImages.forEach(item => { item.img.x = item.before.x; item.img.y = item.before.y + dy; });
     redrawStrokes();
     renderImages();
+    // Linia de previzualizare rămâne vizibilă, ca reper FIX, exact la
+    // punctul de start (locul de unde a plecat tragerea) — arată clar
+    // "totul de sub această linie se mută", cât timp apeși și tragi.
+    drawVSpacePreviewLine(vspaceStartY);
     showMathInfo((dy >= 0 ? '↓ +' : '↑ ') + (dy / PX_PER_CM).toFixed(1) + ' cm');
     return;
   }
@@ -4923,6 +4964,7 @@ function handlePointerUp(e) {
     }
     vspaceAffectedStrokes = [];
     vspaceAffectedImages = [];
+    clearCanvas(overlayCtx, overlayC);
     updateStatus();
     return;
   }
@@ -5239,6 +5281,7 @@ function handlePointerUp(e) {
 
 function handlePointerLeave() {
   if (tool === 'pen') drawC.style.cursor = '';
+  if (tool === 'vspace' && !isVSpaceDragging) clearCanvas(overlayCtx, overlayC);
 }
 
 function handleDblClick(e) {
@@ -5569,6 +5612,7 @@ function isMathTool() {
 
 function setTool(t) {
   drawC.style.cursor = (t === 'vspace') ? 'ns-resize' : '';
+  if (tool === 'vspace' && t !== 'vspace') clearCanvas(overlayCtx, overlayC);
   if (tool === 'polygon' && drawing && currentStroke && currentStroke.length >= 3) {
     finalizePolygon();
   } else if (tool === 'polygon' && drawing) {
@@ -9680,12 +9724,30 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   const nameEl = document.getElementById('quad-shape-name');
   const A = { x: 120, y: 220 }; // vârf fix, ancoră
 
+  let showAllExtras = false; // implicit, afișarea rămâne exact ca înainte
   let B = { x: 270, y: 220 }; // |AB| = 150
   let D = { x: 170, y: 100 }; // |AD| = 130
 
   function getC() { return { x: B.x + D.x - A.x, y: B.y + D.y - A.y }; }
 
   function distance(p1, p2) { return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
+
+  // Poziționează o etichetă de lungime aproape de mijlocul segmentului
+  // [p1,p2], dar deplasată PERPENDICULAR pe el (nu cu un offset fix în
+  // pixeli x/y) — garantează că eticheta nu se suprapune niciodată cu
+  // segmentul desenat, indiferent de orientarea lui. "side" (1 sau -1)
+  // alege de care parte a segmentului cade eticheta.
+  function placeSegmentLabel(id, p1, p2, side) {
+    const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const offset = 13 * side;
+    const px = -dy / len * offset, py = dx / len * offset;
+    const el = document.getElementById(id);
+    el.setAttribute('x', mid.x + px);
+    el.setAttribute('y', mid.y + py);
+    el.textContent = len.toFixed(0);
+  }
   function angleBetween(vA, vB) {
     const dot = vA.x * vB.x + vA.y * vB.y;
     const magA = Math.hypot(vA.x, vA.y), magB = Math.hypot(vB.x, vB.y);
@@ -9740,28 +9802,127 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     ptB.setAttribute('cx', B.x); ptB.setAttribute('cy', B.y);
     ptD.setAttribute('cx', D.x); ptD.setAttribute('cy', D.y);
 
-    // Arc mic, lângă A, care arată unghiul dintre laturi.
+    // Arc mic, lângă A, care arată unghiul dintre laturi — sau, dacă
+    // unghiul e (aproape) drept, un mic pătrat, convenția standard pentru
+    // unghi de 90°, mult mai recognoscibilă decât un arc.
     const r = 26;
     const angAB = Math.atan2(B.y - A.y, B.x - A.x);
     const angAD = Math.atan2(D.y - A.y, D.x - A.x);
-    const p1 = { x: A.x + r * Math.cos(angAB), y: A.y + r * Math.sin(angAB) };
-    const p2 = { x: A.x + r * Math.cos(angAD), y: A.y + r * Math.sin(angAD) };
     let delta = angAD - angAB;
     while (delta <= -Math.PI) delta += 2 * Math.PI;
     while (delta > Math.PI) delta -= 2 * Math.PI;
-    const largeArc = Math.abs(delta) > Math.PI ? 1 : 0;
-    const sweep = delta > 0 ? 1 : 0;
-    document.getElementById('quad-angle-arc').setAttribute('d', `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} ${sweep} ${p2.x} ${p2.y}`);
+    if (Math.abs(Math.abs(delta) * 180 / Math.PI - 90) < 0.5) {
+      const sq = 16;
+      const sp1 = { x: A.x + sq * Math.cos(angAB), y: A.y + sq * Math.sin(angAB) };
+      const sp2 = { x: sp1.x + sq * Math.cos(angAD), y: sp1.y + sq * Math.sin(angAD) };
+      const sp3 = { x: A.x + sq * Math.cos(angAD), y: A.y + sq * Math.sin(angAD) };
+      document.getElementById('quad-angle-arc').setAttribute('d', `M ${sp1.x} ${sp1.y} L ${sp2.x} ${sp2.y} L ${sp3.x} ${sp3.y}`);
+    } else {
+      const p1 = { x: A.x + r * Math.cos(angAB), y: A.y + r * Math.sin(angAB) };
+      const p2 = { x: A.x + r * Math.cos(angAD), y: A.y + r * Math.sin(angAD) };
+      const largeArc = Math.abs(delta) > Math.PI ? 1 : 0;
+      const sweep = delta > 0 ? 1 : 0;
+      document.getElementById('quad-angle-arc').setAttribute('d', `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} ${sweep} ${p2.x} ${p2.y}`);
+    }
 
-    const labAB = document.getElementById('quad-label-ab');
-    labAB.setAttribute('x', (A.x + B.x) / 2 + 6); labAB.setAttribute('y', (A.y + B.y) / 2 - 6);
-    labAB.textContent = info.ab.toFixed(0);
-    const labAD = document.getElementById('quad-label-ad');
-    labAD.setAttribute('x', (A.x + D.x) / 2 - 24); labAD.setAttribute('y', (A.y + D.y) / 2 - 2);
-    labAD.textContent = info.ad.toFixed(0);
+    placeSegmentLabel('quad-label-ab', A, B, 1);
+    placeSegmentLabel('quad-label-ad', A, D, -1);
     const labAngle = document.getElementById('quad-label-angle');
     labAngle.setAttribute('x', A.x + 34); labAngle.setAttribute('y', A.y - 8);
     labAngle.textContent = info.angle.toFixed(0) + '°';
+
+    // Laturile și unghiurile suplimentare (BC, CD, și unghiurile din B, C,
+    // D) — calculate mereu, dar afișate doar dacă utilizatorul a activat
+    // comutatorul; implicit, afișarea rămâne exact ca înainte (doar AB, AD
+    // și unghiul din A).
+    document.getElementById('quad-extra-group').style.display = showAllExtras ? '' : 'none';
+    if (showAllExtras) {
+      placeSegmentLabel('quad-label-bc', B, C, 1);
+      placeSegmentLabel('quad-label-cd', C, D, -1);
+
+      drawVertexAngle(B, A, C, 'quad-angle-arc-b', 'quad-label-angle-b');
+      drawVertexAngle(C, B, D, 'quad-angle-arc-c', 'quad-label-angle-c');
+      drawVertexAngle(D, C, A, 'quad-angle-arc-d', 'quad-label-angle-d');
+
+      // Diagonalele — se înjumătățesc întotdeauna într-un paralelogram
+      // (proprietate generală, marcată mereu cu liniuțe perpendiculare egale
+      // pe fiecare jumătate), dar sunt perpendiculare DOAR în romb și pătrat
+      // (marcate suplimentar cu un mic pătrat în punctul de intersecție,
+      // doar atunci când chiar e cazul).
+      const M = { x: (A.x + C.x) / 2, y: (A.y + C.y) / 2 }; // = mijlocul lui BD, la fel
+      document.getElementById('quad-diag-ac').setAttribute('x1', A.x);
+      document.getElementById('quad-diag-ac').setAttribute('y1', A.y);
+      document.getElementById('quad-diag-ac').setAttribute('x2', C.x);
+      document.getElementById('quad-diag-ac').setAttribute('y2', C.y);
+      document.getElementById('quad-diag-bd').setAttribute('x1', B.x);
+      document.getElementById('quad-diag-bd').setAttribute('y1', B.y);
+      document.getElementById('quad-diag-bd').setAttribute('x2', D.x);
+      document.getElementById('quad-diag-bd').setAttribute('y2', D.y);
+
+      // Punctul de intersecție se notează O, iar fiecare dintre cele patru
+      // segmente (AO, OC, BO, OD) își arată lungimea reală — NU mai folosim
+      // liniuțe generice de "egalitate", care sugerau greșit că toate cele
+      // patru segmente ar fi egale între ele. De fapt, doar AO=OC (jumătățile
+      // ACELEIAȘI diagonale) și, separat, BO=OD — dar AO nu e neapărat egal
+      // cu BO, pentru că cele două diagonale nu au aceeași lungime într-un
+      // paralelogram oarecare.
+      document.getElementById('quad-pt-o').setAttribute('cx', M.x);
+      document.getElementById('quad-pt-o').setAttribute('cy', M.y);
+      const labO = document.getElementById('quad-label-o');
+      labO.setAttribute('x', M.x + 7); labO.setAttribute('y', M.y - 7);
+      labO.textContent = 'O';
+
+      placeSegmentLabel('quad-label-ao', A, M, 1);
+      placeSegmentLabel('quad-label-oc', M, C, 1);
+      placeSegmentLabel('quad-label-bo', B, M, -1);
+      placeSegmentLabel('quad-label-od', M, D, -1);
+
+      const perpMarker = document.getElementById('quad-perp-marker');
+      if (info.name === 'Romb' || info.name === 'Pătrat') {
+        const dirAC = Math.atan2(C.y - A.y, C.x - A.x);
+        const s = 10;
+        const p1 = { x: M.x + s * Math.cos(dirAC), y: M.y + s * Math.sin(dirAC) };
+        const p2 = { x: p1.x + s * Math.cos(dirAC + Math.PI / 2), y: p1.y + s * Math.sin(dirAC + Math.PI / 2) };
+        const p3 = { x: M.x + s * Math.cos(dirAC + Math.PI / 2), y: M.y + s * Math.sin(dirAC + Math.PI / 2) };
+        perpMarker.setAttribute('d', `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`);
+        perpMarker.style.display = '';
+      } else {
+        perpMarker.style.display = 'none';
+      }
+    }
+  }
+
+  // Desenează un mic arc de unghi și eticheta lui (în grade), la vârful
+  // "vertex", între direcțiile spre "p1" și spre "p2" — folosită pentru
+  // unghiurile din B, C, D (unghiul din A are propriul cod, mai sus, cu
+  // arcul principal, colorat identic).
+  function drawVertexAngle(vertex, p1, p2, arcId, labelId) {
+    const r = 22;
+    const ang1 = Math.atan2(p1.y - vertex.y, p1.x - vertex.x);
+    const ang2 = Math.atan2(p2.y - vertex.y, p2.x - vertex.x);
+    let delta = ang2 - ang1;
+    while (delta <= -Math.PI) delta += 2 * Math.PI;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    if (Math.abs(Math.abs(delta) * 180 / Math.PI - 90) < 0.5) {
+      const sq = 14;
+      const sp1 = { x: vertex.x + sq * Math.cos(ang1), y: vertex.y + sq * Math.sin(ang1) };
+      const sp2 = { x: sp1.x + sq * Math.cos(ang2), y: sp1.y + sq * Math.sin(ang2) };
+      const sp3 = { x: vertex.x + sq * Math.cos(ang2), y: vertex.y + sq * Math.sin(ang2) };
+      document.getElementById(arcId).setAttribute('d', `M ${sp1.x} ${sp1.y} L ${sp2.x} ${sp2.y} L ${sp3.x} ${sp3.y}`);
+    } else {
+      const arcP1 = { x: vertex.x + r * Math.cos(ang1), y: vertex.y + r * Math.sin(ang1) };
+      const arcP2 = { x: vertex.x + r * Math.cos(ang2), y: vertex.y + r * Math.sin(ang2) };
+      const largeArc = Math.abs(delta) > Math.PI ? 1 : 0;
+      const sweep = delta > 0 ? 1 : 0;
+      document.getElementById(arcId).setAttribute('d', `M ${arcP1.x} ${arcP1.y} A ${r} ${r} 0 ${largeArc} ${sweep} ${arcP2.x} ${arcP2.y}`);
+    }
+
+    const angleDeg = angleBetween({ x: p1.x - vertex.x, y: p1.y - vertex.y }, { x: p2.x - vertex.x, y: p2.y - vertex.y });
+    const bisector = ang1 + delta / 2;
+    const lab = document.getElementById(labelId);
+    lab.setAttribute('x', vertex.x + (r + 14) * Math.cos(bisector));
+    lab.setAttribute('y', vertex.y + (r + 14) * Math.sin(bisector));
+    lab.textContent = angleDeg.toFixed(0) + '°';
   }
 
   function svgPointFromEvent(e) {
@@ -9803,10 +9964,18 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
 
   document.getElementById('btn-quad-defs').onclick = () => {
     backdrop.style.display = 'flex';
+    // Afișarea inițială rămâne mereu exact ca înainte — doar AB, AD și
+    // unghiul din A — la fiecare redeschidere a ferestrei.
+    showAllExtras = false;
+    document.getElementById('quad-show-all').checked = false;
     render();
   };
   document.getElementById('quad-defs-close').onclick = () => { backdrop.style.display = 'none'; };
   backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+  document.getElementById('quad-show-all').addEventListener('change', (e) => {
+    showAllExtras = e.target.checked;
+    render();
+  });
 
   document.getElementById('quad-reset').onclick = () => animateTo({ x: 270, y: 220 }, { x: 170, y: 100 });
 
@@ -9865,12 +10034,710 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   };
 })();
 
+// Instrument interactiv — tipuri de unghiuri (nul, ascuțit, drept, obtuz,
+// alungit). O rază rămâne fixă (orizontală), cealaltă se trage liber,
+// unghiul dintre ele actualizându-se live, cu identificarea tipului.
+(function initAngleTypes() {
+  const backdrop = document.getElementById('angle-types-backdrop');
+  const svg = document.getElementById('angle-svg');
+  const pt = document.getElementById('angle-pt');
+  const nameEl = document.getElementById('angle-type-name');
+  const V = { x: 80, y: 180 }; // vârful unghiului, fix
+  const FIXED_LEN = 220;
+  let P = { x: V.x + 140, y: V.y - 140 }; // punctul trăgibil (unghi inițial 45°, ascuțit)
+
+  function classifyAngle(deg) {
+    if (deg < 0.3) return 'Nul';
+    if (Math.abs(deg - 90) < 0.3) return 'Drept';
+    if (Math.abs(deg - 180) < 0.3) return 'Alungit';
+    if (deg < 90) return 'Ascuțit';
+    return 'Obtuz';
+  }
+
+  function render() {
+    const dx = P.x - V.x, dy = P.y - V.y;
+    // Valoarea absolută a rezultatului atan2 dă direct unghiul (nesemnat)
+    // dintre raza fixă (orizontală, spre dreapta) și raza spre P, în
+    // intervalul 0-180°, indiferent dacă P e tras deasupra sau dedesubt.
+    const deg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+    const name = classifyAngle(deg);
+    nameEl.textContent = name;
+
+    document.getElementById('angle-fixed-ray').setAttribute('x1', V.x);
+    document.getElementById('angle-fixed-ray').setAttribute('y1', V.y);
+    document.getElementById('angle-fixed-ray').setAttribute('x2', V.x + FIXED_LEN);
+    document.getElementById('angle-fixed-ray').setAttribute('y2', V.y);
+
+    const rad = deg * Math.PI / 180;
+    const movX = V.x + FIXED_LEN * Math.cos(-rad), movY = V.y + FIXED_LEN * Math.sin(-rad);
+
+    // Zona vizibilă se recalculează la fiecare desenare, ca să încadreze
+    // mereu ambele raze complet — la unghi alungit (180°), raza mobilă
+    // ajunge mult spre stânga, depășind cadrul fix inițial.
+    const pts = [V, { x: V.x + FIXED_LEN, y: V.y }, { x: movX, y: movY }];
+    let minX = Math.min(...pts.map(p => p.x)) - 50, maxX = Math.max(...pts.map(p => p.x)) + 50;
+    let minY = Math.min(...pts.map(p => p.y)) - 50, maxY = Math.max(...pts.map(p => p.y)) + 50;
+    const ratio = 400 / 260;
+    let w = maxX - minX, h = maxY - minY;
+    if (w / h > ratio) { const nh = w / ratio; minY -= (nh - h) / 2; h = nh; }
+    else { const nw = h * ratio; minX -= (nw - w) / 2; w = nw; }
+    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+    document.getElementById('angle-moving-ray').setAttribute('x1', V.x);
+    document.getElementById('angle-moving-ray').setAttribute('y1', V.y);
+    document.getElementById('angle-moving-ray').setAttribute('x2', movX);
+    document.getElementById('angle-moving-ray').setAttribute('y2', movY);
+
+    document.getElementById('angle-vertex').setAttribute('cx', V.x);
+    document.getElementById('angle-vertex').setAttribute('cy', V.y);
+    pt.setAttribute('cx', movX);
+    pt.setAttribute('cy', movY);
+
+    const r = 34;
+    if (Math.abs(deg - 90) < 0.3) {
+      const sq = 20;
+      const sp1 = { x: V.x + sq, y: V.y };
+      const sp2 = { x: sp1.x + sq * Math.cos(-rad), y: sp1.y + sq * Math.sin(-rad) };
+      const sp3 = { x: V.x + sq * Math.cos(-rad), y: V.y + sq * Math.sin(-rad) };
+      document.getElementById('angle-arc').setAttribute('d', `M ${sp1.x} ${sp1.y} L ${sp2.x} ${sp2.y} L ${sp3.x} ${sp3.y}`);
+    } else {
+      const arcEnd = { x: V.x + r * Math.cos(-rad), y: V.y + r * Math.sin(-rad) };
+      const largeArc = deg > 180 ? 1 : 0;
+      document.getElementById('angle-arc').setAttribute('d',
+        `M ${V.x + r} ${V.y} A ${r} ${r} 0 ${largeArc} 0 ${arcEnd.x} ${arcEnd.y}`);
+    }
+
+    const lab = document.getElementById('angle-value-label');
+    lab.setAttribute('x', V.x + 50); lab.setAttribute('y', V.y - 44);
+    lab.textContent = deg.toFixed(0) + '°';
+  }
+
+  function svgPointFromEvent(e) {
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return {
+      x: (e.clientX - rect.left) / rect.width * vb.width + vb.x,
+      y: (e.clientY - rect.top) / rect.height * vb.height + vb.y
+    };
+  }
+  pt.addEventListener('pointerdown', (e) => {
+    pt.setPointerCapture(e.pointerId);
+    function onMove(ev) { P = svgPointFromEvent(ev); render(); }
+    function onUp() { pt.removeEventListener('pointermove', onMove); pt.removeEventListener('pointerup', onUp); }
+    pt.addEventListener('pointermove', onMove);
+    pt.addEventListener('pointerup', onUp);
+  });
+
+  function animateToDeg(targetDeg, duration = 700) {
+    const startDeg = (() => {
+      const dx = P.x - V.x, dy = P.y - V.y;
+      return Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+    })();
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const deg = startDeg + (targetDeg - startDeg) * ease;
+      const rad = deg * Math.PI / 180;
+      P = { x: V.x + FIXED_LEN * Math.cos(-rad), y: V.y + FIXED_LEN * Math.sin(-rad) };
+      render();
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  document.getElementById('btn-angle-types').onclick = () => { backdrop.style.display = 'flex'; render(); };
+  document.getElementById('angle-types-close').onclick = () => { backdrop.style.display = 'none'; };
+  backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+
+  document.getElementById('angle-set-null').onclick = () => animateToDeg(0);
+  document.getElementById('angle-set-acute').onclick = () => animateToDeg(45);
+  document.getElementById('angle-set-right').onclick = () => animateToDeg(90);
+  document.getElementById('angle-set-obtuse').onclick = () => animateToDeg(135);
+  document.getElementById('angle-set-straight').onclick = () => animateToDeg(180);
+})();
+
+// Instrument interactiv — drepte paralele tăiate de o secantă. Cele două
+// drepte rămân mereu orizontale și paralele; secanta trece printr-un punct
+// central fix, iar direcția ei se trage liber. Cele 8 unghiuri formate se
+// calculează live, cu butoane care evidențiază fiecare relație din teoremă.
+(function initParallelLines() {
+  const backdrop = document.getElementById('parallel-lines-backdrop');
+  const svg = document.getElementById('parallel-svg');
+  const ptEnd1 = document.getElementById('pl-pt-end1');
+  const ptEnd2 = document.getElementById('pl-pt-end2');
+  const noteEl = document.getElementById('pl-note');
+  const Y1 = 100, Y2 = 220; // cele doua drepte, pozitia lor de baza
+  const PIVOT = { x: 220, y: 160 }; // centrul, prin care trece mereu secanta
+  let dragAngle = 65 * Math.PI / 180; // unghiul initial al secantei (fata de orizontala)
+  let linesParallel = true; // comutator — drepte paralele sau nu
+  const LINE2_TILT = 20 * Math.PI / 180; // inclinarea dreptei 2, cand NU e paralela
+
+  function angleBetweenVec(vA, vB) {
+    const dot = vA.x * vB.x + vA.y * vB.y;
+    const magA = Math.hypot(vA.x, vA.y), magB = Math.hypot(vB.x, vB.y);
+    if (magA < 0.001 || magB < 0.001) return 0;
+    return Math.acos(Math.max(-1, Math.min(1, dot / (magA * magB)))) * 180 / Math.PI;
+  }
+  // Intersecția a două drepte, fiecare dată ca punct + direcție — folosită
+  // pentru dreapta 2, care poate fi orizontală (paralelă) sau înclinată
+  // (neparalelă), nu doar un "y constant" ca înainte.
+  function intersectLines(Pa, Da, Pb, Db) {
+    const denom = Da.x * Db.y - Da.y * Db.x;
+    if (Math.abs(denom) < 1e-9) return { x: Pa.x, y: Pa.y }; // paralele cu secanta - caz extrem
+    const t = ((Pb.x - Pa.x) * Db.y - (Pb.y - Pa.y) * Db.x) / denom;
+    return { x: Pa.x + t * Da.x, y: Pa.y + t * Da.y };
+  }
+  function line2Direction() {
+    return linesParallel ? { x: 1, y: 0 } : { x: Math.cos(LINE2_TILT), y: Math.sin(LINE2_TILT) };
+  }
+  // overlapFraction (0 = poziția normală, 1 = suprapunere perfectă) e
+  // SINGURA sursă de adevăr pentru cât de apropiate sunt cele două drepte.
+  // La 1, dreapta 2 ajunge VIZUAL exact peste dreapta 1 (zero diferență) —
+  // iar etichetele de măsură se apropie și ele, până ajung perfect
+  // suprapuse. Doar PENTRU CALCULUL unghiurilor (unde o distanță exact
+  // zero ar face vectorii nedefiniți) folosim separat un epsilon
+  // infinitezimal, de ordinul sutimilor de pixel — complet invizibil la
+  // orice nivel de zoom rezonabil, dar suficient ca matematica să rămână
+  // validă.
+  let overlapFraction = 0;
+  const OVERLAP_EPS = 0.05;
+  function line2Y(forMath) {
+    const y = Y2 + (Y1 - Y2) * overlapFraction;
+    if (forMath && Math.abs(y - Y1) < OVERLAP_EPS) return Y1 + OVERLAP_EPS;
+    return y;
+  }
+  // Obiect folosit pentru calculul matematic (compute()) — "y" include
+  // epsilon-ul invizibil, când e cazul.
+  const LINE2_ANCHOR = { x: 220, get y() { return line2Y(true); } };
+
+  function compute() {
+    // Punctele de intersecție ale secantei (care trece prin PIVOT, cu
+    // unghiul curent) cu cele două drepte — dreapta 1 e mereu orizontală;
+    // dreapta 2 e orizontală (paralelă) sau înclinată (neparalelă), în
+    // funcție de comutator.
+    const dir = { x: Math.cos(dragAngle), y: Math.sin(dragAngle) };
+    const L1dir = { x: 1, y: 0 };
+    const L2dir = line2Direction();
+    const P1 = intersectLines(PIVOT, dir, { x: 0, y: Y1 }, L1dir);
+    const P2 = intersectLines(PIVOT, dir, LINE2_ANCHOR, L2dir);
+
+    const toP2 = { x: P2.x - P1.x, y: P2.y - P1.y };
+    const awayP2 = { x: -toP2.x, y: -toP2.y };
+    const toP1 = { x: P1.x - P2.x, y: P1.y - P2.y };
+    const awayP1 = { x: -toP1.x, y: -toP1.y };
+    // "right"/"left" folosesc direcția PROPRIE a fiecărei drepte — la
+    // dreapta 2 înclinată, "dreapta" ei nu mai e (1,0), ca la dreapta 1.
+    const right1 = L1dir, left1 = { x: -L1dir.x, y: -L1dir.y };
+    const right2 = L2dir, left2 = { x: -L2dir.x, y: -L2dir.y };
+
+    // Cele 4 unghiuri din fiecare punct de intersecție — "sus"/"jos" sunt
+    // relative la direcția secantei (sus = spre exteriorul segmentului
+    // dintre cele două drepte).
+    const P1_topRight = angleBetweenVec(right1, awayP2);
+    const P1_botRight = angleBetweenVec(right1, toP2);
+    const P1_topLeft = angleBetweenVec(left1, awayP2);
+    const P1_botLeft = angleBetweenVec(left1, toP2);
+
+    const P2_topRight = angleBetweenVec(right2, toP1);
+    const P2_botRight = angleBetweenVec(right2, awayP1);
+    const P2_topLeft = angleBetweenVec(left2, toP1);
+    const P2_botLeft = angleBetweenVec(left2, awayP1);
+
+    return { dir,
+      P1: { pt: P1, topRight: P1_topRight, botRight: P1_botRight, topLeft: P1_topLeft, botLeft: P1_botLeft,
+            rays: { topRight: [right1, awayP2], botRight: [right1, toP2], topLeft: [left1, awayP2], botLeft: [left1, toP2] } },
+      P2: { pt: P2, topRight: P2_topRight, botRight: P2_botRight, topLeft: P2_topLeft, botLeft: P2_botLeft,
+            rays: { topRight: [right2, toP1], botRight: [right2, awayP1], topLeft: [left2, toP1], botLeft: [left2, awayP1] } }
+    };
+  }
+
+  let highlightMode = 'none';
+  let activePairIndex = 0;
+  let pairCycleTimer = null;
+  function startPairCycle() {
+    stopPairCycle();
+    activePairIndex = 0;
+    // Avansăm la perechea următoare la fiecare 1.3s — suficient cât să se
+    // vadă clar o clipire completă (animația CSS durează 1s) înainte să
+    // treacă mai departe.
+    pairCycleTimer = setInterval(() => {
+      const list = pairs[highlightMode];
+      if (!list) return;
+      activePairIndex = (activePairIndex + 1) % list.length;
+      render();
+    }, 1300);
+  }
+  function stopPairCycle() {
+    if (pairCycleTimer) { clearInterval(pairCycleTimer); pairCycleTimer = null; }
+  }
+  // Offset-urile etichetelor de măsură, din vârful fiecărui unghi — folosite
+  // IDENTIC pentru etichetele reale (la P1 și P2) ȘI pentru cele ale
+  // fantomei translatate, ca, după alunecare, să coincidă exact cu cele
+  // țintă de la P2 (altfel, cele două seturi de numere s-ar vedea
+  // suprapuse, dar nealiniate).
+  const labelOffsets = {
+    topRight: { dx: 26, dy: -18 }, botRight: { dx: 26, dy: 28 },
+    topLeft: { dx: -34, dy: -18 }, botLeft: { dx: -34, dy: 28 }
+  };
+  const pairs = {
+    corresponding: [['topRight', 'topRight'], ['botRight', 'botRight'], ['topLeft', 'topLeft'], ['botLeft', 'botLeft']],
+    altInt: [['botRight', 'topLeft'], ['botLeft', 'topRight']],
+    altExt: [['topRight', 'botLeft'], ['topLeft', 'botRight']],
+    sameSideInt: [['botRight', 'topRight'], ['botLeft', 'topLeft']],
+    sameSideExt: [['topRight', 'botRight'], ['topLeft', 'botLeft']]
+  };
+  // Culoare distinctă pentru fiecare relație — se vede clar ce tip de
+  // pereche e evidențiată acum.
+  const colors = { corresponding: '#ff5fd1', altInt: '#5fff8f', altExt: '#c77dff', sameSideInt: '#ffcf5f', sameSideExt: '#ff9a4d' };
+  function render() {
+    const { P1, P2 } = compute();
+
+    document.getElementById('pl-line1').setAttribute('x1', 20); document.getElementById('pl-line1').setAttribute('y1', Y1);
+    document.getElementById('pl-line1').setAttribute('x2', 420); document.getElementById('pl-line1').setAttribute('y2', Y1);
+
+    // Poziția VIZUALĂ a dreptei 2 e separată de cea folosită în calculul
+    // unghiurilor (LINE2_ANCHOR.y, care păstrează mereu o distanță minimă,
+    // nenulă, necesară ca matematica să rămână validă — vezi OVERLAP_MIN_GAP
+    // mai jos). Când sunt paralele și foarte aproape, afișăm dreapta 2 EXACT
+    // peste dreapta 1 — o suprapunere perfectă, curată, vizual — fără acel
+    // mic gol/contur ciudat care apărea anterior din cauza distanței reale,
+    // de câțiva pixeli, dintre cele două linii aproape (dar nu complet)
+    // suprapuse.
+    const visualY2 = line2Y(false);
+    const L2dirDraw = line2Direction();
+    const L2ext = 260; // suficient de lung ca sa acopere toata zona vizibila, chiar inclinata
+    document.getElementById('pl-line2').setAttribute('x1', LINE2_ANCHOR.x - L2dirDraw.x * L2ext);
+    document.getElementById('pl-line2').setAttribute('y1', visualY2 - L2dirDraw.y * L2ext);
+    document.getElementById('pl-line2').setAttribute('x2', LINE2_ANCHOR.x + L2dirDraw.x * L2ext);
+    document.getElementById('pl-line2').setAttribute('y2', visualY2 + L2dirDraw.y * L2ext);
+
+    // Secanta se desenează suficient de lungă încât să depășească vizibil
+    // ambele drepte, indiferent de înclinare — capetele ei devin cele două
+    // puncte trăgibile. IMPORTANT: direcția de extindere se calculează DIRECT
+    // din P1 spre P2 (nu din unghiul de tragere) — folosind dragAngle direct,
+    // semnul lui putea fi "invers" față de direcția reală dintre cele două
+    // puncte (în funcție de partea din care trăgeai), ducând capetele ÎNTRE
+    // cele două drepte, în loc de clar în exteriorul lor. Lungimea extinderii
+    // garantează cel puțin 45px distanță VERTICALĂ dincolo de fiecare dreaptă.
+    const toP2 = { x: P2.pt.x - P1.pt.x, y: P2.pt.y - P1.pt.y };
+    const segLen = Math.hypot(toP2.x, toP2.y);
+    const dirP1toP2 = { x: toP2.x / segLen, y: toP2.y / segLen };
+    const minVerticalClearance = 45;
+    const ext = Math.max(90, minVerticalClearance / Math.abs(dirP1toP2.y));
+    const end1 = { x: P1.pt.x - dirP1toP2.x * ext, y: P1.pt.y - dirP1toP2.y * ext };
+    const end2 = { x: P2.pt.x + dirP1toP2.x * ext, y: P2.pt.y + dirP1toP2.y * ext };
+    document.getElementById('pl-secant').setAttribute('x1', end1.x);
+    document.getElementById('pl-secant').setAttribute('y1', end1.y);
+    document.getElementById('pl-secant').setAttribute('x2', end2.x);
+    document.getElementById('pl-secant').setAttribute('y2', end2.y);
+    ptEnd1.setAttribute('cx', end1.x); ptEnd1.setAttribute('cy', end1.y);
+    ptEnd2.setAttribute('cx', end2.x); ptEnd2.setAttribute('cy', end2.y);
+
+    // Etichetele celor 8 unghiuri, poziționate în cele 4 "colțuri" ale
+    // fiecărui punct de intersecție.
+    const group = document.getElementById('pl-angle-labels');
+    group.innerHTML = '';
+    const arcsGroup = document.getElementById('pl-arcs');
+    arcsGroup.innerHTML = '';
+    function isHighlighted(pointKey, cornerKey) {
+      if (highlightMode === 'none') return false;
+      // Evidențiem DOAR perechea curentă din ciclu (activePairIndex) — nu
+      // toate perechile relației deodată — ca să poată clipi pe rând, una
+      // câte una, nu toate simultan.
+      const list = pairs[highlightMode];
+      const [c1, c2] = list[activePairIndex % list.length];
+      return (pointKey === 'P1' && c1 === cornerKey) || (pointKey === 'P2' && c2 === cornerKey);
+    }
+    // Când cele două puncte de intersecție ajung foarte aproape unul de
+    // altul (prin slider-ul de suprapunere), etichetele lor, cu offset-uri
+    // fixe în pixeli, ar începe să se suprapună ilizibil. În loc să ascundem
+    // o parte din informație (confuz — părea că "lipsește" ceva), arătăm
+    // ACUM AMBELE valori, dar grupate la aceeași poziție (lângă P1, care
+    // rămâne fix) și separate clar, vertical, una sub cealaltă — ca să le
+    // poți citi și compara direct, confirmând vizual că sunt egale.
+    // Indicator text explicit — nu lăsăm suprapunerea să fie percepută
+    // doar din coincidența pixelilor (greu de observat clar, mai ales pe un
+    // ecran mic); un mesaj clar, verde, confirmă fără ambiguitate starea.
+    const overlapIndicator = document.getElementById('pl-overlap-indicator');
+    const linesVisuallyOverlapping = linesParallel && overlapFraction > 0.97;
+    overlapIndicator.style.display = linesVisuallyOverlapping ? '' : 'none';
+    overlapIndicator.textContent = linesParallel ? '✓ Dreptele sunt suprapuse' : '✗ Dreptele NU se suprapun (nu sunt paralele)';
+    overlapIndicator.setAttribute('fill', linesParallel ? '#5fff8f' : '#ff6b6b');
+    const pointsGap = Math.hypot(P2.pt.x - P1.pt.x, P2.pt.y - P1.pt.y);
+    if (!linesParallel && pointsGap < 25) overlapIndicator.style.display = '';
+
+    function drawArc(data, cornerKey, color, hl) {
+      const [r1, r2] = data.rays[cornerKey];
+      const ang1 = Math.atan2(r1.y, r1.x), ang2 = Math.atan2(r2.y, r2.x);
+      const rArc = 16;
+      const a1 = { x: data.pt.x + rArc * Math.cos(ang1), y: data.pt.y + rArc * Math.sin(ang1) };
+      const a2 = { x: data.pt.x + rArc * Math.cos(ang2), y: data.pt.y + rArc * Math.sin(ang2) };
+      let delta = ang2 - ang1;
+      while (delta <= -Math.PI) delta += 2 * Math.PI;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      const sweep = delta > 0 ? 1 : 0;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${a1.x} ${a1.y} A ${rArc} ${rArc} 0 0 ${sweep} ${a2.x} ${a2.y}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', color);
+      path.setAttribute('stroke-width', hl ? '2.5' : '1');
+      if (hl) path.setAttribute('class', 'pl-highlighted');
+      arcsGroup.appendChild(path);
+    }
+    function drawLabel(x, y, value, color, hl, bold) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', x); txt.setAttribute('y', y);
+      txt.setAttribute('font-size', '12');
+      txt.setAttribute('fill', color);
+      txt.setAttribute('font-weight', (hl || bold) ? '700' : '400');
+      if (hl) txt.setAttribute('class', 'pl-highlighted');
+      txt.textContent = value.toFixed(0) + '°';
+      group.appendChild(txt);
+    }
+
+    // Fiecare punct își desenează mereu propriile etichete, la poziția lui
+    // REALĂ (P1.pt / P2.pt) — niciun prag, nicio comutare bruscă între
+    // "separate" și "stivuite". Pe măsură ce dreapta 2 se apropie de dreapta
+    // 1, P2.pt se apropie continuu de P1.pt (parte din același calcul care
+    // mișcă și dreptele lin) — așa că etichetele converg la fel de lin,
+    // ajungând să coincidă exact la suprapunere perfectă, fără niciun salt.
+    ['P1', 'P2'].forEach(pointKey => {
+      const data = pointKey === 'P1' ? P1 : P2;
+      Object.keys(labelOffsets).forEach(cornerKey => {
+        const off = labelOffsets[cornerKey];
+        const hl = isHighlighted(pointKey, cornerKey);
+        const color = hl ? colors[highlightMode] : '#ccc';
+        drawLabel(data.pt.x + off.dx, data.pt.y + off.dy, data[cornerKey], color, hl, false);
+        drawArc(data, cornerKey, color, hl);
+      });
+    });
+  }
+
+  function svgPointFromEvent(e) {
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return {
+      x: (e.clientX - rect.left) / rect.width * vb.width + vb.x,
+      y: (e.clientY - rect.top) / rect.height * vb.height + vb.y
+    };
+  }
+  function makeSecantEndDraggable(el) {
+    el.addEventListener('pointerdown', (e) => {
+      el.setPointerCapture(e.pointerId);
+      function onMove(ev) {
+        const p = svgPointFromEvent(ev);
+        let a = Math.atan2(p.y - PIVOT.y, p.x - PIVOT.x);
+        // Evităm secanta perfect orizontală (ar deveni paralelă, nu
+        // secantă) — păstrăm un minim de înclinare.
+        const minTilt = 8 * Math.PI / 180;
+        if (Math.abs(Math.sin(a)) < Math.sin(minTilt)) {
+          a = a >= 0 ? minTilt : -minTilt;
+        }
+        dragAngle = a;
+        render();
+      }
+      function onUp() { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); }
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+    });
+  }
+  makeSecantEndDraggable(ptEnd1);
+  makeSecantEndDraggable(ptEnd2);
+
+  document.getElementById('btn-parallel-lines').onclick = () => {
+    backdrop.style.display = 'flex';
+    highlightMode = 'none';
+    noteEl.textContent = '';
+    linesParallel = true;
+    document.getElementById('pl-toggle-parallel').checked = true;
+    overlapFraction = 0;
+    document.getElementById('pl-overlap-slider').value = 0;
+    stopPairCycle();
+    render();
+  };
+  document.getElementById('parallel-lines-close').onclick = () => { backdrop.style.display = 'none'; stopPairCycle(); };
+  backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) { backdrop.style.display = 'none'; stopPairCycle(); } });
+
+  const ghost = document.getElementById('pl-overlap-ghost');
+  const verticalMarker = document.getElementById('pl-vertical-marker');
+  const straightMarker = document.getElementById('pl-straight-marker');
+  function hideExtras() {
+    ghost.style.display = 'none';
+    verticalMarker.style.display = 'none';
+    straightMarker.style.display = 'none';
+  }
+
+  document.getElementById('pl-show-corresponding').onclick = () => {
+    highlightMode = 'corresponding';
+    noteEl.textContent = 'Unghiurile corespondente sunt congruente (egale).';
+    render(); hideExtras(); startPairCycle();
+  };
+  document.getElementById('pl-show-alt-int').onclick = () => {
+    highlightMode = 'altInt';
+    noteEl.textContent = 'Unghiurile alterne interne sunt congruente (egale).';
+    render(); hideExtras(); startPairCycle();
+  };
+  document.getElementById('pl-show-alt-ext').onclick = () => {
+    highlightMode = 'altExt';
+    noteEl.textContent = 'Unghiurile alterne externe sunt congruente (egale).';
+    render(); hideExtras(); startPairCycle();
+  };
+  document.getElementById('pl-show-same-int').onclick = () => {
+    highlightMode = 'sameSideInt';
+    noteEl.textContent = 'Unghiurile interne de aceeași parte a secantei sunt suplementare (suma 180°).';
+    render(); hideExtras(); startPairCycle();
+  };
+  document.getElementById('pl-show-same-ext').onclick = () => {
+    highlightMode = 'sameSideExt';
+    noteEl.textContent = 'Unghiurile externe de aceeași parte a secantei sunt suplementare (suma 180°).';
+    render(); hideExtras(); startPairCycle();
+  };
+  document.getElementById('pl-show-none').onclick = () => {
+    highlightMode = 'none';
+    noteEl.textContent = '';
+    render(); hideExtras(); stopPairCycle();
+  };
+
+  // Translația (glisarea) — demonstrația principală, cea mai intuitivă și
+  // justificativă pentru întreaga teoremă. Punctul de intersecție de SUS se
+  // deplasează de-a lungul secantei (o simplă translație, fără nicio
+  // rotire sau deformare) până se suprapune EXACT peste cel de JOS — cu
+  // toată "crucea" lui de 4 unghiuri deodată, nu doar unul. Pe măsură ce
+  // rețeaua de sus alunecă peste cea de jos, cele 4 unghiuri corespondente
+  // se suprapun perfect, vizibil, fără ambiguitate.
+  //
+  // Translația fiind o izometrie (păstrează exact distanțele și măsurile
+  // unghiurilor), suprapunerea e o dovadă riguroasă, nu doar o sugestie
+  // vizuală.
+  //
+  // Pentru unghiurile ALTERNE și cele COLATERALE — care nu se suprapun
+  // direct prin translație — explicația se construiește ÎN CONTINUAREA
+  // translației: odată ce rețeaua de sus a "aterizat" exact peste cea de
+  // jos (confirmând corespondentele), proprietățile alterne/colaterale se
+  // justifică DOAR din geometria rețelei de jos, luată separat — unghiurile
+  // opuse la vârf sunt egale prin definiție, iar două unghiuri adiacente,
+  // de aceeași parte a unei drepte, formează mereu un unghi alungit (180°).
+  function animateTranslate() {
+    const { P1, P2 } = compute();
+    const L = 60; // lungimea fiecărei raze a "crucii" desenate
+
+    function raysForCorner(ptData, cornerKey) {
+      return ptData.rays[cornerKey];
+    }
+
+    // Construim "crucea" completă (linia orizontală + secanta, ambele în
+    // întregime, ca drepte ce trec prin punct) exact la poziția P1, din
+    // propriile ei patru raze.
+    const dirsP1 = {
+      right: { x: 1, y: 0 }, left: { x: -1, y: 0 },
+      toP2: raysForCorner(P1, 'botRight')[1], // raza spre P2 (din oricare pereche care o conține)
+    };
+    const awayP2 = { x: -dirsP1.toP2.x, y: -dirsP1.toP2.y };
+
+    document.getElementById('pl-ghost-horiz').setAttribute('x1', P1.pt.x - L);
+    document.getElementById('pl-ghost-horiz').setAttribute('y1', P1.pt.y);
+    document.getElementById('pl-ghost-horiz').setAttribute('x2', P1.pt.x + L);
+    document.getElementById('pl-ghost-horiz').setAttribute('y2', P1.pt.y);
+    document.getElementById('pl-ghost-trans').setAttribute('x1', P1.pt.x - dirsP1.toP2.x * L);
+    document.getElementById('pl-ghost-trans').setAttribute('y1', P1.pt.y - dirsP1.toP2.y * L);
+    document.getElementById('pl-ghost-trans').setAttribute('x2', P1.pt.x + dirsP1.toP2.x * L);
+    document.getElementById('pl-ghost-trans').setAttribute('y2', P1.pt.y + dirsP1.toP2.y * L);
+    document.getElementById('pl-ghost-vertex').setAttribute('cx', P1.pt.x);
+    document.getElementById('pl-ghost-vertex').setAttribute('cy', P1.pt.y);
+
+    const rArc = 16;
+    const cornerArcIds = { topRight: 'pl-ghost-arc-tr', botRight: 'pl-ghost-arc-br', botLeft: 'pl-ghost-arc-bl', topLeft: 'pl-ghost-arc-tl' };
+    const cornerLabelIds = { topRight: 'pl-ghost-label-tr', botRight: 'pl-ghost-label-br', botLeft: 'pl-ghost-label-bl', topLeft: 'pl-ghost-label-tl' };
+    Object.keys(cornerArcIds).forEach(cornerKey => {
+      const [r1, r2] = P1.rays[cornerKey];
+      const ang1 = Math.atan2(r1.y, r1.x), ang2 = Math.atan2(r2.y, r2.x);
+      let delta = ang2 - ang1;
+      while (delta <= -Math.PI) delta += 2 * Math.PI;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      const a1 = { x: P1.pt.x + rArc * Math.cos(ang1), y: P1.pt.y + rArc * Math.sin(ang1) };
+      const a2 = { x: P1.pt.x + rArc * Math.cos(ang2), y: P1.pt.y + rArc * Math.sin(ang2) };
+      document.getElementById(cornerArcIds[cornerKey]).setAttribute('d',
+        `M ${a1.x} ${a1.y} A ${rArc} ${rArc} 0 0 ${delta > 0 ? 1 : 0} ${a2.x} ${a2.y}`);
+
+      // Eticheta de măsură, cu EXACT ACELEAȘI offset-uri ca eticheta reală
+      // (labelOffsets) — garantează că, odată ajunsă la P2 prin translație,
+      // coincide perfect cu eticheta reală de-acolo, nu doar aproximativ.
+      const off = labelOffsets[cornerKey];
+      const lab = document.getElementById(cornerLabelIds[cornerKey]);
+      lab.setAttribute('x', P1.pt.x + off.dx);
+      lab.setAttribute('y', P1.pt.y + off.dy);
+      lab.textContent = P1[cornerKey].toFixed(0) + '°';
+    });
+
+    ghost.style.display = '';
+    ghost.setAttribute('transform', '');
+    verticalMarker.style.display = 'none';
+    straightMarker.style.display = 'none';
+
+    const dx = P2.pt.x - P1.pt.x, dy = P2.pt.y - P1.pt.y; // exact de-a lungul secantei
+    const duration = 2800;
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      ghost.setAttribute('transform', `translate(${dx * ease} ${dy * ease})`);
+      if (t < 1) { requestAnimationFrame(step); return; }
+      // Translația s-a încheiat — rețeaua de sus s-a suprapus exact peste
+      // cea de jos. Dacă e selectată o relație care nu se suprapune direct
+      // (alternă sau colaterală), adăugăm explicația secundară, construită
+      // acum DOAR din geometria punctului P2, fără nicio mișcare nouă.
+      showFollowUpExplanation(P2);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // Bisectoarea unui unghi (direcția "din mijlocul" lui) — folosită pentru a
+  // desena marcaje clare, prin centrul fiecărui unghi implicat, indiferent
+  // de cum sunt orientate exact razele lui.
+  function cornerBisector(ptData, cornerKey) {
+    const [r1, r2] = ptData.rays[cornerKey];
+    const a1 = Math.atan2(r1.y, r1.x), a2 = Math.atan2(r2.y, r2.x);
+    let delta = a2 - a1;
+    while (delta <= -Math.PI) delta += 2 * Math.PI;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    return a1 + delta / 2;
+  }
+
+  function showFollowUpExplanation(P2) {
+    if (highlightMode === 'altInt' || highlightMode === 'altExt') {
+      // Unghiurile opuse la vârf la P2 — o linie prin vârf, trecând exact
+      // prin mijlocul fiecăruia din cele două unghiuri (bisectoarele lor),
+      // care — fiind opuse la vârf — sunt mereu exact opuse (diferă cu
+      // 180°), confirmând vizual relația.
+      const [cornerA, cornerB] = pairs[highlightMode][0];
+      const dirA = cornerBisector(P2, cornerA);
+      const Lm = 26;
+      const p1m = { x: P2.pt.x + Lm * Math.cos(dirA), y: P2.pt.y + Lm * Math.sin(dirA) };
+      const p2m = { x: P2.pt.x - Lm * Math.cos(dirA), y: P2.pt.y - Lm * Math.sin(dirA) };
+      verticalMarker.setAttribute('d', `M ${p1m.x} ${p1m.y} L ${P2.pt.x} ${P2.pt.y} L ${p2m.x} ${p2m.y}`);
+      verticalMarker.style.display = '';
+      noteEl.textContent = 'Translația arată corespondentele egale; la P2, cele două unghiuri sunt opuse la vârf — egale prin definiție. Deci unghiurile alterne sunt egale.';
+    } else if (highlightMode === 'sameSideInt' || highlightMode === 'sameSideExt') {
+      // Unghiurile de aceeași parte a secantei (interne sau externe) sunt
+      // ADIACENTE (au o latură comună, nu sunt opuse la vârf) — bisectoarele
+      // lor, luate împreună cu linia orizontală comună, arată că se întind
+      // pe un unghi alungit (180°).
+      const [cornerA, cornerB] = pairs[highlightMode][0];
+      const dirA = cornerBisector(P2, cornerA);
+      const dirB = cornerBisector(P2, cornerB);
+      const Lm = 50;
+      const p1m = { x: P2.pt.x + Lm * Math.cos(dirA), y: P2.pt.y + Lm * Math.sin(dirA) };
+      const p2m = { x: P2.pt.x + Lm * Math.cos(dirB), y: P2.pt.y + Lm * Math.sin(dirB) };
+      straightMarker.setAttribute('d', `M ${p1m.x} ${p1m.y} L ${P2.pt.x} ${P2.pt.y} L ${p2m.x} ${p2m.y}`);
+      straightMarker.style.display = '';
+      noteEl.textContent = 'Translația arată corespondentele egale; la P2, unghiul translatat se așază în prelungirea celuilalt, pe aceeași dreaptă — formând un unghi alungit (180°), deci sunt suplementare.';
+    } else {
+      noteEl.textContent = 'Translația arată direct, prin suprapunere exactă, că unghiurile corespondente sunt congruente.';
+    }
+  }
+
+  document.getElementById('pl-animate-translate').onclick = animateTranslate;
+
+  // Comutator paralel / neparalel — când e debifat, dreapta 2 se înclină,
+  // rupând paralelismul; teorema nu mai e valabilă (unghiurile NU mai sunt
+  // egale), exact contrastul care arată de ce paralelismul contează.
+  document.getElementById('pl-toggle-parallel').addEventListener('change', (e) => {
+    linesParallel = e.target.checked;
+    hideExtras();
+    render();
+    if (highlightMode !== 'none') {
+      const list = pairs[highlightMode];
+      if (list) { activePairIndex = 0; }
+    }
+    if (!linesParallel && highlightMode !== 'none') {
+      noteEl.textContent = '⚠ Dreptele NU mai sunt paralele — relația din teoremă nu se mai verifică (unghiurile nu mai sunt egale).';
+    }
+  });
+
+  // Suprapune dreptele — animă mutarea dreptei 2 (întreaga ei configurație)
+  // până ajunge exact peste dreapta 1, ca demonstrație directă, vizuală, că
+  // — atunci când liniile chiar coincid — unghiurile corespunzătoare se
+  // suprapun perfect (sau, în cazul neparalel, NU se suprapun, evidențiind
+  // contrastul).
+  document.getElementById('pl-animate-coincide').onclick = () => {
+    const startFrac = overlapFraction;
+    const duration = 2000;
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      overlapFraction = startFrac + (1 - startFrac) * ease;
+      document.getElementById('pl-overlap-slider').value = Math.round(overlapFraction * 100);
+      render();
+      if (t < 1) { requestAnimationFrame(step); return; }
+      noteEl.textContent = linesParallel
+        ? 'Dreptele suprapuse — unghiurile corespunzătoare se văd acum exact una peste alta.'
+        : '⚠ Chiar suprapuse la acest punct, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.';
+      setTimeout(() => { overlapFraction = 0; document.getElementById('pl-overlap-slider').value = 0; render(); }, 2200);
+    }
+    requestAnimationFrame(step);
+  };
+
+  // Controlul manual, prin slider — utilizatorul trage punctul de pe
+  // slider ca să apropie sau să depărteze dreapta 2 față de dreapta 1,
+  // văzând clar, pas cu pas, cum se suprapun (sau revin la loc) cele două
+  // drepte și unghiurile lor.
+  document.getElementById('pl-overlap-slider').addEventListener('input', (e) => {
+    overlapFraction = Number(e.target.value) / 100;
+    render();
+    if (overlapFraction > 0.97) {
+      noteEl.textContent = linesParallel
+        ? '✓ Dreptele sunt suprapuse perfect — unghiurile corespunzătoare coincid exact.'
+        : '⚠ Chiar și la acest punct comun, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.';
+    } else if (overlapFraction > 0.5) {
+      noteEl.textContent = 'Dreptele se apropie — observă cum unghiurile ' + (linesParallel ? 'rămân' : 'nu rămân') + ' aceleași pe măsură ce se apropie.';
+    }
+  });
+})();
+
+// Meniul "Math" — reunește cele trei instrumente matematice interactive
+// într-un singur buton, care deschide un mic meniu la click.
+(function initMathMenu() {
+  const menuBtn = document.getElementById('btn-math-menu');
+  const popup = document.getElementById('math-menu-popup');
+  // Mutăm meniul direct în <body> — bara de instrumente are overflow-y:auto
+  // (ca să poată derula când sunt multe butoane), care ar tăia complet un
+  // meniu poziționat absolut, legat de un buton DIN interiorul ei. Poziția
+  // fixă, calculată dinamic la fiecare deschidere, evită complet problema.
+  document.body.appendChild(popup);
+  function positionPopup() {
+    const rect = menuBtn.getBoundingClientRect();
+    const popupHeight = popup.offsetHeight || 140; // estimare inainte de randare
+    // Deasupra butonului, dacă încape; altfel, dedesubt.
+    const top = (rect.top - popupHeight - 6 > 0) ? rect.top - popupHeight - 6 : rect.bottom + 6;
+    popup.style.top = Math.max(6, top) + 'px';
+    const left = Math.min(rect.left, window.innerWidth - 240);
+    popup.style.left = Math.max(6, left) + 'px';
+  }
+  menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popup.style.display === 'none';
+    popup.style.display = willOpen ? 'block' : 'none';
+    if (willOpen) positionPopup();
+  });
+  // Închidem meniul la orice click în afara lui (sau a butonului care îl
+  // deschide), ca un meniu obișnuit.
+  document.addEventListener('click', (e) => {
+    if (popup.style.display !== 'none' && !popup.contains(e.target) && e.target !== menuBtn && !menuBtn.contains(e.target)) {
+      popup.style.display = 'none';
+    }
+  });
+  // Alegerea oricăreia dintre cele trei opțiuni închide meniul — handler-ele
+  // proprii ale fiecărui buton (care deschid fereastra respectivă) rămân
+  // neschimbate, definite separat, mai jos în fișier.
+  ['btn-quad-defs', 'btn-angle-types', 'btn-parallel-lines'].forEach(id => {
+    document.getElementById(id).addEventListener('click', () => { popup.style.display = 'none'; });
+  });
+})();
+
 document.getElementById('btn-circle').onclick = () => setTool('circle');
 document.getElementById('btn-rect').onclick = () => setTool('rect');
 document.getElementById('btn-polygon').onclick = () => setTool('polygon');
-document.getElementById('btn-finish-polygon').onclick = () => {
-  finalizePolygon();
-};
 document.getElementById('btn-erase').onclick = () => setTool('erase');
 document.getElementById('btn-text').onclick = () => setTool('text');
 document.getElementById('btn-function').onclick = () => openFunctionModal();
@@ -11575,6 +12442,15 @@ async function idbSet(key, value) {
     tx.onerror = () => reject(tx.error);
   });
 }
+async function idbDelete(key) {
+  const db = await openAutosaveDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 let autosaveInFlight = false;
 // Marcaj simplu al schimbărilor — dacă lungimea istoricului de anulare nu
 // s-a schimbat de la ultima salvare automată, înseamnă că nimic relevant
@@ -11831,31 +12707,64 @@ document.getElementById('pdf-load-session-btn').onclick = () => {
 // gestionarea manuală a fișierelor), acestea sunt "sloturi" numite,
 // păstrate direct în browser, ușor de văzut și încărcat dintr-o listă.
 // ====================================================================
-const SAVED_SESSIONS_KEY = 'wb-saved-sessions-v1';
+const SAVED_SESSIONS_KEY = 'wb-saved-sessions-v1'; // doar INDEXUL (nume, dată) — ușor
+function sessionDataKey(id) { return 'wb-session-data-v1-' + id; }
 
-function getSavedSessionsList() {
-  try {
-    const raw = localStorage.getItem(SAVED_SESSIONS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { return []; }
-}
+// Indexul (listă de {id, name, savedAt}) e stocat SEPARAT de datele grele
+// ale fiecărei sesiuni (desene, imagini) — fiecare sesiune are propria ei
+// cheie IndexedDB. Înainte, TOATE sesiunile erau stocate împreună,
+// într-un singur obiect JSON, în localStorage — care creștea necontrolat cu
+// fiecare sesiune nouă salvată (mai ales cu multe pagini sau imagini) și
+// depășea ușor limita fixă de stocare a browser-ului (de obicei 5-10MB pe
+// tot site-ul) — exact cauza eșecului semnalat la 18 pagini.
+async function getSavedSessionsList() {
+  let idx = null;
+  try { idx = await idbGet(SAVED_SESSIONS_KEY); } catch (e) {}
 
-function setSavedSessionsList(list) {
-  localStorage.setItem(SAVED_SESSIONS_KEY, JSON.stringify(list));
+  // Migrare — dacă nu există încă un index nou, dar există vechiul format
+  // (un singur obiect JSON uriaș, în localStorage), îl preluăm, îl
+  // despărțim în index + date individuale, și ștergem vechea copie.
+  if (!idx) {
+    try {
+      const raw = localStorage.getItem(SAVED_SESSIONS_KEY);
+      if (raw) {
+        const oldList = JSON.parse(raw);
+        if (Array.isArray(oldList) && oldList.length) {
+          idx = [];
+          for (const entry of oldList) {
+            await idbSet(sessionDataKey(entry.id), entry.data);
+            idx.push({ id: entry.id, name: entry.name, savedAt: entry.savedAt });
+          }
+          await idbSet(SAVED_SESSIONS_KEY, idx);
+        }
+      }
+      localStorage.removeItem(SAVED_SESSIONS_KEY);
+    } catch (e) {}
+  }
+
+  return Array.isArray(idx) ? idx : [];
 }
 
 async function saveNamedSession(name) {
   const data = await buildSessionData();
-  const list = getSavedSessionsList();
-  const entry = { id: 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), name, savedAt: Date.now(), data };
-  list.push(entry);
-  setSavedSessionsList(list); // poate arunca eroare (spațiu depășit) — tratată de apelant
+  const id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const savedAt = Date.now();
+  // Scriem datele grele SUB PROPRIA CHEIE — nu afectează și nu e afectată de
+  // celelalte sesiuni deja salvate, indiferent câte sunt sau cât de mari.
+  await idbSet(sessionDataKey(id), data); // poate arunca eroare (caz extrem de rar pe IndexedDB) — tratată de apelant
+  const list = await getSavedSessionsList();
+  list.push({ id, name, savedAt });
+  await idbSet(SAVED_SESSIONS_KEY, list);
 }
 
-function deleteNamedSession(id) {
-  const list = getSavedSessionsList().filter(s => s.id !== id);
-  setSavedSessionsList(list);
+async function loadNamedSessionData(id) {
+  return await idbGet(sessionDataKey(id));
+}
+
+async function deleteNamedSession(id) {
+  const list = (await getSavedSessionsList()).filter(s => s.id !== id);
+  await idbSet(SAVED_SESSIONS_KEY, list);
+  try { await idbDelete(sessionDataKey(id)); } catch (e) {}
 }
 
 function formatSessionDate(ts) {
@@ -11863,8 +12772,8 @@ function formatSessionDate(ts) {
   catch (e) { return ''; }
 }
 
-function renderSessionsList() {
-  const list = getSavedSessionsList().slice().sort((a, b) => b.savedAt - a.savedAt);
+async function renderSessionsList() {
+  const list = (await getSavedSessionsList()).slice().sort((a, b) => b.savedAt - a.savedAt);
   const container = document.getElementById('sessions-list');
   const emptyEl = document.getElementById('sessions-empty');
   container.querySelectorAll('.session-item').forEach(el => el.remove());
@@ -11888,7 +12797,9 @@ function renderSessionsList() {
         : `Încarci "${entry.name}"? Ce nu ai salvat din sesiunea curentă se va pierde.`;
       if (await customConfirm(msg)) {
         try {
-          await restoreSessionData(entry.data);
+          const data = await loadNamedSessionData(entry.id);
+          if (!data) throw new Error('Datele sesiunii lipsesc');
+          await restoreSessionData(data);
           closeSessionsOverlay();
           showToast(LANG === 'en' ? '✓ Session loaded!' : '✓ Sesiune încărcată!');
         } catch (e) {
@@ -11904,7 +12815,7 @@ function renderSessionsList() {
       e.stopPropagation();
       const msg = LANG === 'en' ? `Delete "${entry.name}"? This cannot be undone.` : `Ștergi "${entry.name}"? Nu se poate anula.`;
       if (await customConfirm(msg)) {
-        deleteNamedSession(entry.id);
+        await deleteNamedSession(entry.id);
         renderSessionsList();
       }
     });
@@ -11915,7 +12826,7 @@ function renderSessionsList() {
 }
 
 function openSessionsOverlay() {
-  renderSessionsList();
+  renderSessionsList(); // asincronă — se completează singură, fereastra nu trebuie să aștepte
   const overlay = document.getElementById('sessions-overlay');
   // Resetăm poziția la valoarea implicită (centrată) de fiecare dată când se
   // deschide — altfel, dacă fereastra fusese trasă anterior (chiar și
@@ -11937,20 +12848,21 @@ document.getElementById('sessions-close').onclick = closeSessionsOverlay;
 // permit ~5-10MB per site în localStorage; avertizăm din timp, înainte ca
 // salvarea să eșueze brusc, fără explicație.
 const SESSIONS_WARN_COUNT = 15;
-const SESSIONS_WARN_SIZE_MB = 4;
-function getSavedSessionsSizeMB() {
+async function maybeWarnAboutSessionsStorage() {
+  const list = await getSavedSessionsList();
+  let percentUsed = null;
   try {
-    const raw = localStorage.getItem(SAVED_SESSIONS_KEY) || '';
-    return raw.length / (1024 * 1024);
-  } catch (e) { return 0; }
-}
-function maybeWarnAboutSessionsStorage() {
-  const list = getSavedSessionsList();
-  const sizeMB = getSavedSessionsSizeMB();
-  if (list.length >= SESSIONS_WARN_COUNT || sizeMB >= SESSIONS_WARN_SIZE_MB) {
+    if (navigator.storage && navigator.storage.estimate) {
+      const { usage, quota } = await navigator.storage.estimate();
+      if (quota) percentUsed = (usage / quota) * 100;
+    }
+  } catch (e) {}
+  const spaceIsHigh = percentUsed !== null && percentUsed >= 80;
+  if (list.length >= SESSIONS_WARN_COUNT || spaceIsHigh) {
+    const spaceStr = percentUsed !== null ? `, ${percentUsed.toFixed(0)}%` : '';
     showToast(LANG === 'en'
-      ? `⚠ ${list.length} saved sessions (~${sizeMB.toFixed(1)} MB) — consider deleting old ones before storage runs out`
-      : `⚠ ${list.length} sesiuni salvate (~${sizeMB.toFixed(1)} MB) — ia în calcul ștergerea celor vechi, înainte să se umple spațiul`, 5000);
+      ? `⚠ ${list.length} saved sessions${spaceStr ? ` (storage ${percentUsed.toFixed(0)}% full)` : ''} — consider deleting old ones`
+      : `⚠ ${list.length} sesiuni salvate${percentUsed !== null ? ` (spațiu ${percentUsed.toFixed(0)}% plin)` : ''} — ia în calcul ștergerea celor vechi`, 5000);
   }
 }
 
@@ -14199,7 +15111,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v299</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v322</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -14226,8 +15138,11 @@ const HELP_CONTENT_HTML = `
   <li><b>Neon</b> (✨) — evidențiere temporară, ca un marker luminos — desenul apare colorat, cu efect de lumină intens, apoi se șterge singur, treptat, în 2 secunde. Nu se salvează niciodată. Apasă din nou butonul ca să revii la creion.</li>
   <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
-  <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi apasă bifa (✓) ca să închizi forma.</li>
+  <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi închide forma printr-un dublu-click (pe ultimul vârf) sau apăsând din nou pe butonul poligon.</li>
+  <li><b>Math</b> — grupează cele trei instrumente matematice interactive de mai jos; un singur click deschide un mic meniu din care alegi.</li>
   <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
+  <li><b>Tipuri de unghiuri</b> — trage punctul portocaliu pentru a schimba unghiul; tipul (nul, ascuțit, drept, obtuz, alungit) se identifică live, cu butoane pentru a sări direct la fiecare caz.</li>
+  <li><b>Drepte paralele tăiate de o secantă</b> — trage oricare din cele două capete ale secantei pentru a o înclina (rămân mereu clar în afara celor două drepte); cele 8 unghiuri formate se recalculează live, cu butoane care evidențiază, pe rând, câte o pereche din fiecare relație (corespondente, alterne interne/externe, interne/externe de aceeași parte a secantei), prin culori diferite și arc clipitor. Butonul de translație glisează lin întreaga rețea de unghiuri (inclusiv măsurile lor) de-a lungul secantei, până se suprapune exact peste cea de jos. Un comutator permite și varianta cu drepte NEparalele, ca să vezi clar de ce paralelismul contează — un slider separat permite și controlul manual, pas cu pas, al apropierii dintre cele două drepte.</li>
   <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
 </ul>
 
@@ -14327,7 +15242,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v299</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v322</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -14354,8 +15269,11 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Neon</b> (✨) — temporary highlight, like a glowing marker — the stroke appears colored, with an intense light effect, then erases itself gradually within 2 seconds. Never saved. Tap the button again to switch back to the pencil.</li>
   <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
   <li><b>Circle</b> — drag from the center outward.</li>
-  <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then press the check mark (✓) to close the shape.</li>
+  <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then close the shape with a double-tap (on the last vertex) or by tapping the polygon button again.</li>
+  <li><b>Math</b> — groups the three interactive math tools below; one click opens a small menu to choose from.</li>
   <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
+  <li><b>Angle types</b> — drag the orange point to change the angle; the type (zero, acute, right, obtuse, straight) is identified live, with buttons to jump directly to each case.</li>
+  <li><b>Parallel lines cut by a transversal</b> — drag either of the transversal's two endpoints to tilt it (they always stay clearly outside the two lines); the 8 angles formed recalculate live, with buttons that highlight, one pair at a time, each relationship from the theorem (corresponding, alternate interior/exterior, same-side interior/exterior) through distinct colors and a blinking arc. The translate button smoothly slides the whole angle network (including its measurements) along the transversal until it lands exactly on the lower one. A toggle also lets you try non-parallel lines, to see clearly why parallelism matters — a separate slider also lets you manually, step by step, control how close the two lines come together.</li>
   <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
 </ul>
 

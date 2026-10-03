@@ -207,6 +207,8 @@ input:focus-visible {
     #images-container.hidden-in-replay { display: none !important; }
 
     #overlay-canvas { pointer-events: none; z-index: 5; }
+    @keyframes pl-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+    .pl-highlighted { animation: pl-blink 2s ease-in-out infinite; }
     #neon-canvas { position: fixed; pointer-events: none; z-index: 30; }
 
     #guide-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; transition: filter 0.15s; }
@@ -441,6 +443,17 @@ input:focus-visible {
       padding: 10px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.25);
       width: 220px;
+      /* Calculatorul rămâne mereu cu tema luminoasă — indiferent de tema
+         generală a aplicației — ca să se distingă bine butoanele, chiar
+         dacă restul tablei e în modul întunecat. Suprascriem aici
+         variabilele CSS folosite mai jos, scopate strict la acest element. */
+      --tw-modal-bg: #ffffff;
+      --tw-modal-text: #222222;
+      --tw-calc-btn-bg: #f7f7fa;
+      --tw-calc-btn-hover: #ececf4;
+      --tw-calc-btn-active: #d8d8e4;
+      --tw-calc-border: #d0d0d8;
+      --tw-calc-expr: #888888;
     }
     #calc-overlay .calc-header {
       display: flex;
@@ -489,8 +502,8 @@ input:focus-visible {
     #calc-overlay .calc-grid-3col { grid-template-columns: repeat(3, 1fr); }
     #calc-overlay .calc-btn.calc-trig { background: #f3ecff; color: #6a3fc2; font-size: 13px; padding: 7px 0; }
     #calc-overlay .calc-btn.calc-trig:hover { background: #e6d9ff; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig { background: #3d2f5c; color: #c9a8ff; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig:hover { background: #4d3b70; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig { background: #f3ecff !important; color: #6a3fc2 !important; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-trig:hover { background: #e6d9ff !important; }
     #calc-overlay .calc-btn {
       font-size: 16px;
       padding: 10px 0;
@@ -505,12 +518,12 @@ input:focus-visible {
     #calc-overlay .calc-btn:active { background: var(--tw-calc-btn-active); }
     #calc-overlay .calc-btn.calc-op { background: #eef2ff; color: #0055cc; font-weight: 600; }
     #calc-overlay .calc-btn.calc-op:hover { background: #dde6ff; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op { background: #1f3357; color: #7db3ff; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op:hover { background: #2a4270; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op { background: #eef2ff !important; color: #0055cc !important; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-op:hover { background: #dde6ff !important; }
     #calc-overlay .calc-btn.calc-fn { background: #fff0ee; color: #cc3300; }
     #calc-overlay .calc-btn.calc-fn:hover { background: #ffe0da; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn { background: #4a2620; color: #ff9478; }
-    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn:hover { background: #5c3128; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn { background: #fff0ee !important; color: #cc3300 !important; }
+    :root:not([data-theme="light"]) #calc-overlay .calc-btn.calc-fn:hover { background: #ffe0da !important; }
     #calc-overlay .calc-btn.calc-eq { background: #0055cc; color: #fff; font-weight: 600; }
     #calc-overlay .calc-btn.calc-eq:hover { background: #0044aa; }
     #calc-overlay .calc-insert {
@@ -1003,7 +1016,7 @@ input:focus-visible {
       <button class="tool" id="btn-neon" title="Evidențiere neon — apare colorat și se șterge singur după câteva secunde" style="color:#ff2fb0; border-color:#ff2fb0;"><i class="ti ti-sparkles"></i></button>
       <button class="tool" id="btn-line"><i class="ti ti-line"></i></button>
       <button class="tool select-tool" id="btn-select"><i class="ti ti-select"></i></button>
-      <button class="tool" id="btn-vspace" title="Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă"><i class="ti ti-arrows-vertical"></i></button>
+      <button class="tool" id="btn-vspace" title="Spațiu vertical — apasă pentru a vedea o linie la locul de inserare, apoi trage în sus/jos pentru a insera sau elimina spațiu pe tablă"><i class="ti ti-arrows-vertical"></i></button>
       <span class="qa-sep"></span>
       <button class="color-btn" id="qa-color-white" style="background:#ffffff;border-color:#aaa" title="Alb"></button>
       <button class="color-btn" id="qa-color-red" style="background:#ff0000" title="Roșu"></button>
@@ -1029,8 +1042,14 @@ input:focus-visible {
       <button class="tool" id="btn-circle" title="Cerc (trage din centru)"><i class="ti ti-circle"></i></button>
       <button class="tool shape-tool" id="btn-rect" title="Dreptunghi"><i class="ti ti-rectangle"></i></button>
       <button class="tool shape-tool" id="btn-polygon" title="Poligon"><i class="ti ti-polygon"></i></button>
-      <button class="tool" id="btn-quad-defs" title="Paralelogram interactiv — dreptunghi, romb, pătrat"><i class="ti ti-math-symbols"></i></button>
-      <button class="tool" id="btn-finish-polygon" title="Finalizează poligonul (utilă pe ecran tactil)"><i class="ti ti-check"></i></button>
+      <div style="position:relative; display:inline-block;">
+        <button class="tool" id="btn-math-menu" title="Instrumente matematice interactive"><i class="ti ti-math-symbols"></i> Math</button>
+        <div id="math-menu-popup" style="display:none; position:fixed; background:#1e1e22; border-radius:10px; padding:6px; box-shadow:0 6px 24px rgba(0,0,0,0.4); z-index:500; min-width:220px;">
+          <button class="tool" id="btn-quad-defs" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-math-symbols"></i> Paralelogram interactiv</button>
+          <button class="tool" id="btn-angle-types" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-angle"></i> Tipuri de unghiuri</button>
+          <button class="tool" id="btn-parallel-lines" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="7" x2="22" y2="7"/><line x1="2" y1="17" x2="22" y2="17"/><line x1="7" y1="2" x2="17" y2="22"/></svg> Drepte paralele tăiate de o secantă</button>
+        </div>
+      </div>
       <button class="tool" id="btn-text"><i class="ti ti-text-size"></i></button>
       <button class="tool" id="btn-function" title="Reprezintă grafic o funcție f(x)"><i class="ti ti-chart-line"></i> f(x)</button>
       <button class="tool" id="btn-axes" title="Adaugă un sistem de axe xOy, cu 20 de diviziuni pe orizontală și verticală">
@@ -1156,12 +1175,35 @@ input:focus-visible {
       <line id="quad-side-cd" stroke="#4da6ff" stroke-width="2.5"/>
       <line id="quad-side-da" stroke="#4da6ff" stroke-width="2.5"/>
       <path id="quad-angle-arc" fill="none" stroke="#ffcc00" stroke-width="2"/>
+      <g id="quad-extra-group" style="display:none;">
+        <line id="quad-diag-ac" stroke="#9b6bff" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <line id="quad-diag-bd" stroke="#9b6bff" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <path id="quad-perp-marker" fill="none" stroke="#9b6bff" stroke-width="1.5" style="display:none;"/>
+        <circle id="quad-pt-o" r="3" fill="#9b6bff"/>
+        <text id="quad-label-o" fill="#9b6bff" font-size="13" font-weight="700"></text>
+        <text id="quad-label-ao" fill="#9b6bff" font-size="12"></text>
+        <text id="quad-label-oc" fill="#9b6bff" font-size="12"></text>
+        <text id="quad-label-bo" fill="#9b6bff" font-size="12"></text>
+        <text id="quad-label-od" fill="#9b6bff" font-size="12"></text>
+        <path id="quad-angle-arc-b" fill="none" stroke="#ffcc00" stroke-width="2"/>
+        <path id="quad-angle-arc-c" fill="none" stroke="#ffcc00" stroke-width="2"/>
+        <path id="quad-angle-arc-d" fill="none" stroke="#ffcc00" stroke-width="2"/>
+        <text id="quad-label-bc" fill="#ccc" font-size="13"></text>
+        <text id="quad-label-cd" fill="#ccc" font-size="13"></text>
+        <text id="quad-label-angle-b" fill="#ffcc00" font-size="13"></text>
+        <text id="quad-label-angle-c" fill="#ffcc00" font-size="13"></text>
+        <text id="quad-label-angle-d" fill="#ffcc00" font-size="13"></text>
+      </g>
       <circle id="quad-pt-b" r="9" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
       <circle id="quad-pt-d" r="9" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
       <text id="quad-label-ab" fill="#ccc" font-size="13"></text>
       <text id="quad-label-ad" fill="#ccc" font-size="13"></text>
       <text id="quad-label-angle" fill="#ffcc00" font-size="13"></text>
     </svg>
+    <label style="display:flex; align-items:center; gap:6px; color:#ccc; font-size:13px; justify-content:center; cursor:pointer;">
+      <input type="checkbox" id="quad-show-all">
+      Arată toate laturile și unghiurile
+    </label>
     <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
       <button id="quad-to-rect" class="tool" style="flex:1; min-width:110px;">→ Dreptunghi</button>
       <button id="quad-to-rhombus" class="tool" style="flex:1; min-width:110px;">→ Romb</button>
@@ -1170,6 +1212,88 @@ input:focus-visible {
       <button id="quad-level-diag" class="tool" style="flex:1; min-width:150px;">⟷ Diagonala mică orizontală</button>
     </div>
     <div style="color:#999; font-size:12px; text-align:center;">Trage vârfurile portocalii pentru a schimba forma — numele se actualizează live.</div>
+  </div>
+</div>
+
+<div id="angle-types-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(560px, 94vw); box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <span id="angle-type-name" style="color:#fff; font-size:17px; font-weight:700;">Ascuțit</span>
+      <button id="angle-types-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <svg id="angle-svg" viewBox="0 0 400 260" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:none;">
+      <line id="angle-fixed-ray" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="angle-moving-ray" stroke="#4da6ff" stroke-width="2.5"/>
+      <path id="angle-arc" fill="none" stroke="#ffcc00" stroke-width="2.5"/>
+      <circle id="angle-vertex" r="4" fill="#fff"/>
+      <circle id="angle-pt" r="9" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
+      <text id="angle-value-label" fill="#ffcc00" font-size="16" font-weight="700"></text>
+    </svg>
+    <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
+      <button id="angle-set-null" class="tool" style="flex:1; min-width:80px;">Nul (0°)</button>
+      <button id="angle-set-acute" class="tool" style="flex:1; min-width:80px;">Ascuțit</button>
+      <button id="angle-set-right" class="tool" style="flex:1; min-width:80px;">Drept (90°)</button>
+      <button id="angle-set-obtuse" class="tool" style="flex:1; min-width:80px;">Obtuz</button>
+      <button id="angle-set-straight" class="tool" style="flex:1; min-width:80px;">Alungit (180°)</button>
+    </div>
+    <div style="color:#999; font-size:12px; text-align:center;">Trage punctul portocaliu ca să schimbi unghiul — tipul se actualizează live.</div>
+  </div>
+</div>
+
+<div id="parallel-lines-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(640px, 94vw); box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <span style="color:#fff; font-size:17px; font-weight:700;">Drepte paralele tăiate de o secantă</span>
+      <button id="parallel-lines-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <svg id="parallel-svg" viewBox="0 0 440 320" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:none;">
+      <line id="pl-line1" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="pl-line2" stroke="#4da6ff" stroke-width="2.5"/>
+      <line id="pl-secant" stroke="#4da6ff" stroke-width="2.5"/>
+      <circle id="pl-pt-end1" r="8" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
+      <circle id="pl-pt-end2" r="8" fill="#ff7a1a" stroke="#fff" stroke-width="2" style="cursor:grab;"/>
+      <g id="pl-arcs"></g>
+      <g id="pl-overlap-ghost" style="display:none;">
+        <line id="pl-ghost-horiz" stroke="#fff" stroke-width="3" opacity="0.9"/>
+        <line id="pl-ghost-trans" stroke="#fff" stroke-width="3" opacity="0.9"/>
+        <path id="pl-ghost-arc-tr" fill="none" stroke="#ffd84d" stroke-width="3"/>
+        <path id="pl-ghost-arc-br" fill="none" stroke="#ffd84d" stroke-width="3"/>
+        <path id="pl-ghost-arc-bl" fill="none" stroke="#ffd84d" stroke-width="3"/>
+        <path id="pl-ghost-arc-tl" fill="none" stroke="#ffd84d" stroke-width="3"/>
+        <circle id="pl-ghost-vertex" r="4" fill="#fff"/>
+        <text id="pl-ghost-label-tr" fill="#ffd84d" font-size="12" font-weight="700"></text>
+        <text id="pl-ghost-label-br" fill="#ffd84d" font-size="12" font-weight="700"></text>
+        <text id="pl-ghost-label-bl" fill="#ffd84d" font-size="12" font-weight="700"></text>
+        <text id="pl-ghost-label-tl" fill="#ffd84d" font-size="12" font-weight="700"></text>
+      </g>
+      <path id="pl-vertical-marker" fill="none" stroke="#ff5fd1" stroke-width="2.5" style="display:none;"/>
+      <path id="pl-straight-marker" stroke="#ffcf5f" stroke-width="3" style="display:none;"/>
+      <text id="pl-overlap-indicator" x="220" y="60" text-anchor="middle" font-size="15" font-weight="700" fill="#5fff8f" style="display:none;">✓ Dreptele sunt suprapuse</text>
+      <g id="pl-angle-labels"></g>
+    </svg>
+    <button id="pl-animate-translate" class="tool" style="font-weight:700;">▶ Translatează rețeaua de unghiuri (glisare pe secantă)</button>
+    <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
+      <button id="pl-show-corresponding" class="tool" style="flex:1; min-width:140px;">Corespondente</button>
+      <button id="pl-show-alt-int" class="tool" style="flex:1; min-width:140px;">Alterne interne</button>
+      <button id="pl-show-alt-ext" class="tool" style="flex:1; min-width:140px;">Alterne externe</button>
+      <button id="pl-show-same-int" class="tool" style="flex:1; min-width:140px;">Interne, aceeași secantă</button>
+      <button id="pl-show-same-ext" class="tool" style="flex:1; min-width:140px;">Externe, aceeași secantă</button>
+      <button id="pl-show-none" class="tool" style="flex:1; min-width:100px;">Niciuna</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
+      <label style="display:flex; align-items:center; gap:6px; color:#ccc; font-size:13px; cursor:pointer;">
+        <input type="checkbox" id="pl-toggle-parallel" checked>
+        Drepte paralele (debifează pentru neparalele)
+      </label>
+      <button id="pl-animate-coincide" class="tool">⬇ Suprapune dreptele (automat)</button>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span style="color:#999; font-size:12px; white-space:nowrap;">Dreapta 2 ↕</span>
+      <input type="range" id="pl-overlap-slider" min="0" max="100" value="0" style="flex:1;">
+      <span style="color:#999; font-size:12px; white-space:nowrap;">suprapusă</span>
+    </div>
+    <div id="pl-note" style="color:#9b6bff; font-size:13px; text-align:center; min-height:34px;"></div>
+    <div style="color:#999; font-size:12px; text-align:center;">Trage oricare din cele două capete portocalii ca să înclini secanta — unghiurile se recalculează live.</div>
   </div>
 </div>
 
