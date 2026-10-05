@@ -145,6 +145,9 @@ const UI_TEXT = {
 const RO_EN_RULES = [
   [/^✓ Fișă PDF încărcată \((\d+) pagini\)$/, '✓ PDF sheet loaded ($1 pages)'],
   [/^🔒 Imagine blocată$/, '🔒 Image locked'],
+  [/^✓ Fișă trimisă pe tablă \((\d+) pagin(?:ă|i)\)$/, '✓ Worksheet sent to the board ($1 pages)'],
+  [/^⚠ Nu s-a putut încărca fișa trimisă$/, '⚠ The sent worksheet could not be loaded'],
+  [/^⚠ Biblioteca PDF nu e disponibilă$/, '⚠ The PDF library is not available'],
   [/^🔓 Imagine deblocată$/, '🔓 Image unlocked'],
   [/^🔒 Imaginea e blocată — deblocheaz-o întâi$/, '🔒 The image is locked — unlock it first'],
   [/^✓ (\d+) imagini șterse \((\d+) blocate au fost păstrate\)$/, '✓ $1 images deleted ($2 locked ones kept)'],
@@ -284,6 +287,7 @@ function applyStaticUI() {
   });
 
   setBtnText('btn-load-pdf', 'Fișă PDF', 'PDF Sheet');
+  setBtnText('btn-culegere', 'Culegere', 'Problem book');
   setBtnText('btn-help', 'Ajutor', 'Help');
   setBtnText('btn-license', 'Licență', 'License');
   setElText('calc-header-title', '🧮 Calculator', '🧮 Calculator');
@@ -15111,7 +15115,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v322</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v324</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15139,6 +15143,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
   <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi închide forma printr-un dublu-click (pe ultimul vârf) sau apăsând din nou pe butonul poligon.</li>
+  <li><b>Culegere</b> — deschide generatorul de fișe (BAC și Evaluare Națională). Alegi exercițiile, apeși „Previzualizează”, apoi „Trimite pe tablă”: fișa se deschide în modulul PDF al tablei, pe toată lățimea ferestrei, ca să scrii direct pe ea. „Pe pagini de tablă” pune fiecare pagină ca imagine pe câte o pagină de tablă.</li>
   <li><b>Math</b> — grupează cele trei instrumente matematice interactive de mai jos; un singur click deschide un mic meniu din care alegi.</li>
   <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
   <li><b>Tipuri de unghiuri</b> — trage punctul portocaliu pentru a schimba unghiul; tipul (nul, ascuțit, drept, obtuz, alungit) se identifică live, cu butoane pentru a sări direct la fiecare caz.</li>
@@ -15242,7 +15247,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v322</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v324</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -15270,6 +15275,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
   <li><b>Circle</b> — drag from the center outward.</li>
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then close the shape with a double-tap (on the last vertex) or by tapping the polygon button again.</li>
+  <li><b>Problem book</b> — opens the worksheet generator (BAC and National Assessment). Pick exercises, press “Preview”, then “Send to the board”: the worksheet opens in the board’s PDF module at full window width, ready to write on. “To board pages” puts each page as an image on its own board page.</li>
   <li><b>Math</b> — groups the three interactive math tools below; one click opens a small menu to choose from.</li>
   <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
   <li><b>Angle types</b> — drag the orange point to change the angle; the type (zero, acute, right, obtuse, straight) is identified live, with buttons to jump directly to each case.</li>
@@ -15476,3 +15482,149 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     });
   });
 }
+
+
+// ================================================================
+// CULEGERE DE MATEMATICĂ — generator de fișe, încorporat în tablă
+// ================================================================
+// Butonul „Culegere” deschide modulul (culegere.html) într-un strat pe tot
+// ecranul, peste tablă. Când în modul se apasă „Trimite pe tablă”, paginile
+// din previzualizare ajung aici ca imagini (fără PDF) — câte o pagină de
+// tablă pentru fiecare pagină a fișei — sau, la „Trimite ca PDF”, ca fișă PDF.
+// Același protocol de mesaje (tabla-ping / tabla-ready / culegere-pdf /
+// tabla-ok) funcționează și cu versiunea online a culegerii, deschisă separat.
+(function initCulegere() {
+  const btn = document.getElementById('btn-culegere');
+  const overlay = document.getElementById('culegere-overlay');
+  const frame = document.getElementById('culegere-frame');
+  if (!btn || !overlay || !frame) return;
+  const CULEGERE_URL = 'culegere.html?embed=1';
+
+  function openCulegere() {
+    if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
+    overlay.style.display = 'block';
+    try { frame.contentWindow.focus(); } catch (e) {}
+  }
+  function closeCulegere() {
+    overlay.style.display = 'none';
+    try { window.focus(); } catch (e) {}
+  }
+  btn.addEventListener('click', openCulegere);
+  window.openCulegere = openCulegere;
+  window.closeCulegere = closeCulegere;
+
+  function loadSheetImage(src) {
+    return new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => resolve(null);
+      im.src = src;
+    });
+  }
+
+  // Așază paginile fișei pe tablă: prima pe pagina curentă (dacă e goală),
+  // restul pe pagini noi; fiecare imagine încape întreagă în ecran și e blocată
+  // (ca să scrii pe ea fără să o muți din greșeală — se poate debloca oricând).
+  async function placeSheetPages(dataUrls) {
+    if (typeof pdfModeActive !== 'undefined' && pdfModeActive) setBoardMode(false);
+    activatePane('board');
+    let placed = 0, firstIdx = -1;
+    for (let i = 0; i < dataUrls.length; i++) {
+      const img = await loadSheetImage(dataUrls[i]);
+      if (!img) continue;
+      let page = getCurrentPage();
+      if (placed > 0 || page.strokes.length > 0 || page.images.length > 0) {
+        addPage();
+        page = getCurrentPage();
+      }
+      if (firstIdx < 0) firstIdx = currentPageIdx;
+      const vw = wrap.clientWidth, vh = wrap.clientHeight;
+      const scale = boardZoom || 1;
+      const ratio = (img.naturalWidth || img.width) / (img.naturalHeight || img.height);
+      let sh = vh * 0.97, sw = sh * ratio;
+      if (sw > vw * 0.97) { sw = vw * 0.97; sh = sw / ratio; }
+      const x = ((vw - sw) / 2 - boardPanX) / scale;
+      const y = ((vh - sh) / 2 - boardPanY) / scale;
+      addImageToPage(page, img, x, y, sw / scale, sh / scale);
+      const imgData = page.images[page.images.length - 1];
+      imgData.locked = true;
+      undoStack.push({ type: 'imageAdd', page, img: imgData });
+      placed++;
+    }
+    redoStack = [];
+    if (firstIdx >= 0 && firstIdx !== currentPageIdx) {
+      currentPageIdx = firstIdx;
+      drawBg(); redrawStrokes();
+    }
+    renderImages();
+    updateStatus();
+    return placed;
+  }
+
+  function paneHasAnnotations() {
+    if (!pdfDoc) return false;
+    const pd = (pdfPanes.top && pdfPanes.top.pagesData) || {};
+    return Object.keys(pd).some(k => pd[k] && ((pd[k].strokes && pd[k].strokes.length) || (pd[k].images && pd[k].images.length)));
+  }
+  // Construiește local (instant, fără rețea) o fișă PDF A4 din paginile randate și o încarcă în
+  // modulul PDF al tablei, unde se afișează pe toată lățimea ferestrei.
+  async function openSheetInPdfPane(dataUrls) {
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      showToast(trMsg('⚠ Biblioteca PDF nu e disponibilă')); return false;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    for (let i = 0; i < dataUrls.length; i++) {
+      if (i) doc.addPage();
+      doc.addImage(dataUrls[i], 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    }
+    const buf = doc.output('arraybuffer');
+    loadPdfFromArrayBuffer(buf);
+    return true;
+  }
+
+  function reply(src, msg) { try { src.postMessage(msg, '*'); } catch (e) {} }
+
+  window.addEventListener('message', async (e) => {
+    const d = e.data;
+    if (!d || typeof d !== 'object' || !e.source) return;
+    const fromFrame = e.source === frame.contentWindow;
+    const fromOpener = !!window.opener && e.source === window.opener;
+    if (d.type === 'tabla-ping') { if (fromFrame || fromOpener) reply(e.source, { type: 'tabla-ready' }); return; }
+    if (!fromFrame && !fromOpener) return; // acceptăm doar mesaje de la culegere
+    if (d.type === 'culegere-close') { if (fromFrame) closeCulegere(); return; }
+    if (d.type === 'culegere-pages' && Array.isArray(d.pages)) {
+      const imgs = d.pages.filter(p => typeof p === 'string' && p.startsWith('data:image/'));
+      if (!imgs.length) { showToast(trMsg('⚠ Nu s-a putut încărca fișa trimisă')); return; }
+      if (paneHasAnnotations() && !confirm(LANG === 'en'
+        ? 'The PDF sheet currently open has your annotations; they will be lost if it is replaced. Continue?'
+        : 'Fișa PDF deschisă acum are adnotări de-ale tale; se vor pierde dacă o înlocuiești. Continui?')) {
+        reply(e.source, { type: 'tabla-cancel' }); return;
+      }
+      if (await openSheetInPdfPane(imgs)) {
+        reply(e.source, { type: 'tabla-ok' });
+        if (fromFrame) closeCulegere(); else { try { window.focus(); } catch (er) {} }
+      }
+      return;
+    }
+    if (d.type === 'culegere-board-pages' && Array.isArray(d.pages)) {
+      const n = await placeSheetPages(d.pages.filter(p => typeof p === 'string' && p.startsWith('data:image/')));
+      if (n > 0) {
+        showToast(trMsg(`✓ Fișă trimisă pe tablă (${n} ${n === 1 ? 'pagină' : 'pagini'})`));
+        reply(e.source, { type: 'tabla-ok' });
+        if (fromFrame) closeCulegere(); else { try { window.focus(); } catch (er) {} }
+      } else {
+        showToast(trMsg('⚠ Nu s-a putut încărca fișa trimisă'));
+      }
+      return;
+    }
+    if (d.type === 'culegere-pdf' && d.buffer) {
+      loadPdfFromArrayBuffer(d.buffer);
+      reply(e.source, { type: 'tabla-ok' });
+      if (fromFrame) closeCulegere(); else { try { window.focus(); } catch (er) {} }
+    }
+  });
+
+  // deschisă din versiunea online a culegerii (fereastră separată, #culegere): anunțăm că tabla e gata
+  if (location.hash === '#culegere' && window.opener) reply(window.opener, { type: 'tabla-ready' });
+})();
