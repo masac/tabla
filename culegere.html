@@ -430,6 +430,24 @@ input.num{width:64px;margin-left:6px;border:1px solid var(--line);border-radius:
 @media print{.selbar,.pick{display:none!important}}
 .embed-only{display:none}
 .embed .embed-only{display:inline-flex}
+/* ===== mod tablă interactivă (doar când rulează încorporat în tablă): zone de atingere mai mari ===== */
+.embed{-webkit-tap-highlight-color:transparent}
+.embed button,.embed .chip,.embed .toggle,.embed .pick,.embed select,.embed label{touch-action:manipulation}
+.embed .btn{min-height:44px;padding:8px 16px;font-size:14.5px}
+.embed .btn.sm{min-height:40px;padding:6px 13px;font-size:14px}
+.embed .seg button{min-height:36px;padding:6px 16px;font-size:14px}
+.embed .chip{min-height:40px;padding:6px 15px;font-size:14px}
+.embed .icon-btn{min-height:42px;min-width:42px;padding:6px 12px;font-size:14px;justify-content:center}
+.embed .toggle{min-height:42px;font-size:14px}
+.embed .pick{min-height:42px;padding-right:10px;font-size:14px}
+.embed .sel,.embed select{min-height:42px;font-size:14.5px}
+.embed input.ck{width:26px;height:26px;border-radius:6px}
+.embed input.ck:checked::after{width:12px;height:6px}
+.embed input.ck:indeterminate::after{width:12px}
+.embed .side .t{min-height:40px}
+.embed .opt{min-height:42px}
+.embed .opt input[type=checkbox]{width:22px;height:22px}
+.embed .num{min-height:42px;font-size:14.5px}
 .embed #pvBoardEdit,.embed #pvBoardSetup{display:none!important}
 </style>
 </head>
