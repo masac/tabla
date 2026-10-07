@@ -488,6 +488,8 @@ function applyImagesPanTransform() {
   const t = (activeSurface === 'board') ? `translate(${boardPanX}px, ${boardPanY}px) scale(${boardZoom})` : 'none';
   if (typeof imagesContainer !== 'undefined' && imagesContainer) imagesContainer.style.transform = t;
   if (typeof imagesContainerFront !== 'undefined' && imagesContainerFront) imagesContainerFront.style.transform = t;
+  const sm = document.getElementById('sol-marks-board');
+  if (sm) { sm.style.transform = t; sm.style.setProperty('--inv', String(1 / (boardZoom || 1))); }
 
   // Containerul de imagini al ferestrei PDF — aceeași transformare de
   // conținut ca desenele de pe fișă, ca imaginile lipite peste PDF să
@@ -1055,6 +1057,7 @@ function updatePdfPanePosition(name) {
   }
 
   updatePdfScrollbar(name);
+  updateSolMarks(name);
   // Stroke-urile desenate pe fereastra PDF sunt stocate în coordonate
   // "conținut" (independente de pan/zoom) — de fiecare dată când fișa se
   // mișcă sau se scalează, trebuie reactualizată transformarea canvas-ului
@@ -1307,7 +1310,120 @@ document.getElementById('btn-load-pdf').addEventListener('click', () => pdfFileI
 // fișa PDF (nu doar adnotările) într-o sesiune salvată, ca la redeschidere
 // să nu mai fie nevoie să încarci din nou manual același fișier.
 let loadedPdfArrayBuffer = null;
-function loadPdfFromArrayBuffer(arrayBuffer) {
+// ================================================================
+// REZOLVĂRI PENTRU EXERCIȚIILE TRIMISE DIN CULEGERE (fără răspunsuri)
+// Culegerea trimite, pentru fiecare exercițiu, poziția numărului pe pagină și o imagine cu rezolvarea.
+// În fața numărului apare o bifă; apăsată, arată rezolvarea într-un card mobil, apăsată din nou o ascunde.
+// ================================================================
+let pdfSolMarks = null; // { nrPagină (de la 1): [{n, x, y, w, h, img}] } pentru fișa PDF deschisă din culegere
+function groupSolMarks(marks) {
+  if (!Array.isArray(marks)) return null;
+  const out = {}; let any = false;
+  marks.forEach(m => {
+    if (!m || typeof m.img !== 'string' || !m.img.startsWith('data:image/') || !isFinite(m.x) || !isFinite(m.y)) return;
+    const p = (m.page | 0) + 1;
+    (out[p] = out[p] || []).push({ n: m.n | 0, x: +m.x, y: +m.y, w: +m.w || 0.04, h: +m.h || 0.02, img: m.img });
+    any = true;
+  });
+  return any ? out : null;
+}
+let solCardEl = null, solCardOwner = null;
+function hideSolCard() {
+  if (solCardEl) solCardEl.style.display = 'none';
+  if (solCardOwner) solCardOwner.classList.remove('on');
+  solCardOwner = null;
+}
+function ensureSolCard() {
+  if (solCardEl) return solCardEl;
+  const c = document.createElement('div');
+  c.id = 'sol-card';
+  c.innerHTML = '<div class="sol-card-h"><span class="sol-card-t"></span><button type="button" class="sol-card-x" aria-label="Închide">×</button></div><div class="sol-card-b"><img alt="Rezolvare"></div>';
+  document.body.appendChild(c);
+  const stop = ev => ev.stopPropagation();
+  ['pointerdown', 'mousedown', 'touchstart', 'click', 'wheel'].forEach(n => c.addEventListener(n, stop, { passive: true }));
+  c.querySelector('.sol-card-x').addEventListener('click', hideSolCard);
+  // card mobil: se trage de antet
+  const h = c.querySelector('.sol-card-h');
+  let drag = null;
+  h.addEventListener('pointerdown', ev => {
+    if (ev.target.closest('.sol-card-x')) return;
+    const r = c.getBoundingClientRect();
+    drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+    c.style.transform = 'none'; c.style.left = r.left + 'px'; c.style.top = r.top + 'px'; c.style.bottom = 'auto';
+    try { h.setPointerCapture(ev.pointerId); } catch (e) {}
+    ev.preventDefault();
+  });
+  h.addEventListener('pointermove', ev => {
+    if (!drag) return;
+    c.style.left = Math.max(0, Math.min(innerWidth - 60, ev.clientX - drag.dx)) + 'px';
+    c.style.top = Math.max(0, Math.min(innerHeight - 40, ev.clientY - drag.dy)) + 'px';
+  });
+  const end = () => { drag = null; };
+  h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+  solCardEl = c; return c;
+}
+function toggleSolution(m, markEl) {
+  const c = ensureSolCard();
+  if (solCardOwner === markEl && c.style.display !== 'none') { hideSolCard(); return; }
+  hideSolCard();
+  c.querySelector('img').src = m.img;
+  c.querySelector('.sol-card-t').textContent = (LANG === 'en' ? 'Solution — exercise ' : 'Rezolvare — exercițiul ') + m.n;
+  c.style.display = 'block';
+  markEl.classList.add('on'); solCardOwner = markEl;
+}
+// butonul-bifă din fața numărului unui exercițiu; poziția e în procente din pagină (rămâne lipită de pagină la zoom/pan)
+function makeSolMark(m) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'sol-mark';
+  b.style.left = 'calc(' + (m.x * 100) + '% - 25px)';
+  b.style.top = 'calc(' + ((m.y + m.h / 2) * 100) + '% - 11px)';
+  b.title = LANG === 'en' ? 'Show / hide the solution' : 'Arată / ascunde rezolvarea';
+  b.setAttribute('aria-label', (LANG === 'en' ? 'Solution of exercise ' : 'Rezolvarea exercițiului ') + m.n);
+  b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  ['pointerdown', 'mousedown', 'touchstart', 'pointerup', 'mouseup', 'touchend'].forEach(n => b.addEventListener(n, ev => ev.stopPropagation(), { passive: true }));
+  b.addEventListener('click', ev => { ev.stopPropagation(); ev.preventDefault(); toggleSolution(m, b); b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false'); });
+  return b;
+}
+// fereastra PDF: un strat cu bifele fiecărei pagini, mutat odată cu pagina (aceeași poziție ca a bitmap-ului PDF)
+function updateSolMarks(name) {
+  const pane = pdfPanes[name]; if (!pane) return;
+  const els = getPaneEls(name); if (!els.root) return;
+  let layer = els.root.querySelector('.pdf-pane-marks');
+  if (!pdfSolMarks) { if (layer) { layer.style.display = 'none'; } return; }
+  if (!layer) { layer = document.createElement('div'); layer.className = 'pdf-pane-marks'; els.root.appendChild(layer); }
+  layer.style.display = '';
+  const rect = els.root.getBoundingClientRect();
+  const place = (num, w, h, x, y) => {
+    let pg = layer.querySelector('[data-pg="' + num + '"]');
+    const list = pdfSolMarks[num];
+    if (!list || !w || !h) { if (pg) pg.style.display = 'none'; return; }
+    if (!pg) {
+      pg = document.createElement('div'); pg.className = 'sol-pg'; pg.dataset.pg = num;
+      list.forEach(m => pg.appendChild(makeSolMark(m)));
+      layer.appendChild(pg);
+    }
+    pg.style.display = '';
+    pg.style.width = w + 'px'; pg.style.height = h + 'px';
+    pg.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+  };
+  const w = pane._liveW || els.bg.width, h = pane._liveH || els.bg.height;
+  const cx = (rect.width - w) / 2, cy = Math.max(0, (rect.height - h) / 2);
+  layer.querySelectorAll('.sol-pg').forEach(pg => { pg.style.display = 'none'; });
+  place(pane.pageNum, w, h, cx + pane.panX, cy + pane.panY);
+  if (els.bgAdj && pane.adjNum) {
+    const wA = pane.adjWidth, hA = pane.adjHeight;
+    const adjY = pane.adjDir > 0 ? (cy + pane.panY + h) : (cy + pane.panY - hA);
+    place(pane.adjNum, wA, hA, (rect.width - wA) / 2 + pane.panX, adjY);
+  }
+}
+function clearSolMarksLayer(name) {
+  const root = document.getElementById('pdf-pane-' + name);
+  const layer = root && root.querySelector('.pdf-pane-marks');
+  if (layer) layer.remove();
+}
+
+function loadPdfFromArrayBuffer(arrayBuffer, marks) {
   if (typeof pdfjsLib === 'undefined') {
     alert(LANG === 'en'
       ? 'The PDF library could not load — the PDF sheet feature is unavailable right now. The rest of the app (drawing, tools) still works normally.'
@@ -1320,6 +1436,8 @@ function loadPdfFromArrayBuffer(arrayBuffer) {
     loadedPdfArrayBuffer = bufferCopy;
     pdfTotalPages = doc.numPages;
     pdfPanes.top = makePdfPane();
+    hideSolCard(); clearSolMarksLayer('top');
+    pdfSolMarks = groupSolMarks(marks);
     document.getElementById('btn-toggle-pdf-mode').disabled = false;
     document.getElementById('btn-pdf-split').disabled = false;
     setCurrentSize(3);
@@ -1891,8 +2009,8 @@ function addImageToPage(page, img, x, y, w, h) {
   const imageData = {
     id,
     img,
-    x: x || 40,
-    y: y || 40,
+    x: (x == null ? 40 : x),
+    y: (y == null ? 40 : y),
     w: w || 200,
     h: h || 150,
     locked: false,
@@ -2000,6 +2118,26 @@ function renderImages() {
   });
   
   updateImageSelection();
+  renderBoardSolMarks(isPdfPane ? null : page);
+}
+// bifele cu rezolvări ale paginilor de culegere puse pe tablă: într-un strat deasupra desenului (altfel, canvasul de scris le-ar acoperi)
+function renderBoardSolMarks(page) {
+  const layer = document.getElementById('sol-marks-board'); if (!layer) return;
+  layer.innerHTML = '';
+  if (solCardOwner && !solCardOwner.isConnected) hideSolCard();
+  if (!page) return;
+  page.images.forEach(im => {
+    if (!Array.isArray(im.solMarks)) return;
+    im.solMarks.forEach(m => {
+      const b = makeSolMark(m);
+      // poziția în coordonatele tablei: colțul imaginii + fracțiile din pagină; mărimea rămâne constantă pe ecran la zoom
+      b.style.left = 'calc(' + (im.x + m.x * im.w) + 'px - 25px * var(--inv, 1))';
+      b.style.top = 'calc(' + (im.y + (m.y + m.h / 2) * im.h) + 'px - 11px * var(--inv, 1))';
+      b.classList.add('on-board');
+      layer.appendChild(b);
+    });
+  });
+  applyImagesPanTransform();
 }
 
 // ================================================================
@@ -10212,7 +10350,20 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   }
   // Obiect folosit pentru calculul matematic (compute()) — "y" include
   // epsilon-ul invizibil, când e cazul.
-  const LINE2_ANCHOR = { x: 220, get y() { return line2Y(true); } };
+  // Punctul prin care trece dreapta 2. Paralelă: dreapta e orizontală, deci poziția x nu contează.
+  // Neparalelă: pe măsură ce dreapta 2 se apropie (overlapFraction → 1), o translatăm și lateral,
+  // astfel încât la capătul cursei să treacă EXACT prin punctul în care secanta taie dreapta 1 (P1)
+  // — punct comun celor trei drepte. Înainte, ea pivota în jurul unui punct fix (x = 220) și
+  // trecea pe lângă P1, cu o distanță care depindea de înclinarea secantei.
+  const LINE2_ANCHOR = {
+    get x() {
+      if (linesParallel) return 220;
+      const d = { x: Math.cos(dragAngle), y: Math.sin(dragAngle) };
+      const p1 = intersectLines(PIVOT, d, { x: 0, y: Y1 }, { x: 1, y: 0 });
+      return 220 + (p1.x - 220) * overlapFraction;
+    },
+    get y() { return line2Y(true); }
+  };
 
   function compute() {
     // Punctele de intersecție ale secantei (care trece prin PIVOT, cu
@@ -10405,16 +10556,86 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     // 1, P2.pt se apropie continuu de P1.pt (parte din același calcul care
     // mișcă și dreptele lin) — așa că etichetele converg la fel de lin,
     // ajungând să coincidă exact la suprapunere perfectă, fără niciun salt.
+    // Etichetele (poziții naturale, la offset fix de fiecare punct).
+    const labelItems = [];
     ['P1', 'P2'].forEach(pointKey => {
       const data = pointKey === 'P1' ? P1 : P2;
       Object.keys(labelOffsets).forEach(cornerKey => {
         const off = labelOffsets[cornerKey];
         const hl = isHighlighted(pointKey, cornerKey);
         const color = hl ? colors[highlightMode] : '#ccc';
-        drawLabel(data.pt.x + off.dx, data.pt.y + off.dy, data[cornerKey], color, hl, false);
-        drawArc(data, cornerKey, color, hl);
+        const value = data[cornerKey];
+        const w = value.toFixed(0).length * 6.8 + 7;      // lățimea aproximativă a textului "123°"
+        const h = 13;
+        // (x, y) = colțul stânga-sus al casetei textului; baza textului e la y + 10
+        labelItems.push({ data, cornerKey, hl, color, value, w, h,
+          natX: data.pt.x + off.dx, natY: data.pt.y + off.dy - 10,
+          x: data.pt.x + off.dx, y: data.pt.y + off.dy - 10 });
       });
     });
+    // Drepte NEparalele, apropiate: cele două cruci au unghiuri DIFERITE, iar etichetele lor
+    // ajung una peste alta (ex. 115° desenat peste 135°) și devin ilizibile. Le depărtăm
+    // automat, cât e strict necesar — deplasarea crește treptat din momentul în care încep
+    // să se atingă, deci nu există niciun salt. La drepte paralele, valorile coincid (aceleași
+    // numere, la aceeași poziție), iar suprapunerea lor e chiar scopul demonstrației.
+    if (!linesParallel) {
+      const vb = svg.viewBox.baseVal;
+      declutterLabelBoxes(labelItems);
+      labelItems.forEach(it => {   // păstrăm etichetele în interiorul desenului
+        it.x = Math.max(vb.x + 3, Math.min(vb.x + vb.width - it.w - 3, it.x));
+        it.y = Math.max(vb.y + 3, Math.min(vb.y + vb.height - it.h - 3, it.y));
+      });
+    }
+    labelItems.forEach(it => {
+      drawArc(it.data, it.cornerKey, it.color, it.hl);
+      // Etichetă mutată din locul ei firesc: o legăm de arcul unghiului printr-o linie fină,
+      // ca să se vadă clar cărui unghi îi aparține.
+      const moved = Math.hypot(it.x - it.natX, it.y - it.natY);
+      if (moved > 6) {
+        const [r1, r2] = it.data.rays[it.cornerKey];
+        const n1 = Math.hypot(r1.x, r1.y) || 1, n2 = Math.hypot(r2.x, r2.y) || 1;
+        let bx = r1.x / n1 + r2.x / n2, by = r1.y / n1 + r2.y / n2;
+        const bn = Math.hypot(bx, by);
+        if (bn < 1e-6) { bx = -r1.y / n1; by = r1.x / n1; } else { bx /= bn; by /= bn; }
+        const ax = it.data.pt.x + 16 * bx, ay = it.data.pt.y + 16 * by;     // mijlocul arcului
+        const qx = Math.max(it.x, Math.min(it.x + it.w, ax)), qy = Math.max(it.y, Math.min(it.y + it.h, ay));
+        if (Math.hypot(qx - ax, qy - ay) > 3) {
+          const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          ln.setAttribute('x1', ax); ln.setAttribute('y1', ay); ln.setAttribute('x2', qx); ln.setAttribute('y2', qy);
+          ln.setAttribute('stroke', it.color); ln.setAttribute('stroke-width', '0.8'); ln.setAttribute('opacity', '0.6');
+          arcsGroup.appendChild(ln);
+        }
+      }
+      drawLabel(it.x, it.y + 10, it.value, it.color, it.hl, false);
+    });
+    // Mesajul de stare nu trebuie să se lovească de etichete: dacă ele urcă mai sus, urcă și el.
+    const topMost = Math.min(...labelItems.map(it => it.y));
+    overlapIndicator.setAttribute('y', Math.max(18, Math.min(60, topMost - 8)));
+  }
+
+  // Aranjare automată a casetelor de text, ca să nu se suprapună: pentru fiecare pereche care se
+  // atinge, le depărtăm simetric, pe direcția dintre centrele lor, exact cât e nevoie ca să
+  // rămână un mic spațiu liber. Rezultatul depinde doar de poziții (fără stare), iar mutarea
+  // pornește de la zero în clipa în care două etichete încep să se atingă.
+  function declutterLabelBoxes(items) {
+    const PAD = 3;
+    for (let pass = 0; pass < 40; pass++) {
+      let any = false;
+      for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+        const A = items[i], B = items[j];
+        let vx = (B.x + B.w / 2) - (A.x + A.w / 2), vy = (B.y + B.h / 2) - (A.y + A.h / 2);
+        const needX = (A.w + B.w) / 2 + PAD, needY = (A.h + B.h) / 2 + PAD;
+        if (Math.abs(vx) >= needX || Math.abs(vy) >= needY) continue;       // nu se ating
+        if (Math.abs(vx) < 1e-6 && Math.abs(vy) < 1e-6) vy = 0.01;          // centre identice: direcție fixă
+        const kx = Math.abs(vx) > 1e-9 ? needX / Math.abs(vx) : Infinity;
+        const ky = Math.abs(vy) > 1e-9 ? needY / Math.abs(vy) : Infinity;
+        const k = Math.min(kx, ky);                                         // > 1 aici
+        const px = vx * (k - 1) / 2, py = vy * (k - 1) / 2;
+        A.x -= px; A.y -= py; B.x += px; B.y += py;
+        any = true;
+      }
+      if (!any) break;
+    }
   }
 
   function svgPointFromEvent(e) {
@@ -10653,6 +10874,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       const list = pairs[highlightMode];
       if (list) { activePairIndex = 0; }
     }
+    // Nota de suprapunere rămasă de dinainte (ex. „coincid exact”) nu mai e adevărată după comutare.
+    if (overlapFraction > 0.5) updateOverlapNote();
+    else if (OVERLAP_NOTE_RE.test(noteEl.textContent)) noteEl.textContent = '';
     if (!linesParallel && highlightMode !== 'none') {
       noteEl.textContent = '⚠ Dreptele NU mai sunt paralele — relația din teoremă nu se mai verifică (unghiurile nu mai sunt egale).';
     }
@@ -10686,9 +10910,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   // slider ca să apropie sau să depărteze dreapta 2 față de dreapta 1,
   // văzând clar, pas cu pas, cum se suprapun (sau revin la loc) cele două
   // drepte și unghiurile lor.
-  document.getElementById('pl-overlap-slider').addEventListener('input', (e) => {
-    overlapFraction = Number(e.target.value) / 100;
-    render();
+  // Nota despre starea de suprapunere (după poziția slider-ului și după paralel/neparalel).
+  const OVERLAP_NOTE_RE = /^(✓ Dreptele sunt suprapuse perfect|⚠ Chiar și la acest punct comun|Dreptele se apropie)/;
+  function updateOverlapNote() {
     if (overlapFraction > 0.97) {
       noteEl.textContent = linesParallel
         ? '✓ Dreptele sunt suprapuse perfect — unghiurile corespunzătoare coincid exact.'
@@ -10696,6 +10920,11 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     } else if (overlapFraction > 0.5) {
       noteEl.textContent = 'Dreptele se apropie — observă cum unghiurile ' + (linesParallel ? 'rămân' : 'nu rămân') + ' aceleași pe măsură ce se apropie.';
     }
+  }
+  document.getElementById('pl-overlap-slider').addEventListener('input', (e) => {
+    overlapFraction = Number(e.target.value) / 100;
+    render();
+    updateOverlapNote();
   });
 })();
 
@@ -15115,7 +15344,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v324</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v336</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15143,7 +15372,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Linie</b>, <b>linie întreruptă</b>, <b>săgeată</b> — trage din punctul de start până la cel final.</li>
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
   <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi închide forma printr-un dublu-click (pe ultimul vârf) sau apăsând din nou pe butonul poligon.</li>
-  <li><b>Culegere</b> — deschide generatorul de fișe (BAC și Evaluare Națională). Alegi exercițiile, apeși „Previzualizează”, apoi „Trimite pe tablă”: fișa se deschide în modulul PDF al tablei, pe toată lățimea ferestrei, ca să scrii direct pe ea. „Pe pagini de tablă” pune fiecare pagină ca imagine pe câte o pagină de tablă.</li>
+  <li><b>Culegere</b> — deschide generatorul de fișe (tabul Gimnaziu se deschide implicit; mai ai Primar și Liceu). Alegi exercițiile, apeși „Previzualizează”, apoi „Trimite pe tablă”: fișa se deschide în modulul PDF al tablei, pe toată lățimea ferestrei, ca să scrii direct pe ea. „Pe pagini de tablă” pune fiecare pagină ca imagine pe câte o pagină de tablă.</li>
   <li><b>Math</b> — grupează cele trei instrumente matematice interactive de mai jos; un singur click deschide un mic meniu din care alegi.</li>
   <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
   <li><b>Tipuri de unghiuri</b> — trage punctul portocaliu pentru a schimba unghiul; tipul (nul, ascuțit, drept, obtuz, alungit) se identifică live, cu butoane pentru a sări direct la fiecare caz.</li>
@@ -15247,7 +15476,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v324</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v336</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -15275,7 +15504,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Line</b>, <b>dashed line</b>, <b>arrow</b> — drag from the start point to the end point.</li>
   <li><b>Circle</b> — drag from the center outward.</li>
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then close the shape with a double-tap (on the last vertex) or by tapping the polygon button again.</li>
-  <li><b>Problem book</b> — opens the worksheet generator (BAC and National Assessment). Pick exercises, press “Preview”, then “Send to the board”: the worksheet opens in the board’s PDF module at full window width, ready to write on. “To board pages” puts each page as an image on its own board page.</li>
+  <li><b>Problem book</b> — opens the worksheet generator (it opens on the Middle school tab by default; Primary and High school are also available). Pick exercises, press “Preview”, then “Send to the board”: the worksheet opens in the board’s PDF module at full window width, ready to write on. “To board pages” puts each page as an image on its own board page.</li>
   <li><b>Math</b> — groups the three interactive math tools below; one click opens a small menu to choose from.</li>
   <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
   <li><b>Angle types</b> — drag the orange point to change the angle; the type (zero, acute, right, obtuse, straight) is identified live, with buttons to jump directly to each case.</li>
@@ -15503,10 +15732,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
     overlay.style.display = 'block';
+    document.documentElement.classList.add('culegere-open');
     try { frame.contentWindow.focus(); } catch (e) {}
   }
   function closeCulegere() {
     overlay.style.display = 'none';
+    document.documentElement.classList.remove('culegere-open');
     try { window.focus(); } catch (e) {}
   }
   btn.addEventListener('click', openCulegere);
@@ -15525,7 +15756,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   // Așază paginile fișei pe tablă: prima pe pagina curentă (dacă e goală),
   // restul pe pagini noi; fiecare imagine încape întreagă în ecran și e blocată
   // (ca să scrii pe ea fără să o muți din greșeală — se poate debloca oricând).
-  async function placeSheetPages(dataUrls) {
+  async function placeSheetPages(dataUrls, marks) {
+    const byPage = groupSolMarks(marks) || {};
     if (typeof pdfModeActive !== 'undefined' && pdfModeActive) setBoardMode(false);
     activatePane('board');
     let placed = 0, firstIdx = -1;
@@ -15541,13 +15773,14 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
       const vw = wrap.clientWidth, vh = wrap.clientHeight;
       const scale = boardZoom || 1;
       const ratio = (img.naturalWidth || img.width) / (img.naturalHeight || img.height);
-      let sh = vh * 0.97, sw = sh * ratio;
-      if (sw > vw * 0.97) { sw = vw * 0.97; sh = sw / ratio; }
-      const x = ((vw - sw) / 2 - boardPanX) / scale;
-      const y = ((vh - sh) / 2 - boardPanY) / scale;
+      // imaginea ocupă toată lățimea tablei (orizontal); înălțimea urmează proporțiile paginii
+      const sw = vw, sh = sw / ratio;
+      const x = (0 - boardPanX) / scale;
+      const y = sh <= vh ? ((vh - sh) / 2 - boardPanY) / scale : (0 - boardPanY) / scale;
       addImageToPage(page, img, x, y, sw / scale, sh / scale);
       const imgData = page.images[page.images.length - 1];
       imgData.locked = true;
+      if (byPage[i + 1]) imgData.solMarks = byPage[i + 1];
       undoStack.push({ type: 'imageAdd', page, img: imgData });
       placed++;
     }
@@ -15558,6 +15791,10 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     }
     renderImages();
     updateStatus();
+    // fișa are fundal alb: dacă creionul e alb (sau foarte deschis), trecem automat pe roșu
+    if (placed > 0 && /^#?(f{3}|f{6})$/i.test(String(color || '').replace('#', ''))) {
+      try { setColorFromButton('#ff0000', 'qa-color-red'); } catch (er) {}
+    }
     return placed;
   }
 
@@ -15568,7 +15805,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   }
   // Construiește local (instant, fără rețea) o fișă PDF A4 din paginile randate și o încarcă în
   // modulul PDF al tablei, unde se afișează pe toată lățimea ferestrei.
-  async function openSheetInPdfPane(dataUrls) {
+  async function openSheetInPdfPane(dataUrls, marks) {
     if (!window.jspdf || !window.jspdf.jsPDF) {
       showToast(trMsg('⚠ Biblioteca PDF nu e disponibilă')); return false;
     }
@@ -15579,7 +15816,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
       doc.addImage(dataUrls[i], 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
     }
     const buf = doc.output('arraybuffer');
-    loadPdfFromArrayBuffer(buf);
+    loadPdfFromArrayBuffer(buf, marks);
     return true;
   }
 
@@ -15601,14 +15838,15 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
         : 'Fișa PDF deschisă acum are adnotări de-ale tale; se vor pierde dacă o înlocuiești. Continui?')) {
         reply(e.source, { type: 'tabla-cancel' }); return;
       }
-      if (await openSheetInPdfPane(imgs)) {
+      if (await openSheetInPdfPane(imgs, d.marks)) {
         reply(e.source, { type: 'tabla-ok' });
         if (fromFrame) closeCulegere(); else { try { window.focus(); } catch (er) {} }
       }
       return;
     }
     if (d.type === 'culegere-board-pages' && Array.isArray(d.pages)) {
-      const n = await placeSheetPages(d.pages.filter(p => typeof p === 'string' && p.startsWith('data:image/')));
+      const okPages = d.pages.map((p, ix) => ({ p, ix })).filter(o => typeof o.p === 'string' && o.p.startsWith('data:image/'));
+      const n = await placeSheetPages(okPages.map(o => o.p), (Array.isArray(d.marks) ? d.marks : []).map(m => { const k = okPages.findIndex(o => o.ix === m.page); return k < 0 ? null : { ...m, page: k }; }).filter(Boolean));
       if (n > 0) {
         showToast(trMsg(`✓ Fișă trimisă pe tablă (${n} ${n === 1 ? 'pagină' : 'pagini'})`));
         reply(e.source, { type: 'tabla-ok' });
@@ -15619,7 +15857,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
       return;
     }
     if (d.type === 'culegere-pdf' && d.buffer) {
-      loadPdfFromArrayBuffer(d.buffer);
+      loadPdfFromArrayBuffer(d.buffer, d.marks);
       reply(e.source, { type: 'tabla-ok' });
       if (fromFrame) closeCulegere(); else { try { window.focus(); } catch (er) {} }
     }
