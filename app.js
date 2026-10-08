@@ -460,7 +460,7 @@ function redrawPdfPaneInk(name) {
   inkCtx.setTransform(t.scale * DPR, 0, 0, t.scale * DPR, t.offX * DPR, t.offY * DPR);
   clearCanvas(inkCtx, els.draw);
   const pageData = getPdfPageData(pane, pane.pageNum);
-  const drawCtx = makeWidthScaledContext(inkCtx, 1 / (pane.baseScale || pane.finalScale || 1));
+  const drawCtx = makeWidthScaledContext(inkCtx, 1 / (pane.finalScale || pane.baseScale || 1));
   const strokes = pageData.strokes;
   for (let i = 0; i < strokes.length; i++) {
     drawStrokeOn(drawCtx, strokes[i]);
@@ -3088,7 +3088,7 @@ function redrawStrokes(limit) {
   // aceeași grosime "3" ar apărea mai groasă sau mai subțire în funcție de
   // cât de mult ai mărit/micșorat tabla.
   const drawCtx = pane
-    ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+    ? makeWidthScaledContext(ctx, 1 / (pane.finalScale || pane.baseScale || 1))
     : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
   const n = limit !== undefined ? limit : page.strokes.length;
   for (let i = 0; i < n; i++) {
@@ -4981,7 +4981,7 @@ function handlePointerMove(e) {
   const size = tool === 'erase' ? lastEraserSize : lastPenSize;
   const pdfPaneNow = pdfPanes[activeSurface];
   const effSize = pdfPaneNow
-    ? size / (pdfPaneNow.baseScale || pdfPaneNow.finalScale || 1)
+    ? size / (pdfPaneNow.finalScale || pdfPaneNow.baseScale || 1)
     : size / (boardZoom || 1);
   if (tool === 'circle') {
     clearCanvas(ctx, drawC);
@@ -5043,7 +5043,7 @@ function handlePointerMove(e) {
     currentStroke.push(newPoint);
     const pane = pdfPanes[activeSurface];
     const previewCtx = pane
-      ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+      ? makeWidthScaledContext(ctx, 1 / (pane.finalScale || pane.baseScale || 1))
       : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
     previewCtx.save();
     previewCtx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
@@ -5072,7 +5072,7 @@ function handlePointerMove(e) {
     redrawStrokes();
     const pane = pdfPanes[activeSurface];
     const previewCtx = pane
-      ? makeWidthScaledContext(ctx, 1 / (pane.baseScale || pane.finalScale || 1))
+      ? makeWidthScaledContext(ctx, 1 / (pane.finalScale || pane.baseScale || 1))
       : makeWidthScaledContext(ctx, 1 / (boardZoom || 1));
     drawStrokeOn(previewCtx, {points: currentStroke, color, size, erase: tool==='erase'});
   }
@@ -5319,7 +5319,7 @@ function handlePointerUp(e) {
       // ca unghiul să aibă mereu aceeași mărime pe ecran, indiferent de cât
       // de mult e mărită/micșorată suprafața curentă.
       const anglePane = pdfPanes[activeSurface];
-      const angleScaleComp = anglePane ? (anglePane.baseScale || anglePane.finalScale || 1) : (boardZoom || 1);
+      const angleScaleComp = anglePane ? (anglePane.finalScale || anglePane.baseScale || 1) : (boardZoom || 1);
       pushStroke(page, {
         type: 'angle',
         vertex: { x: mathStartPoint.x, y: mathStartPoint.y },
@@ -7018,7 +7018,7 @@ function plotEmptyAxesOnCanvas(strokeColor) {
   if (!page) throw new Error(LANG === 'en' ? 'No active page.' : 'Nu există o pagină activă.');
 
   const fnPane = pdfPanes[activeSurface];
-  const fnScaleComp = fnPane ? (fnPane.baseScale || fnPane.finalScale || 1) : 1;
+  const fnScaleComp = fnPane ? (fnPane.finalScale || fnPane.baseScale || 1) : 1;
 
   function canvasPxToContent(px, py) {
     if (activeSurface === 'board') {
@@ -7145,7 +7145,7 @@ function plotFunctionOnCanvas(rawExpr, xMin, xMax, strokeColor) {
   // eticheta formulei), ca să aibă vizual aceeași mărime ca pe tablă,
   // indiferent de zoom-ul fișei.
   const fnPane = pdfPanes[activeSurface];
-  const fnScaleComp = fnPane ? (fnPane.baseScale || fnPane.finalScale || 1) : 1;
+  const fnScaleComp = fnPane ? (fnPane.finalScale || fnPane.baseScale || 1) : 1;
   // Măsură defensivă: dacă dreptunghiul suprafeței active vine cu
   // dimensiune zero sau nerezonabil de mică (ex. un canvas rămas ascuns
   // dintr-un mod anterior, nesincronizat încă), revenim la dimensiunea
@@ -14647,7 +14647,7 @@ function finalizeProtractorArc(skipUsageRecord) {
   // zoom-ul tablei (boardZoom) — ca eticheta să aibă mereu aceeași mărime
   // pe ecran, indiferent de zoom-ul de la momentul creării.
   const protractorPane = pdfPanes[targetSurf];
-  const protractorScaleComp = protractorPane ? (protractorPane.baseScale || protractorPane.finalScale || 1) : (boardZoom || 1);
+  const protractorScaleComp = protractorPane ? (protractorPane.finalScale || protractorPane.baseScale || 1) : (boardZoom || 1);
   const labelFontSize = 16 / protractorScaleComp;
   pushStroke(page, {
     type: 'text',
@@ -15344,7 +15344,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v336</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v337</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15476,7 +15476,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v336</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v337</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
