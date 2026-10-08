@@ -5801,6 +5801,7 @@ function setTool(t) {
   tool = t;
   const neonCv = document.getElementById('neon-canvas');
   if (neonCv) neonCv.style.pointerEvents = (t === 'neon') ? 'auto' : 'none';
+  if (t === 'neon' && window.__resizeNeonCanvas) window.__resizeNeonCanvas();
   if (t !== 'neon' && window.__finishNeonStroke) window.__finishNeonStroke();
   const allTools = ['btn-pen','btn-neon','btn-line','btn-dashed','btn-arrow','btn-circle','btn-rect','btn-polygon','btn-erase','btn-text','btn-midpoint','btn-select','btn-vspace'];
   allTools.forEach(id => {
@@ -9843,6 +9844,83 @@ document.getElementById('btn-neon').onclick = () => setTool(tool === 'neon' ? 'p
     if (neonCurrent.points.length >= 2) neonStrokes.push(neonCurrent);
     neonCurrent = null;
     ensureNeonTicking();
+  }
+  // Cât timp neonul e activ, canvas-ul acoperă tabla/fișa PDF și ar bloca
+  // rotița și gesturile cu 2 degete — le redirecționăm aici către suprafața
+  // aflată sub cursor (tablă sau fișă PDF).
+  function neonSurfaceAt(x, y) {
+    const prev = neonCanvas.style.pointerEvents;
+    neonCanvas.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(x, y);
+    neonCanvas.style.pointerEvents = prev;
+    const pn = el && el.closest ? el.closest('[id^="pdf-pane-"]') : null;
+    if (pn && pn.id !== 'pdf-pane-divider') {
+      const name = pn.id.replace('pdf-pane-', '');
+      if (pdfPanes[name]) return name;
+    }
+    return 'board';
+  }
+  neonCanvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const surf = neonSurfaceAt(e.clientX, e.clientY);
+    if (surf === 'board') {
+      if (e.ctrlKey) {
+        zoomBoardAtPoint(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+        refreshBoardView();
+      } else {
+        panBoardBy(0, e.deltaY > 0 ? -40 : 40);
+      }
+      return;
+    }
+    const pane = pdfPanes[surf];
+    if (e.ctrlKey) { zoomPaneAtPoint(surf, Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); return; }
+    if (e.shiftKey) pane.panX -= e.deltaY;
+    else { pane.panX -= e.deltaX; pane.panY -= e.deltaY; }
+    updatePdfPanePosition(surf);
+  }, { passive: false });
+  const neonTouches = new Map();
+  let neonPinch = null;
+  neonCanvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    neonTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (neonTouches.size === 2) {
+      neonCurrent = null; // gest cu 2 degete: fără urmă de neon
+      const p = Array.from(neonTouches.values());
+      neonPinch = { dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+                    mid: { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 },
+                    surf: neonSurfaceAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2) };
+    }
+  });
+  neonCanvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'touch' || !neonTouches.has(e.pointerId)) return;
+    neonTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (neonTouches.size !== 2 || !neonPinch) return;
+    const p = Array.from(neonTouches.values());
+    const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+    const factor = neonPinch.dist > 0 ? dist / neonPinch.dist : 1;
+    if (neonPinch.surf === 'board') {
+      zoomBoardAtPoint(factor, mid.x, mid.y);
+      boardPanX += mid.x - neonPinch.mid.x;
+      boardPanY += mid.y - neonPinch.mid.y;
+      refreshBoardView();
+    } else {
+      zoomPaneAtPoint(neonPinch.surf, factor, neonPinch.mid.x, neonPinch.mid.y, mid.x, mid.y);
+    }
+    neonPinch.dist = dist; neonPinch.mid = mid;
+  });
+  function neonTouchEnd(e) {
+    neonTouches.delete(e.pointerId);
+    if (neonTouches.size < 2) neonPinch = null;
+  }
+  neonCanvas.addEventListener('pointerup', neonTouchEnd);
+  neonCanvas.addEventListener('pointercancel', neonTouchEnd);
+  window.__resizeNeonCanvas = resizeNeonCanvas;
+  if (window.ResizeObserver) new ResizeObserver(resizeNeonCanvas).observe(document.getElementById('workspace'));
+  neonCanvas.addEventListener('pointerdown', () => { /* poziția actuală a zonei de lucru */ resizeNeonCanvasIfMoved(); }, true);
+  function resizeNeonCanvasIfMoved() {
+    const r = document.getElementById('workspace').getBoundingClientRect();
+    if (Math.abs(r.left - neonOffsetX) > 0.5 || Math.abs(r.top - neonOffsetY) > 0.5) resizeNeonCanvas();
   }
   neonCanvas.addEventListener('pointerup', finishNeonStroke);
   neonCanvas.addEventListener('pointercancel', finishNeonStroke);
@@ -15344,7 +15422,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v337</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v338</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15476,7 +15554,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v337</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v338</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
