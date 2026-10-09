@@ -6358,7 +6358,38 @@ function syncRulingColorPicker() {
   picker.value = rulingColor || (isColorDark(bgColor) ? '#ffe100' : '#e6007e');
 }
 
+// Dacă există stroke-uri selectate, o culoare aleasă explicit (buton sau
+// selector) le schimbă și culoarea (cu undo). Fără selecție, comportamentul
+// rămâne cel obișnuit: se schimbă doar culoarea implicită de desen.
+function recolorSelectedStrokes(c) {
+  if (!selectedStrokes || selectedStrokes.size === 0) return;
+  const page = getCurrentPage();
+  if (!page) return;
+  const items = [];
+  for (const idx of selectedStrokes) {
+    const st = page.strokes[idx];
+    if (!st || st.erase || st.color === undefined || st.color === c) continue;
+    items.push({ stroke: st, before: { color: st.color }, after: { color: c } });
+  }
+  if (items.length === 0) return;
+  // Trageri succesive în selectorul nativ: unim în aceeași intrare de undo.
+  const top = undoStack[undoStack.length - 1];
+  if (top && top.recolor && top.page === page && top.items.length === items.length &&
+      top.items.every((it, i) => it.stroke === items[i].stroke)) {
+    top.items.forEach(it => { it.after.color = c; });
+  } else {
+    items.forEach(it => { it.stroke.color = c; });
+    undoStack.push({ type: 'resizeStrokeGroup', page, items, recolor: true });
+    redoStack = [];
+  }
+  top && top.recolor && top.items.forEach(it => { it.stroke.color = c; });
+  items.forEach(it => { it.stroke.color = c; });
+  redrawStrokes();
+  drawSelectionHighlights();
+}
+
 function setColorFromButton(c, btnId) {
+  recolorSelectedStrokes(c);
   color = c;
   colorManuallyPicked = true; // alegere explicită — folosită de acum pe ambele suprafețe, nu se mai schimbă automat
   document.getElementById('color-pick').value = c;
@@ -11161,7 +11192,7 @@ presentIntervalInput.addEventListener('change', restartPresentTimerIfRunning);
 document.getElementById('btn-prev-page').addEventListener('click', () => { if (presentTimer) stopPresentMode(); });
 document.getElementById('btn-next-page').addEventListener('click', () => { if (presentTimer) stopPresentMode(); });
 document.getElementById('btn-del-page').onclick = () => { deletePage(); };
-document.getElementById('color-pick').oninput = e => { color = e.target.value; colorManuallyPicked = true; };
+document.getElementById('color-pick').oninput = e => { color = e.target.value; colorManuallyPicked = true; recolorSelectedStrokes(color); };
 document.getElementById('size-minus').onclick = () => setCurrentSize(getCurrentSize() - 1);
 document.getElementById('size-plus').onclick = () => setCurrentSize(getCurrentSize() + 1);
 
@@ -15422,7 +15453,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v338</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v339</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15554,7 +15585,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v338</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v339</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
