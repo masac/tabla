@@ -666,15 +666,23 @@ document.getElementById('axes-numbers-check').addEventListener('change', (e) => 
   function safeLabel(v) {
     return (axesShowNumbers && v !== undefined && !isNaN(v)) ? String(v) : '';
   }
-  st.xTicks.forEach((t) => {
-    const v = (t.value !== undefined) ? t.value
-      : (st.axesOrigin ? Math.round((t.x - st.axesOrigin.x) / PX_PER_CM) : undefined);
-    t.label = safeLabel(v);
+  // Diviziunile sunt generate în ordine (n = 1..10, pe rând + și −), deci
+  // valoarea se poate reface din INDEX — nu din poziție, care se schimbă
+  // când sistemul de axe e scalat (de aceea numerele ieșeau greșite după
+  // scalare sau mutare).
+  st.xTicks.forEach((t, i) => {
+    if (t.value === undefined || isNaN(t.value)) {
+      const n = Math.floor(i / 2) + 1;
+      t.value = (i % 2 === 0) ? n : -n;
+    }
+    t.label = safeLabel(t.value);
   });
-  st.yTicks.forEach((t) => {
-    const v = (t.value !== undefined) ? t.value
-      : (st.axesOrigin ? Math.round((st.axesOrigin.y - t.y) / PX_PER_CM) : undefined);
-    t.label = safeLabel(v);
+  st.yTicks.forEach((t, i) => {
+    if (t.value === undefined || isNaN(t.value)) {
+      const n = Math.floor(i / 2) + 1;
+      t.value = (i % 2 === 0) ? -n : n;
+    }
+    t.label = safeLabel(t.value);
   });
   redrawStrokes();
 });
@@ -2289,7 +2297,28 @@ function handleImagePointerDown(e) {
   
   if (e.target.closest('.img-delete-btn')) return;
   if (e.target.closest('.img-lock-btn')) return;
-  
+
+  // Imaginea selectată stă în containerul din față (ca mânerele ei să fie
+  // atingibile) și ar prinde atingerea chiar dacă dedesubt, deasupra ei
+  // vizual, e un desen — îl lăsăm pe acela să primească evenimentul.
+  if (!e.target.closest('.resizer') && !target.closest('.pdf-pane-images') && !isImageDrag) {
+    let hitStroke = false;
+    try { hitStroke = strokeHasPriorityAt(pos(e).x, pos(e).y, page); } catch (er) {}
+    if (hitStroke) {
+      selectedImages.clear();
+      updateImageSelection();
+      const dc = boardDrawC;
+      dc.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary,
+        clientX: e.clientX, clientY: e.clientY, button: e.button, buttons: e.buttons,
+        shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey,
+        pressure: e.pressure, bubbles: true, cancelable: true
+      }));
+      e.preventDefault();
+      return;
+    }
+  }
+
   if (e.target.closest('.resizer')) {
     if (imgData.locked) { showToast(LANG === 'en' ? '🔒 The image is locked — unlock it first' : '🔒 Imaginea e blocată — deblocheaz-o întâi'); return; }
     isImageResize = true;
@@ -2443,6 +2472,9 @@ document.addEventListener('pointerup', () => {
 // ================================================================
 
 function pushStroke(page, stroke) {
+  // Tot ce se adaugă trebuie să fie deasupra: o imagine rămasă selectată
+  // (deci în stratul din față) ar acoperi noul desen.
+  if (selectedImages.size > 0) { selectedImages.clear(); updateImageSelection(); }
   page.strokes.push(stroke);
   undoStack.push({ type: 'draw', page, stroke });
   redoStack = [];
@@ -3636,6 +3668,8 @@ function computeScaledGeometry(orig, anchorX, anchorY, factor) {
       out.extremes = (orig.extremes || []).map(t => ({ ...sp(t.x, t.y), label: t.label, axis: t.axis }));
       out.roots = (orig.roots || []).map(t => ({ ...sp(t.x, t.y), label: t.label }));
       if (orig.axesOrigin) out.axesOrigin = sp(orig.axesOrigin.x, orig.axesOrigin.y);
+      // Numerele de pe diviziuni se scalează odată cu axele.
+      if (orig.tickFontSize) out.tickFontSize = Math.max(2, orig.tickFontSize * factor);
       break;
     }
     case 'solid3d': {
@@ -3783,6 +3817,20 @@ function findSegmentStrokeAt(x, y, page) {
     if (d < bestDist) { bestDist = d; best = i; }
   }
   return best;
+}
+
+// Desenele (inclusiv corpurile 3D) stau deasupra imaginilor: dacă atingerea
+// cade pe un desen — sau în căsuța unui desen deja selectat — acesta are
+// prioritate față de imaginea de dedesubt.
+function strokeHasPriorityAt(x, y, page) {
+  if (findStrokeAt(x, y, page) >= 0) return true;
+  for (const si of selectedStrokes) {
+    const st = page.strokes[si];
+    if (!st) continue;
+    const bb = getStrokeBoundingBox(st);
+    if (x >= bb.x && x <= bb.x + bb.w && y >= bb.y && y <= bb.y + bb.h) return true;
+  }
+  return false;
 }
 
 function findStrokeAt(x, y, page) {
@@ -4502,7 +4550,7 @@ function handlePointerDown(e) {
     }
     
     const imgAt = getImageAt(page, p.x, p.y);
-    if (imgAt) {
+    if (imgAt && !strokeHasPriorityAt(p.x, p.y, page)) {
       const shiftKey = e.shiftKey || e.metaKey || multiSelectMode;
       const alreadySelectedNoShift = !shiftKey && selectedImages.has(imgAt.id);
       if (!alreadySelectedNoShift) {
@@ -4575,8 +4623,8 @@ function handlePointerDown(e) {
               segments: (s.segments || []).map(seg => seg.map(pt => ({ x: pt.x, y: pt.y }))),
               xAxis: (s.xAxis || []).map(pt => ({ x: pt.x, y: pt.y })),
               yAxis: (s.yAxis || []).map(pt => ({ x: pt.x, y: pt.y })),
-              xTicks: (s.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
-              yTicks: (s.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
+              xTicks: (s.xTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value })),
+              yTicks: (s.yTicks || []).map(t => ({ x: t.x, y: t.y, label: t.label, value: t.value })),
               extremes: (s.extremes || []).map(t => ({ x: t.x, y: t.y, label: t.label, axis: t.axis })),
               roots: (s.roots || []).map(t => ({ x: t.x, y: t.y, label: t.label })),
               axesOrigin: s.axesOrigin ? { x: s.axesOrigin.x, y: s.axesOrigin.y } : null
@@ -12482,19 +12530,36 @@ document.getElementById('btn-pdf').onclick = () => {
   doc.save('whiteboard.pdf');
 };
 
+// Codifică imaginea ca data URL, o singură dată (se memorează). Imaginile
+// complet opace (paginile din Culegere, capturile, PDF-urile) se salvează ca
+// JPEG de calitate înaltă — de câteva ori mai mici decât PNG — iar cele cu
+// transparență rămân PNG. Fără asta, sesiunea cu multe pagini depășea
+// limita de mărime a unui șir de caractere și salvarea eșua.
+function encodeImageForSave(imgData) {
+  if (imgData.dataUrl) return imgData.dataUrl;
+  if (!imgData.img) return undefined;
+  try {
+    const w = imgData.img.naturalWidth || imgData.img.width;
+    const h = imgData.img.naturalHeight || imgData.img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const c2 = canvas.getContext('2d');
+    c2.drawImage(imgData.img, 0, 0);
+    let opaque = true;
+    try {
+      const d = c2.getImageData(0, 0, w, h).data;
+      for (let i = 3; i < d.length; i += 4) { if (d[i] < 255) { opaque = false; break; } }
+    } catch (e) { opaque = false; }
+    const url = opaque ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png');
+    imgData.dataUrl = url;
+    return url;
+  } catch (e) { return undefined; }
+}
+
 async function buildSessionData() {
   const pagesData = await Promise.all(pages.map(async (page) => {
     const imagesData = await Promise.all(page.images.map(async (imgData) => {
-      let dataUrl = imgData.dataUrl;
-      if (!dataUrl && imgData.img) {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = imgData.img.naturalWidth || imgData.img.width;
-          canvas.height = imgData.img.naturalHeight || imgData.img.height;
-          canvas.getContext('2d').drawImage(imgData.img, 0, 0);
-          dataUrl = canvas.toDataURL('image/png');
-        } catch(e) {}
-      }
+      const dataUrl = encodeImageForSave(imgData);
       return {
         id: imgData.id,
         x: imgData.x,
@@ -12541,16 +12606,7 @@ async function buildSessionData() {
     for (const pageNum in pdfPanes.top.pagesData) {
       const pd = pdfPanes.top.pagesData[pageNum];
       const imagesData = await Promise.all((pd.images || []).map(async (imgData) => {
-        let dataUrl = imgData.dataUrl;
-        if (!dataUrl && imgData.img) {
-          try {
-            const canvas = document.createElement('canvas');
-            canvas.width = imgData.img.naturalWidth || imgData.img.width;
-            canvas.height = imgData.img.naturalHeight || imgData.img.height;
-            canvas.getContext('2d').drawImage(imgData.img, 0, 0);
-            dataUrl = canvas.toDataURL('image/png');
-          } catch (e) {}
-        }
+        const dataUrl = encodeImageForSave(imgData);
         return { id: imgData.id, x: imgData.x, y: imgData.y, w: imgData.w, h: imgData.h, locked: !!imgData.locked, dataUrl };
       }));
       pdfPagesData[pageNum] = { strokes: pd.strokes || [], images: imagesData };
@@ -12565,11 +12621,52 @@ async function buildSessionData() {
   return sessionData;
 }
 
+// Serializează sesiunea ca o listă de fragmente JSON (nu un singur șir uriaș),
+// ca să nu depășim limita de lungime a unui șir când sunt multe imagini.
+function sessionToJsonParts(sd) {
+  const parts = [];
+  const pdf = sd.pdf;
+  const rest = Object.assign({}, sd);
+  delete rest.pages; delete rest.pdf;
+  const restJson = JSON.stringify(rest);
+  parts.push(restJson.slice(0, -1) + ',"pages":[');
+  sd.pages.forEach((p, i) => {
+    parts.push((i ? ',' : '') + '{"strokes":' + JSON.stringify(p.strokes) + ',"images":[');
+    (p.images || []).forEach((im, j) => parts.push((j ? ',' : '') + JSON.stringify(im)));
+    parts.push(']}');
+  });
+  parts.push(']');
+  if (pdf) {
+    parts.push(',"pdf":{"base64":"');
+    const b = pdf.base64, CH = 1 << 24;
+    for (let i = 0; i < b.length; i += CH) parts.push(b.slice(i, i + CH));
+    parts.push('","pageNum":' + JSON.stringify(pdf.pageNum) + ',"pagesData":{');
+    let first = true;
+    for (const k in pdf.pagesData) {
+      const pd = pdf.pagesData[k];
+      parts.push((first ? '' : ',') + JSON.stringify(k) + ':{"strokes":' + JSON.stringify(pd.strokes) + ',"images":[');
+      first = false;
+      (pd.images || []).forEach((im, j) => parts.push((j ? ',' : '') + JSON.stringify(im)));
+      parts.push(']}');
+    }
+    parts.push('}}');
+  }
+  parts.push('}');
+  return parts;
+}
+
 async function saveSession() {
-  const sessionData = await buildSessionData();
-  const json = JSON.stringify(sessionData);
-  const ts = new Date().toISOString().slice(0,19).replace('T','_').replace(/:/g,'-');
-  const suggestedName = `whiteboard_${ts}.wbs`;
+  let parts;
+  try {
+    const sessionData = await buildSessionData();
+    parts = sessionToJsonParts(sessionData);
+  } catch (err) {
+    showToast((LANG === 'en' ? '✗ Could not prepare the session: ' : '✗ Nu s-a putut pregăti sesiunea: ') + (err && err.message || err));
+    return;
+  }
+  const _d = new Date(), _p = n => String(n).padStart(2, '0');
+  const ts = `${_d.getFullYear()}-${_p(_d.getMonth()+1)}-${_p(_d.getDate())}_${_p(_d.getHours())}-${_p(_d.getMinutes())}-${_p(_d.getSeconds())}`;
+  const suggestedName = `whiteboard_${ts}.json`;
 
   // Browserele bazate pe Chromium (Chrome, Brave, Edge) suportă alegerea
   // directă a locației și numelui fișierului, printr-o fereastră nativă de
@@ -12580,10 +12677,10 @@ async function saveSession() {
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName,
-        types: [{ description: 'Sesiune tablă', accept: { 'application/json': ['.wbs'] } }]
+        types: [{ description: 'Sesiune tablă', accept: { "application/json": [".json", ".wbs"] } }]
       });
       const writable = await handle.createWritable();
-      await writable.write(json);
+      for (const part of parts) await writable.write(part);
       await writable.close();
       showToast(LANG === 'en' ? '✓ Session saved!' : '✓ Sesiunea a fost salvată!');
       return;
@@ -12597,7 +12694,13 @@ async function saveSession() {
     }
   }
 
-  const blob = new Blob([json], { type: 'application/json' });
+  let blob;
+  try {
+    blob = new Blob(parts, { type: 'application/json' });
+  } catch (err) {
+    showToast((LANG === 'en' ? '✗ Session too large to save: ' : '✗ Sesiunea e prea mare pentru salvare: ') + (err && err.message || err));
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = suggestedName;
@@ -12737,9 +12840,10 @@ function loadSession(file) {
       const data = JSON.parse(e.target.result);
       await restoreSessionData(data);
     } catch(err) {
-      showToast(trMsg('⚠ Fișier invalid sau corupt.'), 4000);
+      showToast(trMsg('⚠ Fișier invalid sau corupt.') + ' (' + (err && err.message || err) + ')', 6000);
     }
   };
+  reader.onerror = () => showToast(trMsg('⚠ Fișier invalid sau corupt.') + ' (citire eșuată / fișier prea mare)', 6000);
   reader.readAsText(file);
 }
 
@@ -13045,7 +13149,7 @@ document.getElementById('pdf-load-session-btn').onclick = () => {
 
 // ====================================================================
 // SESIUNI MULTIPLE SALVATE — spre deosebire de autosalvare (un singur
-// "ultima stare") sau exportul/importul de fișiere .wbs (necesită
+// "ultima stare") sau exportul/importul de fișiere .json (necesită
 // gestionarea manuală a fișierelor), acestea sunt "sloturi" numite,
 // păstrate direct în browser, ușor de văzut și încărcat dintr-o listă.
 // ====================================================================
@@ -15453,7 +15557,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v339</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v346</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15541,7 +15645,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Nou</b> — pornește curat, ca la prima deschidere a aplicației (șterge tot ce e pe tablă, cu confirmare înainte — nu se poate anula după).</li>
   <li><b>Șterge tot</b> — golește pagina curentă.</li>
   <li><b>Exportă PDF</b> — salvează tabla curentă ca document PDF.</li>
-  <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.wbs</code> pe care îl poți relua ulterior. Pe Chrome/Brave/Edge, salvarea îți lasă să alegi exact locul și numele fișierului (fereastra nativă „Salvează ca...").</li>
+  <li><b>Salvează / Încarcă sesiune</b> — salvează progresul într-un fișier <code>.json</code> pe care îl poți relua ulterior. Pe Chrome/Brave/Edge, salvarea îți lasă să alegi exact locul și numele fișierului (fereastra nativă „Salvează ca...").</li>
   <li><b>Indicator de salvare</b> — o mică etichetă discretă, în bara de stare, arată dacă lucrul e salvat automat, se salvează chiar acum, sau a apărut o eroare. Salvarea automată păstrează ultimele 3 copii, prin rotație, ca plasă suplimentară de siguranță.</li>
   <li><b>Captură de ecran</b> (🔲) — alege ce vrei să distribui (ecran/fereastră/filă), apoi trage un dreptunghi peste zona dorită, care se adaugă direct pe tablă ca imagine. Necesită Chrome/Brave/Edge pe calculator — de obicei nu funcționează pe telefon (limitare a platformei mobile, nu a aplicației).</li>
   <li><b>Ceas</b> (🕐) — arată/ascunde ora sistemului, actualizată live, implicit în colțul din stânga-sus. Atinge direct ceasul ca să-l muți în dreapta-sus (poziționat puțin mai jos acolo, ca să nu se suprapună peste butonul de ecran complet) — alegerea se reține pentru data viitoare.</li>
@@ -15558,7 +15662,7 @@ const HELP_CONTENT_HTML = `
 <p>Butonul de calculator (🧮) deschide o fereastră flotantă, care poate fi mutată trăgând de antet. Suportă expresii complete, cu precedența corectă a operațiilor (înmulțirea/împărțirea înaintea adunării/scăderii), constantele π și e, procent (aplicat corect la adunare/scădere, ca procent din operandul anterior) și funcțiile sin/cos/tan/cot (în grade) și radical — apăsate ca prefix matematic normal (ex. „√2+√3", cu paranteza închisă automat la operator sau la egal). Butonul verde „Inserează pe tablă" adaugă calculul curent ca text în centrul zonei vizibile și îl selectează automat, gata de mutat sau redimensionat.</p>
 
 <h4>Sesiuni salvate</h4>
-<p>Pe lângă salvarea/încărcarea unui fișier <code>.wbs</code> de pe calculator (butoanele cu dischetă și folder) și salvarea automată periodică (care păstrează doar ultima stare, pentru cazul unei închideri accidentale), butonul cu listă (📋) deschide o fereastră cu <b>sesiuni multiple, numite</b>, păstrate direct în browser — scrii un nume, apeși „+ Salvează", și rămâne acolo separat de celelalte, oricând poți reveni la ea dintr-o listă, fără să suprascrii nimic. Utilă pentru a păstra mai multe lecții/clase separat, fiecare cu numele ei.</p>
+<p>Pe lângă salvarea/încărcarea unui fișier <code>.json</code> de pe calculator (butoanele cu dischetă și folder) și salvarea automată periodică (care păstrează doar ultima stare, pentru cazul unei închideri accidentale), butonul cu listă (📋) deschide o fereastră cu <b>sesiuni multiple, numite</b>, păstrate direct în browser — scrii un nume, apeși „+ Salvează", și rămâne acolo separat de celelalte, oricând poți reveni la ea dintr-o listă, fără să suprascrii nimic. Utilă pentru a păstra mai multe lecții/clase separat, fiecare cu numele ei.</p>
 `;
 
 const LICENSE_CONTENT_HTML = `
@@ -15585,7 +15689,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v339</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v346</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -15673,7 +15777,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>New</b> — starts fresh, as if you just opened the app (clears everything on the board, with a confirmation first — can't be undone afterward).</li>
   <li><b>Clear all</b> — clears the current page.</li>
   <li><b>Export PDF</b> — saves the current board as a PDF document.</li>
-  <li><b>Save / Load session</b> — saves your progress to a <code>.wbs</code> file you can resume later. On Chrome/Brave/Edge, saving lets you pick the exact file location and name (native "Save As" window).</li>
+  <li><b>Save / Load session</b> — saves your progress to a <code>.json</code> file you can resume later. On Chrome/Brave/Edge, saving lets you pick the exact file location and name (native "Save As" window).</li>
   <li><b>Save indicator</b> — a small, discreet label in the status bar shows whether your work is saved, currently saving, or an error occurred. Auto-save keeps the last 3 copies, rotating between them, as an extra safety net.</li>
   <li><b>Screen capture</b> (🔲) — pick what to share (screen/window/tab), then drag a rectangle over the area you want, which gets added directly to the board as an image. Requires Chrome/Brave/Edge on a computer — usually doesn't work on phones (a mobile platform limitation, not the app's).</li>
   <li><b>Clock</b> (🕐) — shows/hides the system time, updated live, by default in the top-left corner. Tap the clock itself to move it to the top-right (positioned a bit lower there, to clear the fullscreen button) — your choice is remembered for next time.</li>
@@ -15690,7 +15794,7 @@ const HELP_CONTENT_HTML_EN = `
 <p>The calculator button (🧮) opens a floating window, which can be moved by dragging its header. It supports full expressions with correct operator precedence (multiplication/division before addition/subtraction), the constants π and e, percent (correctly applied for addition/subtraction, as a percentage of the previous operand), and the sin/cos/tan/cot (in degrees) and square root functions — pressed as a normal math prefix (e.g. "√2+√3", with the parenthesis closing automatically at the next operator or at equals). The green "Insert on board" button adds the current calculation as text in the center of the visible area and selects it automatically, ready to move or resize.</p>
 
 <h4>Saved sessions</h4>
-<p>Besides saving/loading a <code>.wbs</code> file to/from your computer (the floppy disk and folder buttons) and the periodic autosave (which only keeps the latest state, for an accidental close), the list button (📋) opens a window with <b>multiple, named sessions</b> kept right in the browser — type a name, tap "+ Save", and it stays there separately from the others; you can come back to it anytime from a list, without overwriting anything. Handy for keeping several lessons/classes separate, each under its own name.</p>
+<p>Besides saving/loading a <code>.json</code> file to/from your computer (the floppy disk and folder buttons) and the periodic autosave (which only keeps the latest state, for an accidental close), the list button (📋) opens a window with <b>multiple, named sessions</b> kept right in the browser — type a name, tap "+ Save", and it stays there separately from the others; you can come back to it anytime from a list, without overwriting anything. Handy for keeping several lessons/classes separate, each under its own name.</p>
 `;
 
 const LICENSE_CONTENT_HTML_EN = `
