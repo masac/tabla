@@ -1064,10 +1064,14 @@ input:focus-visible {
         <button class="tool" id="btn-math-menu" title="Instrumente matematice interactive"><i class="ti ti-math-symbols"></i> Math</button>
         <div id="math-menu-popup" style="display:none; position:fixed; background:#1e1e22; border-radius:10px; padding:6px; box-shadow:0 6px 24px rgba(0,0,0,0.4); z-index:500; min-width:220px;">
           <button class="tool" id="btn-quad-defs" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-math-symbols"></i> Paralelogram interactiv</button>
-          <button class="tool" id="btn-angle-types" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-angle"></i> Tipuri de unghiuri</button>
+          <button class="tool" id="btn-angle-types" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-angle"></i> Tipuri de unghiuri + joc</button>
           <button class="tool" id="btn-parallel-lines" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="7" x2="22" y2="7"/><line x1="2" y1="17" x2="22" y2="17"/><line x1="7" y1="2" x2="17" y2="22"/></svg> Drepte paralele tăiate de o secantă</button>
           <button class="tool" id="btn-mult-game" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-multiplier-1x"></i> Tabla înmulțirii (joc)</button>
           <button class="tool" id="btn-tri-lines" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-triangle"></i> Linii importante în triunghi</button>
+                    <button class="tool" id="btn-hangman" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-abc"></i> Hangman (joc)</button>
+          <button class="tool" id="btn-hanoi" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-stack-3"></i> Turnurile din Hanoi (joc)</button>
+          <button class="tool" id="btn-tangram" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-puzzle"></i> Tangram (joc)</button>
+          <button class="tool" id="btn-miliardar" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-coin"></i> Vrei să fii miliardar? (joc)</button>
         </div>
       </div>
       <button class="tool" id="btn-culegere" title="Culegere de matematică — alege exerciții, generează fișe și trimite-le pe tablă"><i class="ti ti-books"></i> Culegere</button>
@@ -1237,11 +1241,12 @@ input:focus-visible {
 </div>
 
 <div id="angle-types-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(560px, 94vw); box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(600px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;">
     <div style="display:flex; align-items:center; justify-content:space-between;">
-      <span id="angle-type-name" style="color:#fff; font-size:17px; font-weight:700;">Ascuțit</span>
+      <span style="display:flex; gap:6px; align-items:center;"><button id="at-tab-explore" class="tool" style="color:#fff; font-weight:700;">Explorează</button><button id="at-tab-game" class="tool" style="color:#fff; font-weight:700;">🎮 Joc</button></span>
       <button id="angle-types-close" class="tool" style="color:#fff;">✕</button>
     </div>
+    <div id="at-explore" style="display:flex; flex-direction:column; gap:10px;"><div id="angle-type-name" style="color:#fff; font-size:17px; font-weight:700; text-align:center;">Ascuțit</div>
     <svg id="angle-svg" viewBox="0 0 400 260" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:none;">
       <line id="angle-fixed-ray" stroke="#4da6ff" stroke-width="2.5"/>
       <line id="angle-moving-ray" stroke="#4da6ff" stroke-width="2.5"/>
@@ -1258,7 +1263,21 @@ input:focus-visible {
       <button id="angle-set-straight" class="tool" style="flex:1; min-width:80px;">Alungit (180°)</button>
     </div>
     <div style="color:#999; font-size:12px; text-align:center;">Trage punctul portocaliu ca să schimbi unghiul — tipul se actualizează live.</div>
+    </div>
+  <div id="at-game" style="display:none; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <label id="ag-level-label">Tipuri:</label>
+      <select id="ag-level" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <span style="flex:1"></span>
+      <span id="ag-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <div id="ag-question" style="text-align:center; font-size:20px; font-weight:800;"></div>
+    <svg id="ag-svg" viewBox="0 0 400 270" style="width:100%; height:auto; max-height:46vh; background:#111; border-radius:8px;"></svg>
+    <div id="ag-options" style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;"></div>
+    <div id="ag-msg" style="text-align:center; min-height:40px; font-size:14px; color:#ccc;"></div>
+    <div style="display:flex; justify-content:center;"><button id="ag-next" class="tool" style="display:none;">Următorul ›</button></div>
   </div>
+</div>
 </div>
 
 <div id="mult-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
@@ -1296,6 +1315,99 @@ input:focus-visible {
     <svg id="tri-svg" viewBox="-50 -12 520 330" style="width:100%; height:auto; max-height:58vh; background:#111; border-radius:8px; touch-action:manipulation;"></svg>
     <div id="tri-msg" style="text-align:center; min-height:40px; font-size:14px; color:#ccc;"></div>
     <div style="display:flex; justify-content:center;"><button id="tri-next" class="tool" style="display:none;">Următoarea ›</button></div>
+  </div>
+</div>
+
+<div id="hm-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(640px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="hm-title" style="font-size:17px; font-weight:700;">Hangman</span>
+      <button id="hm-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <select id="hm-topic" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <label id="hm-level-label">Nivel:</label>
+      <select id="hm-level" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <button id="hm-hint" class="tool" style="font-size:13px;">💡 Indiciu (-1 viață)</button>
+      <span style="flex:1"></span>
+      <span id="hm-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:center;">
+      <svg id="hm-svg" viewBox="0 0 160 190" style="width:150px; height:auto; background:#111; border-radius:8px; flex:none;"></svg>
+      <div style="flex:1; min-width:240px; display:flex; flex-direction:column; gap:8px; align-items:center;">
+        <div id="hm-cat" style="color:#aaa; font-size:13px;"></div>
+        <div id="hm-word" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; min-height:44px;"></div>
+        <div id="hm-lives" style="font-size:18px; letter-spacing:2px;"></div>
+      </div>
+    </div>
+    <div id="hm-keys" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;"></div>
+    <div id="hm-def" style="text-align:center; min-height:44px; font-size:15px; color:#ddd;"></div>
+    <div style="display:flex; justify-content:center;"><button id="hm-next" class="tool" style="display:none;">Următorul cuvânt ›</button></div>
+  </div>
+</div>
+
+<div id="hanoi-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(640px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="hanoi-title" style="font-size:17px; font-weight:700;">Turnurile din Hanoi</span>
+      <button id="hanoi-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <label id="hanoi-n-label">Discuri:</label>
+      <select id="hanoi-n" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <button id="hanoi-reset" class="tool" style="font-size:13px;">↺ Reia</button>
+      <span style="flex:1"></span>
+      <span id="hanoi-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <svg id="hanoi-svg" viewBox="0 0 420 200" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:manipulation;"></svg>
+    <div id="hanoi-msg" style="text-align:center; min-height:40px; font-size:15px; color:#ddd;"></div>
+  </div>
+</div>
+
+<div id="tg-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(700px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="tg-title" style="font-size:17px; font-weight:700;">Tangram</span>
+      <button id="tg-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <select id="tg-fig" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <button id="tg-flip" class="tool" style="font-size:13px;">⇋ Întoarce</button>
+      <button id="tg-hint" class="tool" style="font-size:13px;">💡 Indiciu</button>
+      <button id="tg-new" class="tool" style="font-size:13px;">↺ Reia</button>
+      <span style="flex:1"></span>
+      <span id="tg-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <svg id="tg-svg" viewBox="0 0 640 400" style="width:100%; height:auto; background:#111; border-radius:8px; touch-action:none; user-select:none;"></svg>
+    <div id="tg-help" style="font-size:13px; color:#aaa;"></div>
+    <div id="tg-msg" style="text-align:center; min-height:28px; font-size:16px;"></div>
+  </div>
+</div>
+
+<div id="ml-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.65); align-items:center; justify-content:center;">
+  <div style="background:radial-gradient(circle at 50% 0%, #1d2a7a, #0a0f33 70%); border-radius:12px; padding:16px; width:min(720px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.5); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="ml-title" style="font-size:18px; font-weight:800; color:#f59e0b;">Vrei să fii miliardar?</span>
+      <button id="ml-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <label id="ml-level-label">Nivel:</label>
+      <select id="ml-level" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <select id="ml-set" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <span style="flex:1"></span>
+      <button id="ml-f" class="tool" style="font-size:13px; border:1px solid #3b4a9c; border-radius:16px;">50:50</button>
+      <button id="ml-a" class="tool" style="font-size:13px; border:1px solid #3b4a9c; border-radius:16px;">👥</button>
+      <button id="ml-c" class="tool" style="font-size:13px; border:1px solid #3b4a9c; border-radius:16px;">📞</button>
+    </div>
+    <div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+      <div style="flex:1; min-width:260px; display:flex; flex-direction:column; gap:10px;">
+        <div id="ml-q" style="padding:14px; border:1px solid #3b4a9c; border-radius:14px; background:linear-gradient(#1a2466,#0d1445); font-size:18px; text-align:center; min-height:56px;"></div>
+        <div id="ml-opts" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;"></div>
+        <div id="ml-msg" style="text-align:center; min-height:70px; font-size:14px; color:#dbe4ff;"></div>
+        <div style="display:flex; justify-content:center;"><button id="ml-take" class="tool" style="display:none; font-size:13px;">Mă retrag</button></div>
+      </div>
+      <div id="ml-ladder" style="display:flex; flex-direction:column; gap:1px; min-width:120px;"></div>
+    </div>
   </div>
 </div>
 
