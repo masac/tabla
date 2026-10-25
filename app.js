@@ -11125,6 +11125,396 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   });
 })();
 
+// Jocuri din meniul "Math": tabla înmulțirii (atinge rezultatul corect) și
+// liniile importante în triunghi (recunoaște linia mijlocie, mediana etc.).
+(function initMathGames() {
+  const EN = () => LANG === 'en';
+  const T = (ro, en) => EN() ? en : ro;
+  const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const $ = (id) => document.getElementById(id);
+
+  /* ---------------- Tabla înmulțirii ---------------- */
+  (function () {
+    const backdrop = $('mult-backdrop'), field = $('mult-field'), qEl = $('mult-question'),
+      stats = $('mult-stats'), msg = $('mult-msg'), sel = $('mult-table');
+    const ROUND = 10, COLORS = ['#4da6ff', '#6cc28f', '#e0ae52', '#c792ea', '#ff8a80', '#4dd0e1'];
+    let q = null, n = 0, ok = 0, streak = 0, best = 0, locked = false, missed = [], pool = [];
+
+    function fillSelect() {
+      const cur = sel.value || 'mix';
+      sel.innerHTML = `<option value="mix">${T('Toate (2–9)', 'All (2–9)')}</option><option value="mix10">${T('Toate (2–10)', 'All (2–10)')}</option>` +
+        Array.from({ length: 9 }, (_, i) => `<option value="${i + 2}">${T('Tabla lui ', 'Table of ')}${i + 2}</option>`).join('');
+      sel.value = cur;
+      $('mult-table-label').textContent = T('Tabla:', 'Table:');
+      $('mult-title').textContent = T('Tabla înmulțirii — atinge rezultatul corect', 'Times tables — tap the correct result');
+    }
+    function factors() {
+      const v = sel.value;
+      if (v === 'mix') return [rnd(2, 9), rnd(2, 9)];
+      if (v === 'mix10') return [rnd(2, 10), rnd(2, 10)];
+      const a = +v, b = rnd(1, 10);
+      return Math.random() < 0.5 ? [a, b] : [b, a];
+    }
+    function pickQuestion() {
+      // exercițiile greșite revin în runda următoare
+      if (pool.length) return pool.shift();
+      return factors();
+    }
+    function bubbles(a, b) {
+      // 4 variante, una corectă; distractorii sunt rezultate plauzibile
+      const right = a * b, cand = new Set();
+      [[a + 1, b], [a - 1, b], [a, b + 1], [a, b - 1]].forEach(([x, y]) => { if (x > 0 && y > 0) cand.add(x * y); });
+      [right + 10, right - 10, right + a, right - a, right + b, right - b].forEach(v => { if (v > 0) cand.add(v); });
+      const sw = +String(right).split('').reverse().join(''); if (sw !== right && sw > 0) cand.add(sw);
+      cand.delete(right);
+      const opts = shuffle([...cand]).slice(0, 3);
+      let guard = 0;
+      while (opts.length < 3 && guard++ < 100) { const v = rnd(2, 10) * rnd(2, 10); if (v !== right && !opts.includes(v)) opts.push(v); }
+      return shuffle([right, ...opts]);
+    }
+    function statsText() { return T(`Întrebarea ${Math.min(n + 1, ROUND)}/${ROUND}; corecte: ${ok}; serie: ${streak}`, `Question ${Math.min(n + 1, ROUND)}/${ROUND}; correct: ${ok}; streak: ${streak}`); }
+    function next() {
+      if (n >= ROUND) return finish();
+      locked = false; msg.textContent = '';
+      const [a, b] = pickQuestion(); q = { a, b };
+      qEl.textContent = `${a} × ${b} = ?`;
+      field.innerHTML = '';
+      bubbles(a, b).forEach((v, i) => {
+        const btn = document.createElement('button');
+        btn.dataset.v = v;
+        const c = COLORS[i % COLORS.length];
+        btn.innerHTML = `<span style="color:${c}; margin-right:10px;">${'ABCD'[i]}:</span>${v}`;
+        btn.style.cssText = `border-radius:999px; padding:16px 10px; border:3px solid ${c}; background:${c}18; color:#fff; font-size:26px; font-weight:800; cursor:pointer; touch-action:manipulation;`;
+        btn.onclick = () => answer(btn, v);
+        field.appendChild(btn);
+      });
+      stats.textContent = statsText();
+    }
+    function answer(btn, v) {
+      if (locked) return; locked = true;
+      const right = q.a * q.b;
+      n++;
+      if (v === right) {
+        ok++; streak++; best = Math.max(best, streak);
+        btn.style.background = '#2e8b57'; btn.style.borderColor = '#7be3a3';
+        msg.textContent = T('Corect! ✓', 'Correct! ✓');
+        setTimeout(next, 650);
+      } else {
+        streak = 0; missed.push([q.a, q.b]);
+        btn.style.background = '#b53a2e'; btn.style.borderColor = '#ff8a80';
+        [...field.children].forEach(c => { if (+c.dataset.v === right) { c.style.background = '#2e8b57'; c.style.borderColor = '#7be3a3'; } });
+        msg.textContent = `${q.a} × ${q.b} = ${right}`;
+        setTimeout(next, 1700);
+      }
+      stats.textContent = statsText();
+    }
+    function finish() {
+      locked = true; stats.textContent = ''; msg.textContent = '';
+      const uniq = [...new Set(missed.map(m => m.join('×')))];
+      qEl.textContent = T(`Rezultat: ${ok}/${ROUND}`, `Score: ${ok}/${ROUND}`);
+      field.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:14px; font-size:15px;">
+        ${ok === ROUND ? T('Perfect! 🎉', 'Perfect! 🎉') : ok >= 8 ? T('Foarte bine! 👏', 'Very good! 👏') : T('Mai exersăm puțin. 💪', 'Let\'s practice a bit more. 💪')}
+        <div style="margin-top:6px; color:#aaa;">${T('Cea mai lungă serie', 'Longest streak')}: ${best}</div>
+        ${uniq.length ? `<div style="margin-top:8px;">${T('De repetat', 'To review')}: <b>${uniq.map(u => u.replace('×', ' × ') + ' = ' + u.split('×').reduce((x, y) => x * y)).join('; ')}</b></div>` : ''}
+        <button id="mult-again" class="tool" style="margin:12px auto 0; display:block;">${T('Din nou', 'Play again')}</button></div>`;
+      $('mult-again').onclick = () => start(true);
+    }
+    function start(keepMissed) {
+      pool = keepMissed ? [...new Set(missed.map(m => m.join('x')))].slice(0, 5).map(s => s.split('x').map(Number)) : [];
+      n = 0; ok = 0; streak = 0; best = 0; missed = []; next();
+    }
+    if (!document.getElementById('mult-style')) {
+      const st = document.createElement('style'); st.id = 'mult-style';
+      st.textContent = '@keyframes multFloat{from{transform:translateY(-4px)}to{transform:translateY(5px)}}';
+      document.head.appendChild(st);
+    }
+    $('btn-mult-game').onclick = () => { fillSelect(); backdrop.style.display = 'flex'; start(false); };
+    $('mult-close').onclick = () => { backdrop.style.display = 'none'; };
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+    sel.onchange = () => start(false);
+  })();
+
+  /* ---------------- Liniile importante în triunghi ---------------- */
+  (function () {
+    const backdrop = $('tri-backdrop'), svg = $('tri-svg'), qEl = $('tri-question'),
+      stats = $('tri-stats'), msg = $('tri-msg'), sel = $('tri-kind'), nextBtn = $('tri-next');
+    const ROUND = 10, NS = 'http://www.w3.org/2000/svg';
+    const COLORS = ['#3b82f6', '#facc15', '#a855f7', '#fb923c', '#f472b6', '#e5e7eb'];   // albastru, galben, violet, portocaliu, roz (fără roșu/verde: rezervate pentru greșit/corect)
+    const COLOR_NAMES = [['albastră', 'blue'], ['galbenă', 'yellow'], ['violet', 'purple'], ['portocalie', 'orange'], ['roz', 'pink'], ['albă', 'white']];
+    const KINDS = ['mid', 'med', 'alt', 'bis', 'mdt'];
+    const NAME = {
+      mid: ['linia mijlocie', 'the midsegment'], med: ['mediana', 'the median'], alt: ['înălțimea', 'the altitude'],
+      bis: ['bisectoarea', 'the angle bisector'], mdt: ['mediatoarea unei laturi', 'the perpendicular bisector of a side']
+    };
+    const EXPL = {
+      mid: ['Linia mijlocie unește mijloacele a două laturi; este paralelă cu a treia latură și are jumătate din lungimea ei.', 'The midsegment joins the midpoints of two sides; it is parallel to the third side and half as long.'],
+      med: ['Mediana unește un vârf cu mijlocul laturii opuse.', 'A median joins a vertex to the midpoint of the opposite side.'],
+      alt: ['Înălțimea pornește dintr-un vârf și cade perpendicular pe latura opusă (formează unghi de 90°).', 'An altitude starts at a vertex and meets the opposite side at a right angle (90°).'],
+      bis: ['Bisectoarea pornește dintr-un vârf și împarte unghiul în două unghiuri egale.', 'An angle bisector starts at a vertex and splits the angle into two equal angles.'],
+      mdt: ['Mediatoarea trece prin mijlocul unei laturi și este perpendiculară pe ea.', 'A perpendicular bisector passes through the midpoint of a side and is perpendicular to it.'],
+      par: ['Acest segment este paralel cu o latură, dar nu unește mijloacele laturilor.', 'This segment is parallel to a side, but it does not join the midpoints.'],
+      skew: ['Acest segment pornește din mijlocul unei laturi, dar nu ajunge în mijlocul altei laturi și nu e vârf–mijloc.', 'This segment starts at a midpoint, but it does not end at another midpoint.']
+    };
+    let tri = null, segs = [], target = 'mid', n = 0, ok = 0, locked = false, kind = 'mid';
+
+    const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y }), add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+    const mul = (a, k) => ({ x: a.x * k, y: a.y * k }), dot = (a, b) => a.x * b.x + a.y * b.y;
+    const len = (a) => Math.hypot(a.x, a.y), mid = (a, b) => mul(add(a, b), 0.5);
+    const lerp = (a, b, t) => add(a, mul(sub(b, a), t));
+    function angleAt(P, Q, R) { const u = sub(Q, P), v = sub(R, P); return Math.acos(dot(u, v) / (len(u) * len(v))) * 180 / Math.PI; }
+    function distPS(p, a, b) { const ab = sub(b, a); let t = dot(sub(p, a), ab) / dot(ab, ab); t = Math.max(0, Math.min(1, t)); return len(sub(p, add(a, mul(ab, t)))); }
+    function foot(P, A, B) { const ab = sub(B, A); return add(A, mul(ab, dot(sub(P, A), ab) / dot(ab, ab))); }
+    // intersecția dreptei (p, d) cu segmentul [A,B]; returnează punctul sau null
+    function hitSeg(p, d, A, B) {
+      const e = sub(B, A), den = d.x * e.y - d.y * e.x; if (Math.abs(den) < 1e-9) return null;
+      const w = sub(A, p), t = (w.x * e.y - w.y * e.x) / den, s = (w.x * d.y - w.y * d.x) / den;
+      return (s >= -1e-9 && s <= 1 + 1e-9) ? { pt: add(p, mul(d, t)), t } : null;
+    }
+    function newTriangle() {
+      for (let k = 0; k < 400; k++) {
+        const P = [0, 1, 2].map(() => ({ x: rnd(34, 386), y: rnd(34, 262) }));
+        const ang = [angleAt(P[0], P[1], P[2]), angleAt(P[1], P[0], P[2]), angleAt(P[2], P[0], P[1])];
+        const sides = [len(sub(P[1], P[2])), len(sub(P[0], P[2])), len(sub(P[0], P[1]))];
+        if (Math.min(...ang) < 38 || Math.max(...ang) > 80) continue;       // triunghi ascuțitunghic, nu prea turtit
+        if (Math.min(...sides) < 165) continue;
+        const so = [...sides].sort((a, b) => a - b); if (so[1] - so[0] < 18 || so[2] - so[1] < 18) continue; // oarecare, nu isoscel
+        return P;
+      }
+      return [{ x: 40, y: 262 }, { x: 384, y: 240 }, { x: 170, y: 36 }];
+    }
+    function build(type, P, v, side) {
+      // v = vârful ales (0..2); side = latura opusă (perechea celorlalte două)
+      const o = [0, 1, 2].filter(i => i !== v), A = P[v], B = P[o[0]], C = P[o[1]];
+      const r = build0(type, A, B, C);
+      if (r) { r.A = A; r.B = B; r.C = C; r.vn = 'ABC'[v]; r.nb = 'ABC'[o[0]]; r.nc = 'ABC'[o[1]]; }
+      return r;
+    }
+    function build0(type, A, B, C) {
+      switch (type) {
+        case 'mid': return { type, a: mid(A, B), b: mid(A, C) };
+        case 'med': return { type, a: A, b: mid(B, C) };
+        case 'alt': return { type, a: A, b: foot(A, B, C) };
+        case 'bis': { const t = len(sub(B, A)) / (len(sub(B, A)) + len(sub(C, A))); return { type, a: A, b: lerp(B, C, t) }; }
+        case 'mdt': { const M = mid(B, C), d = { x: -(C.y - B.y), y: C.x - B.x }; // perpendiculară în M, tăiată de laturile AB / AC
+          let best = null;
+          [[A, B], [A, C]].forEach(([X, Y]) => { const h = hitSeg(M, d, X, Y); if (h && (!best || Math.abs(h.t) < Math.abs(best.t))) best = h; });
+          const h2 = [[A, B], [A, C]].map(([X, Y]) => hitSeg(M, mul(d, -1), X, Y)).filter(Boolean)[0];
+          const e = h2 || best; return e ? { type, a: M, b: e.pt } : null; }
+        case 'par': { const t = [1 / 3, 2 / 3][rnd(0, 1)]; return { type, a: lerp(A, B, t), b: lerp(A, C, t) }; }
+        case 'skew': { const t = [0.28, 0.72][rnd(0, 1)]; return { type, a: mid(A, B), b: lerp(A, C, t) }; }
+      }
+      return null;
+    }
+    function makeSegments() {
+      const kinds = kind === 'mix' ? KINDS : [kind];
+      target = kinds[rnd(0, kinds.length - 1)];
+      for (let tries = 0; tries < 300; tries++) {
+        const P = newTriangle();
+        const decoyTypes = shuffle(['mid', 'med', 'alt', 'bis', 'mdt', 'par', 'skew'].filter(t => t !== target)).slice(0, 4);
+        const all = [target, ...decoyTypes].map(t => build(t, P, rnd(0, 2)));
+        if (all.some(s => !s)) continue;
+        if (all.some(s => len(sub(s.a, s.b)) < 45)) continue;
+        let bad = false;
+        for (let i = 0; i < all.length && !bad; i++) for (let j = i + 1; j < all.length; j++) {
+          const A = all[i], B = all[j];
+          if ((distPS(B.a, A.a, A.b) < 9 && distPS(B.b, A.a, A.b) < 9) || (distPS(A.a, B.a, B.b) < 9 && distPS(A.b, B.a, B.b) < 9)) { bad = true; break; }
+          if (len(sub(A.a, B.a)) < 12 && len(sub(A.b, B.b)) < 12) { bad = true; break; }
+          // segmente aproape paralele și foarte apropiate se confundă între ele: le respingem
+          const ang = (S) => Math.atan2(S.b.y - S.a.y, S.b.x - S.a.x), dA = Math.abs(((ang(A) - ang(B)) * 180 / Math.PI) % 180);
+          if (Math.min(dA, 180 - dA) < 12 && (distPS(mid(A.a, A.b), B.a, B.b) < 16 || distPS(mid(B.a, B.b), A.a, A.b) < 16)) { bad = true; break; }
+          // două segmente care pornesc din același punct, cu unghi mic între ele
+          if ((len(sub(A.a, B.a)) < 6 || len(sub(A.a, B.b)) < 6 || len(sub(A.b, B.a)) < 6 || len(sub(A.b, B.b)) < 6) && Math.min(dA, 180 - dA) < 14) { bad = true; break; }
+        }
+        if (bad) continue;
+        tri = P; return shuffle(all);
+      }
+      tri = newTriangle(); return [build(target, tri, 0), build('med', tri, 1)];
+    }
+    const el = (name, attrs) => { const e = document.createElementNS(NS, name); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
+    function draw() {
+      svg.innerHTML = '';
+      svg.appendChild(el('polygon', { points: tri.map(p => `${p.x},${p.y}`).join(' '), fill: 'rgba(255,255,255,0.05)', stroke: '#fff', 'stroke-width': 2.5, 'stroke-linejoin': 'round' }));
+      ['A', 'B', 'C'].forEach((L, i) => {
+        const c = { x: (tri[0].x + tri[1].x + tri[2].x) / 3, y: (tri[0].y + tri[1].y + tri[2].y) / 3 };
+        const d = sub(tri[i], c), k = 16 / len(d), t = el('text', { x: tri[i].x + d.x * k - 5, y: tri[i].y + d.y * k + 5, fill: '#fff', 'font-size': 16, 'font-weight': 700 });
+        t.textContent = L; svg.appendChild(t);
+      });
+      drawColorPicker();
+      segs.forEach((s, i) => {
+        s.col = COLORS[i % COLORS.length];
+        s.line = el('line', { x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y, stroke: s.col, 'stroke-width': 3.5, 'stroke-linecap': 'round' });
+        svg.appendChild(s.line);
+        [s.a, s.b].forEach(p => svg.appendChild(el('circle', { cx: p.x, cy: p.y, r: 3.5, fill: s.col })));
+      });
+    }
+    // „Mediana are culoarea …” — alegere prin culoare, ca alternativă la atingerea segmentului
+    function drawColorPicker() {
+      const box = $('tri-colors'); box.innerHTML = '';
+      const lab = document.createElement('span');
+      lab.textContent = EN() ? `${NAME[target][1].replace(/^the /, '').replace(/^./, c => c.toUpperCase())} has the color` : `${NAME[target][0].replace(/ unei laturi/, '').replace(/^./, c => c.toUpperCase())} are culoarea`;
+      box.appendChild(lab);
+      segs.forEach((s, i) => {
+        const b = document.createElement('button'); b.className = 'tool'; b.dataset.col = i;
+        b.style.cssText = `display:inline-flex; align-items:center; gap:6px; border:2px solid ${COLORS[i % COLORS.length]}; border-radius:999px; padding:5px 10px; color:#fff;`;
+        b.innerHTML = `<span style="width:18px; height:18px; border-radius:50%; background:${COLORS[i % COLORS.length]}; display:inline-block; border:1px solid #fff8;"></span>${T(COLOR_NAMES[i % 6][0], COLOR_NAMES[i % 6][1])}`;
+        b.onclick = () => pick(s);
+        s.btn = b;
+        box.appendChild(b);
+      });
+    }
+    // evidențiere fără a schimba culoarea segmentului: un halo verde (corect) / roșu (greșit) în spatele lui
+    function mark(s, color) {
+      const h = el('line', { x1: s.a.x, y1: s.a.y, x2: s.b.x, y2: s.b.y, stroke: color, 'stroke-width': 13, 'stroke-linecap': 'round', opacity: 0.85 });
+      svg.insertBefore(h, s.line);
+      s.btn && (s.btn.style.boxShadow = `0 0 0 3px ${color}`);
+    }
+    // semne de egalitate / unghi drept pe răspunsul corect
+    function unit(v) { const l = len(v); return { x: v.x / l, y: v.y / l }; }
+    function arcPath(V, p, q, r) {
+      const u = unit(sub(p, V)), w = unit(sub(q, V)), cr = u.x * w.y - u.y * w.x;
+      const a = add(V, mul(u, r)), b = add(V, mul(w, r));
+      return `M${a.x},${a.y} A${r},${r} 0 0 ${cr > 0 ? 1 : 0} ${b.x},${b.y}`;
+    }
+    function tickAt(M, dirv, color) {
+      const n = unit({ x: -dirv.y, y: dirv.x }), p = add(M, mul(n, 8)), q = add(M, mul(n, -8));
+      svg.appendChild(el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color, 'stroke-width': 3, 'stroke-linecap': 'round' }));
+    }
+    function rightSquare(V, d1, d2, color) {
+      const u = unit(d1), w = unit(d2), k = 14, p1 = add(V, mul(u, k)), p2 = add(p1, mul(w, k)), p3 = add(V, mul(w, k));
+      svg.appendChild(el('polyline', { points: `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y}`, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'miter' }));
+    }
+    const CM = 38;   // 1 cm = 38 unități de desen
+    const fmt = (v) => v.toFixed(1).replace('.', EN() ? '.' : ',');
+    const cm = (a, b) => len(sub(a, b)) / CM;
+    function label(p, text, away, col) {
+      const c = { x: (tri[0].x + tri[1].x + tri[2].x) / 3, y: (tri[0].y + tri[1].y + tri[2].y) / 3 };
+      const d = away || sub(p, c), k = 17 / (len(d) || 1), q = add(p, mul(d, k));
+      const t = el('text', { x: q.x, y: q.y + 4, 'text-anchor': 'middle', fill: col || '#fff', 'font-size': 13, 'font-weight': 700, 'paint-order': 'stroke', stroke: '#111', 'stroke-width': 3.5 });
+      t.textContent = text; svg.appendChild(t);
+    }
+    // cotă ca pe schița cadastrală: din capete pleacă două liniuțe perpendiculare, iar între ele o săgeată dublă cu lungimea
+    function dim(p, q, text) {
+      const c = { x: (tri[0].x + tri[1].x + tri[2].x) / 3, y: (tri[0].y + tri[1].y + tri[2].y) / 3 };
+      const u = unit(sub(q, p));
+      let n = { x: -u.y, y: u.x };
+      if (dot(n, sub(mid(p, q), c)) < 0) n = mul(n, -1);
+      const off = 24, p2 = add(p, mul(n, off)), q2 = add(q, mul(n, off)), g = '#ffd866';
+      const ln = (a, b, w) => svg.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: g, 'stroke-width': w, 'stroke-linecap': 'round' }));
+      ln(add(p, mul(n, 4)), add(p, mul(n, off + 6)), 1.8); ln(add(q, mul(n, 4)), add(q, mul(n, off + 6)), 1.8);
+      ln(p2, q2, 1.8);
+      const head = (tip, dir) => {
+        const w = { x: -dir.y, y: dir.x }, b = add(tip, mul(dir, 9));
+        const a1 = add(b, mul(w, 3.6)), a2 = add(b, mul(w, -3.6));
+        svg.appendChild(el('polygon', { points: `${tip.x},${tip.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`, fill: g }));
+      };
+      head(p2, u); head(q2, mul(u, -1));
+      label(add(mid(p2, q2), mul(n, 3)), text, n, g);
+    }
+    function tickN(M, dirv, n, color) {   // n liniuțe identice (1 sau 2) — semn de egalitate
+      const u = unit(dirv);
+      for (let i = 0; i < n; i++) tickAt(add(M, mul(u, (i - (n - 1) / 2) * 6)), dirv, color);
+    }
+    // semne și valori pe răspunsul corect; returnează o linie de text cu măsurile
+    function mathMarks(s) {
+      const col = '#fff', { A, B, C } = s, V = s.vn, NB = s.nb, NC = s.nc;
+      const nameAt = (p, t) => label(p, t, sub(p, mid(B, C)).x === 0 && sub(p, mid(B, C)).y === 0 ? { x: 0, y: -1 } : sub(p, A), '#fff');
+      if (s.type === 'bis') {            // două arce egale + măsura fiecărui unghi
+        const D = s.b, half = angleAt(A, B, D);
+        [[B, D], [D, C]].forEach(([p, q]) => {
+          svg.appendChild(el('path', { d: arcPath(A, p, q, 34), fill: 'none', stroke: col, 'stroke-width': 3 }));
+          const bis = unit(add(unit(sub(p, A)), unit(sub(q, A))));
+          label(add(A, mul(bis, 58)), fmt(half) + '°', bis, '#ffd866');
+        });
+        nameAt(D, 'D');
+        return `∠${NB}${V}D = ∠D${V}${NC} = ${fmt(half)}° (${T('jumătate din', 'half of')} ∠${V} = ${fmt(2 * half)}°)`;
+      }
+      if (s.type === 'med') {            // BM = MC
+        const M = s.b, x = cm(B, M);
+        tickN(mid(B, M), sub(M, B), 1, col); tickN(mid(M, C), sub(C, M), 1, col);
+        dim(B, M, fmt(x) + ' cm'); dim(M, C, fmt(x) + ' cm');
+        nameAt(M, 'M');
+        return `${NB}M = M${NC} = ${fmt(x)} cm`;
+      }
+      if (s.type === 'alt') {            // unghi drept
+        const D = s.b, toward = len(sub(B, D)) > len(sub(C, D)) ? B : C;
+        rightSquare(D, sub(toward, D), sub(A, D), col);
+        const u = unit(sub(toward, D)), w = unit(sub(A, D));
+        label(add(D, mul(add(u, w), 24)), '90°', add(u, w), '#ffd866');
+        nameAt(D, 'D');
+        return `${V}D ⟂ ${NB}${NC}, ${T('adică', 'i.e.')} ∠${V}D${NB} = ∠${V}D${NC} = 90°; ${V}D = ${fmt(cm(A, D))} cm`;
+      }
+      if (s.type === 'mdt') {            // unghi drept + jumătăți egale
+        const M = s.a, x = cm(B, M);
+        rightSquare(M, sub(C, M), sub(s.b, M), col);
+        const u = unit(sub(C, M)), w = unit(sub(s.b, M));
+        label(add(M, mul(add(u, w), 24)), '90°', add(u, w), '#ffd866');
+        tickN(mid(B, M), sub(M, B), 1, col); tickN(mid(M, C), sub(C, M), 1, col);
+        dim(B, M, fmt(x) + ' cm'); dim(M, C, fmt(x) + ' cm');
+        nameAt(M, 'M');
+        return `${T('perpendiculară pe', 'perpendicular to')} ${NB}${NC} ${T('în mijlocul ei', 'at its midpoint')}: ∠ = 90°; ${NB}M = M${NC} = ${fmt(x)} cm`;
+      }
+      if (s.type === 'mid') {            // AM = MB, AN = NC și MN = BC/2
+        const M = s.a, N = s.b, x = cm(A, M), y = cm(A, N);
+        const base = Math.round(cm(B, C) / 0.2) * 0.2, mn = base / 2;   // baza rotunjită la 0,2 cm, ca MN = baza/2 să iasă exact
+        tick(M, col); tick(N, col);
+        tickN(mid(A, M), sub(M, A), 1, col); tickN(mid(M, B), sub(B, M), 1, col);
+        tickN(mid(A, N), sub(N, A), 2, col); tickN(mid(N, C), sub(C, N), 2, col);
+        dim(A, M, fmt(x) + ' cm'); dim(M, B, fmt(x) + ' cm'); dim(A, N, fmt(y) + ' cm'); dim(N, C, fmt(y) + ' cm');
+        dim(B, C, fmt(base) + ' cm');   // baza
+        label(mid(M, N), fmt(mn) + ' cm', sub(mid(M, N), mid(B, C)), '#fff');
+        label(M, 'M', sub(M, mid(N, C)), '#fff'); label(N, 'N', sub(N, mid(M, B)), '#fff');
+        return `${V}M = M${NB} = ${fmt(x)} cm; ${V}N = N${NC} = ${fmt(y)} cm; MN ∥ ${NB}${NC}, MN = ${NB}${NC}/2 = ${fmt(base)}/2 = ${fmt(mn)} cm`;
+      }
+      return '';
+    }
+    function tick(p, color) { svg.appendChild(el('circle', { cx: p.x, cy: p.y, r: 6, fill: 'none', stroke: color, 'stroke-width': 2 })); }
+    function statsText() { return T(`Întrebarea ${Math.min(n + 1, ROUND)}/${ROUND}; corecte: ${ok}`, `Question ${Math.min(n + 1, ROUND)}/${ROUND}; correct: ${ok}`); }
+    function ask() {
+      if (n >= ROUND) return finish();
+      locked = false; nextBtn.style.display = 'none'; msg.textContent = '';
+      segs = makeSegments(); draw();
+      qEl.textContent = T(`Găsește ${NAME[target][0]} și alege culoarea ei`, `Find ${NAME[target][1]} and choose its color`);
+      stats.textContent = statsText();
+    }
+    function pick(s) {
+      if (locked) return; locked = true; n++;
+      const right = segs.find(x => x.type === target);
+      if (s.type === target) { ok++; mark(s, '#34d399'); msg.innerHTML = `<b style="color:#7be3a3">${T('Corect! ✓', 'Correct! ✓')}</b> ${EXPL[target][EN() ? 1 : 0]}`; }
+      else {
+        mark(s, '#ef4444'); mark(right, '#34d399');
+        msg.innerHTML = `<b style="color:#ff8a80">${T('Nu chiar.', 'Not quite.')}</b> ${EXPL[s.type][EN() ? 1 : 0]} <br>${T('Răspunsul corect (verde):', 'Correct answer (green):')} ${EXPL[target][EN() ? 1 : 0]}`;
+      }
+      const info = mathMarks(right);
+      if (info) msg.innerHTML += `<br><b style="color:#ffd866">${info}</b>`;
+      $('tri-colors').querySelectorAll('button').forEach(b => { b.style.pointerEvents = 'none'; });
+      stats.textContent = statsText();
+      nextBtn.style.display = ''; nextBtn.textContent = n >= ROUND ? T('Rezultat', 'Result') : T('Următoarea ›', 'Next ›');
+    }
+    function finish() {
+      svg.innerHTML = '';
+      stats.textContent = ''; nextBtn.style.display = 'none';
+      qEl.textContent = T(`Rezultat: ${ok}/${ROUND}`, `Score: ${ok}/${ROUND}`);
+      msg.innerHTML = `${ok === ROUND ? T('Perfect! 🎉', 'Perfect! 🎉') : ok >= 8 ? T('Foarte bine! 👏', 'Very good! 👏') : T('Mai exersăm puțin. 💪', 'Let\'s practice a bit more. 💪')}<br><button id="tri-again" class="tool" style="margin-top:10px;">${T('Din nou', 'Play again')}</button>`;
+      $('tri-again').onclick = start;
+    }
+    function fillSelect() {
+      const cur = kind;
+      sel.innerHTML = KINDS.map(k => `<option value="${k}">${T(NAME[k][0], NAME[k][1])}</option>`).join('') + `<option value="mix">${T('Toate (amestecat)', 'All (mixed)')}</option>`;
+      sel.value = cur; $('tri-kind-label').textContent = T('Recunoaște:', 'Identify:');
+      $('tri-title').textContent = T('Liniile importante în triunghi', 'Important lines in a triangle');
+    }
+    function start() { n = 0; ok = 0; ask(); }
+    nextBtn.onclick = ask;
+    sel.onchange = () => { kind = sel.value; start(); };
+    $('btn-tri-lines').onclick = () => { fillSelect(); backdrop.style.display = 'flex'; start(); };
+    $('tri-close').onclick = () => { backdrop.style.display = 'none'; };
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+  })();
+
+  ['btn-mult-game', 'btn-tri-lines'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
+})();
+
 document.getElementById('btn-circle').onclick = () => setTool('circle');
 document.getElementById('btn-rect').onclick = () => setTool('rect');
 document.getElementById('btn-polygon').onclick = () => setTool('polygon');
@@ -15557,7 +15947,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v346</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v366</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -15586,9 +15976,11 @@ const HELP_CONTENT_HTML = `
   <li><b>Cerc</b> — trage din centru spre exterior.</li>
   <li><b>Dreptunghi</b>, <b>poligon</b> — pentru poligon, atinge fiecare vârf, apoi închide forma printr-un dublu-click (pe ultimul vârf) sau apăsând din nou pe butonul poligon.</li>
   <li><b>Culegere</b> — deschide generatorul de fișe (tabul Gimnaziu se deschide implicit; mai ai Primar și Liceu). Alegi exercițiile, apeși „Previzualizează”, apoi „Trimite pe tablă”: fișa se deschide în modulul PDF al tablei, pe toată lățimea ferestrei, ca să scrii direct pe ea. „Pe pagini de tablă” pune fiecare pagină ca imagine pe câte o pagină de tablă.</li>
-  <li><b>Math</b> — grupează cele trei instrumente matematice interactive de mai jos; un singur click deschide un mic meniu din care alegi.</li>
+  <li><b>Math</b> — grupează instrumentele matematice interactive și jocurile de mai jos; un singur click deschide un mic meniu din care alegi.</li>
   <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
   <li><b>Tipuri de unghiuri</b> — trage punctul portocaliu pentru a schimba unghiul; tipul (nul, ascuțit, drept, obtuz, alungit) se identifică live, cu butoane pentru a sări direct la fiecare caz.</li>
+  <li><b>Tabla înmulțirii (joc)</b> — pe ecran apar multe rezultate; elevul atinge rezultatul corect al înmulțirii afișate (10 întrebări pe rundă, cu tabla aleasă sau amestecat). Exercițiile greșite se repetă în runda următoare.</li>
+  <li><b>Linii importante în triunghi</b> — elevul recunoaște pe un triunghi desenat linia mijlocie (sau mediana, înălțimea, bisectoarea, mediatoarea, sau amestecat) și alege culoarea ei dintre butoanele de sus; primește explicația după fiecare răspuns.</li>
   <li><b>Drepte paralele tăiate de o secantă</b> — trage oricare din cele două capete ale secantei pentru a o înclina (rămân mereu clar în afara celor două drepte); cele 8 unghiuri formate se recalculează live, cu butoane care evidențiază, pe rând, câte o pereche din fiecare relație (corespondente, alterne interne/externe, interne/externe de aceeași parte a secantei), prin culori diferite și arc clipitor. Butonul de translație glisează lin întreaga rețea de unghiuri (inclusiv măsurile lor) de-a lungul secantei, până se suprapune exact peste cea de jos. Un comutator permite și varianta cu drepte NEparalele, ca să vezi clar de ce paralelismul contează — un slider separat permite și controlul manual, pas cu pas, al apropierii dintre cele două drepte.</li>
   <li><b>Radieră</b>, <b>text</b> — șterge sau adaugă text.</li>
 </ul>
@@ -15689,7 +16081,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v346</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v366</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -15718,9 +16110,11 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Circle</b> — drag from the center outward.</li>
   <li><b>Rectangle</b>, <b>polygon</b> — for a polygon, tap each vertex, then close the shape with a double-tap (on the last vertex) or by tapping the polygon button again.</li>
   <li><b>Problem book</b> — opens the worksheet generator (it opens on the Middle school tab by default; Primary and High school are also available). Pick exercises, press “Preview”, then “Send to the board”: the worksheet opens in the board’s PDF module at full window width, ready to write on. “To board pages” puts each page as an image on its own board page.</li>
-  <li><b>Math</b> — groups the three interactive math tools below; one click opens a small menu to choose from.</li>
+  <li><b>Math</b> — groups the interactive math tools and games below; one click opens a small menu to choose from.</li>
   <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
   <li><b>Angle types</b> — drag the orange point to change the angle; the type (zero, acute, right, obtuse, straight) is identified live, with buttons to jump directly to each case.</li>
+  <li><b>Times tables (game)</b> — many results appear on screen; the student taps the correct result of the multiplication shown (10 questions per round, one table or mixed). Missed facts come back in the next round.</li>
+  <li><b>Important lines in a triangle</b> — the student identifies the midsegment (or the median, altitude, angle bisector, perpendicular bisector, or a mix) on a drawn triangle and gets an explanation after each answer.</li>
   <li><b>Parallel lines cut by a transversal</b> — drag either of the transversal's two endpoints to tilt it (they always stay clearly outside the two lines); the 8 angles formed recalculate live, with buttons that highlight, one pair at a time, each relationship from the theorem (corresponding, alternate interior/exterior, same-side interior/exterior) through distinct colors and a blinking arc. The translate button smoothly slides the whole angle network (including its measurements) along the transversal until it lands exactly on the lower one. A toggle also lets you try non-parallel lines, to see clearly why parallelism matters — a separate slider also lets you manually, step by step, control how close the two lines come together.</li>
   <li><b>Eraser</b>, <b>text</b> — erase or add text.</li>
 </ul>
@@ -15940,7 +16334,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1';
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v366';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere

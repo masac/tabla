@@ -1066,6 +1066,8 @@ input:focus-visible {
           <button class="tool" id="btn-quad-defs" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-math-symbols"></i> Paralelogram interactiv</button>
           <button class="tool" id="btn-angle-types" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-angle"></i> Tipuri de unghiuri</button>
           <button class="tool" id="btn-parallel-lines" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="7" x2="22" y2="7"/><line x1="2" y1="17" x2="22" y2="17"/><line x1="7" y1="2" x2="17" y2="22"/></svg> Drepte paralele tăiate de o secantă</button>
+          <button class="tool" id="btn-mult-game" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-multiplier-1x"></i> Tabla înmulțirii (joc)</button>
+          <button class="tool" id="btn-tri-lines" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-triangle"></i> Linii importante în triunghi</button>
         </div>
       </div>
       <button class="tool" id="btn-culegere" title="Culegere de matematică — alege exerciții, generează fișe și trimite-le pe tablă"><i class="ti ti-books"></i> Culegere</button>
@@ -1256,6 +1258,44 @@ input:focus-visible {
       <button id="angle-set-straight" class="tool" style="flex:1; min-width:80px;">Alungit (180°)</button>
     </div>
     <div style="color:#999; font-size:12px; text-align:center;">Trage punctul portocaliu ca să schimbi unghiul — tipul se actualizează live.</div>
+  </div>
+</div>
+
+<div id="mult-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(640px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="mult-title" style="font-size:17px; font-weight:700;">Tabla înmulțirii — atinge rezultatul corect</span>
+      <button id="mult-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <label id="mult-table-label">Tabla:</label>
+      <select id="mult-table" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <span style="flex:1"></span>
+      <span id="mult-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <div id="mult-question" style="text-align:center; font-size:34px; font-weight:800; padding:6px 0;"></div>
+    <div id="mult-field" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px; background:#111; border-radius:10px; min-height:150px; align-content:center;"></div>
+    <div id="mult-msg" style="text-align:center; min-height:20px; font-size:14px; color:#ccc;"></div>
+  </div>
+</div>
+
+<div id="tri-backdrop" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(620px, 96vw); max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="tri-title" style="font-size:17px; font-weight:700;">Liniile importante în triunghi</span>
+      <button id="tri-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+      <label id="tri-kind-label">Recunoaște:</label>
+      <select id="tri-kind" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:4px 6px;"></select>
+      <span style="flex:1"></span>
+      <span id="tri-stats" style="color:#ffcc00; font-weight:700;"></span>
+    </div>
+    <div id="tri-question" style="text-align:center; font-size:20px; font-weight:800;"></div>
+    <div id="tri-colors" style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; font-size:15px;"></div>
+    <svg id="tri-svg" viewBox="-50 -12 520 330" style="width:100%; height:auto; max-height:58vh; background:#111; border-radius:8px; touch-action:manipulation;"></svg>
+    <div id="tri-msg" style="text-align:center; min-height:40px; font-size:14px; color:#ccc;"></div>
+    <div style="display:flex; justify-content:center;"><button id="tri-next" class="tool" style="display:none;">Următoarea ›</button></div>
   </div>
 </div>
 
