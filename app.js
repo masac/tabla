@@ -58,6 +58,88 @@ function setTheme(theme) {
 // Traduceri pentru atribute statice (title / placeholder / aria-label),
 // indexate după textul românesc exact (implicit).
 const UI_TEXT = {
+  'Apasă pentru a sări direct la o pagină': 'Click to jump straight to a page',
+  'Exportă fișa PDF cu adnotațiile tale, ca fișier nou (imagine plată, pentru distribuire)': 'Export the PDF sheet with your annotations as a new file (flat image, for sharing)',
+  'Salvează sesiunea (fișa PDF + toate adnotațiile, ca să continui lucrul mai târziu)': 'Save the session (PDF sheet + all annotations, to continue later)',
+  'Deschide o sesiune salvată anterior (fișă PDF + adnotații)': 'Open a previously saved session (PDF sheet + annotations)',
+  'Trage pentru a redimensiona ferestrele': 'Drag to resize the panes',
+  'Arată numerele pe sistemul de axe selectat — trage de aici ca s-o muți': 'Show the numbers on the selected axes — drag here to move this control',
+  'Salvează starea curentă sub acest nume': 'Save the current state under this name',
+  'Starea salvării automate': 'Autosave status',
+  'Ascunde/arată bara de instrumente (eliberează spațiu pe tablă)': 'Hide/show the toolbar (frees up space on the board)',
+  'Evidențiere neon — apare colorat și se șterge singur după câteva secunde': 'Neon highlight — appears colored and fades away on its own after a few seconds',
+  'Spațiu vertical — apasă pentru a vedea o linie la locul de inserare, apoi trage în sus/jos pentru a insera sau elimina spațiu pe tablă': 'Vertical space — press to see a line at the insertion point, then drag up/down to insert or remove space on the board',
+  'Ștergere totală (golește pagina curentă)': 'Clear all (empties the current page)',
+  'Instrumente matematice interactive': 'Interactive math tools',
+  'Adaugă un sistem de axe xOy, cu 20 de diviziuni pe orizontală și verticală': 'Add an xOy coordinate system, with 20 divisions horizontally and vertically',
+  'Caută o imagine (Wikimedia Commons, gratuit)': 'Search for an image (Wikimedia Commons, free)',
+  'Nou — pornește curat, ca la prima deschidere (șterge tot ce e pe tablă)': 'New — start fresh, as on first launch (clears everything on the board)',
+  'Arată/ascunde ora sistemului': 'Show/hide the system clock',
+  'Captură de ecran cu selecție — alege o zonă și o adaugă pe tablă': 'Screen capture with selection — pick an area and add it to the board',
+  'Sesiuni salvate (mai multe, cu nume)': 'Saved sessions (several, with names)',
+  'Derulare automată a paginilor (recapitulare)': 'Automatic page slideshow (review)',
+  'Mai puține secunde': 'Fewer seconds',
+  'Secunde între pagini': 'Seconds between pages',
+  'Mai multe secunde': 'More seconds',
+  'Reia': 'Restart',
+  'Pasul anterior': 'Previous step',
+  'Pasul următor': 'Next step',
+  'Atinge pentru a schimba colțul': 'Tap to change the corner',
+  'Nume sesiune nouă...': 'New session name...',
+  'Caută o imagine (ex. triunghi, celula, hartă...)': 'Search for an image (e.g. triangle, cell, map...)',
+  'Paralelogram': 'Parallelogram',
+  'Romb': 'Rhombus',
+  'Pătrat': 'Square',
+  'Dreptunghi': 'Rectangle',
+  'Nul': 'Zero',
+  'Ascuțit': 'Acute',
+  'Drept': 'Right',
+  'Obtuz': 'Obtuse',
+  'Alungit': 'Straight',
+  '✓ Dreptele sunt suprapuse': '✓ The lines coincide',
+  '✗ Dreptele NU se suprapun (nu sunt paralele)': '✗ The lines do NOT coincide (they are not parallel)',
+  'Unghiurile corespondente sunt congruente (egale).': 'Corresponding angles are congruent (equal).',
+  'Unghiurile alterne interne sunt congruente (egale).': 'Alternate interior angles are congruent (equal).',
+  'Unghiurile alterne externe sunt congruente (egale).': 'Alternate exterior angles are congruent (equal).',
+  'Unghiurile interne de aceeași parte a secantei sunt suplementare (suma 180°).': 'Same-side interior angles are supplementary (they add up to 180°).',
+  'Unghiurile externe de aceeași parte a secantei sunt suplementare (suma 180°).': 'Same-side exterior angles are supplementary (they add up to 180°).',
+  'Translația arată corespondentele egale; la P2, cele două unghiuri sunt opuse la vârf — egale prin definiție. Deci unghiurile alterne sunt egale.': 'The translation shows the corresponding angles are equal; at P2 the two angles are vertically opposite — equal by definition. So the alternate angles are equal.',
+  'Translația arată direct, prin suprapunere exactă, că unghiurile corespondente sunt congruente.': 'The translation shows directly, by exact overlap, that corresponding angles are congruent.',
+  '⚠ Dreptele NU mai sunt paralele — relația din teoremă nu se mai verifică (unghiurile nu mai sunt egale).': '⚠ The lines are NO longer parallel — the theorem no longer holds (the angles are not equal anymore).',
+  'Dreptele suprapuse — unghiurile corespunzătoare se văd acum exact una peste alta.': 'The lines coincide — the corresponding angles now sit exactly on top of each other.',
+  '⚠ Chiar suprapuse la acest punct, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.': '⚠ Even when overlapped at this point, the lines have different directions — the angles do NOT coincide, because the lines are not parallel.',
+  '✓ Dreptele sunt suprapuse perfect — unghiurile corespunzătoare coincid exact.': '✓ The lines are perfectly overlapped — the corresponding angles coincide exactly.',
+  '⚠ Chiar și la acest punct comun, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.': '⚠ Even at this common point, the lines have different directions — the angles do NOT coincide, because the lines are not parallel.',
+  'Translația arată corespondentele egale; la P2, unghiul translatat se așază în prelungirea celuilalt, pe aceeași dreaptă — formând un unghi alungit (180°), deci sunt suplementare.': 'The translation shows the corresponding angles are equal; at P2 the translated angle lies along the extension of the other one, on the same line — forming a straight angle (180°), so they are supplementary.',
+  'Arată toate laturile și unghiurile': 'Show all sides and angles',
+  '→ Dreptunghi': '→ Rectangle',
+  '→ Romb': '→ Rhombus',
+  '→ Pătrat': '→ Square',
+  '↺ Resetează': '↺ Reset',
+  '⟷ Diagonala mică orizontală': '⟷ Short diagonal horizontal',
+  'Trage vârfurile portocalii pentru a schimba forma — numele se actualizează live.': 'Drag the orange vertices to change the shape — the name updates live.',
+  'Nul (0°)': 'Zero (0°)',
+  'Drept (90°)': 'Right (90°)',
+  'Alungit (180°)': 'Straight (180°)',
+  'Trage punctul portocaliu ca să schimbi unghiul — tipul se actualizează live.': 'Drag the orange point to change the angle — the type updates live.',
+  'Drepte paralele tăiate de o secantă': 'Parallel lines cut by a transversal',
+  '▶ Translatează rețeaua de unghiuri (glisare pe secantă)': '▶ Translate the angle network (slide along the transversal)',
+  'Corespondente': 'Corresponding',
+  'Alterne interne': 'Alternate interior',
+  'Alterne externe': 'Alternate exterior',
+  'Interne, aceeași secantă': 'Same-side interior',
+  'Externe, aceeași secantă': 'Same-side exterior',
+  'Niciuna': 'None',
+  'Drepte paralele (debifează pentru neparalele)': 'Parallel lines (uncheck for non-parallel)',
+  '⬇ Suprapune dreptele (automat)': '⬇ Overlap the lines (automatic)',
+  'Dreapta 2 ↕': 'Line 2 ↕',
+  'suprapusă': 'overlapped',
+  'Trage oricare din cele două capete portocalii ca să înclini secanta — unghiurile se recalculează live.': 'Drag either orange end to tilt the transversal — the angles are recalculated live.',
+  'Caută': 'Search',
+  'Rezultate de la Wikimedia Commons — imagini libere, cu sursă și licență documentate.': 'Results from Wikimedia Commons — free images, with documented source and license.',
+  'Trage pentru a selecta zona dorită, apoi apasă Enter, dublu-clic pe ea, sau apasă în afara ei — Esc pentru anulare': 'Drag to select the area you want, then press Enter, double-click it, or click outside it — Esc to cancel',
+  'Anulează': 'Cancel',
+  'Sari': 'Go',
   'Linie întreruptă': 'Dashed line',
   'Cerc (trage din centru)': 'Circle (drag from center)',
   'Dreptunghi': 'Rectangle',
@@ -251,7 +333,7 @@ function trMsg(str) {
   for (const [pattern, replacement] of RO_EN_RULES) {
     if (pattern.test(str)) return str.replace(pattern, replacement);
   }
-  return str;
+  return UI_TEXT[str] || str;
 }
 
 function setElText(id, ro, en) {
@@ -287,6 +369,12 @@ function applyStaticUI() {
     if (!el.dataset.roAria) el.dataset.roAria = el.getAttribute('aria-label');
     const ro = el.dataset.roAria;
     el.setAttribute('aria-label', LANG === 'en' ? (UI_TEXT[ro] || ro) : ro);
+  });
+
+  document.querySelectorAll('[data-tr]').forEach(el => {
+    if (el.dataset.roText == null) el.dataset.roText = el.textContent.trim();
+    const ro = el.dataset.roText;
+    el.textContent = LANG === 'en' ? (UI_TEXT[ro] || ro) : ro;
   });
 
   setBtnText('btn-load-pdf', 'Fișă PDF', 'PDF Sheet');
@@ -10073,7 +10161,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   function render() {
     const C = getC();
     const info = classifyShape();
-    nameEl.textContent = info.name;
+    nameEl.textContent = trMsg(info.name);
 
     // Zona vizibilă (viewBox) se recalculează la fiecare redesenare, ca să
     // încadreze mereu toată forma curentă, indiferent de rotație sau cât de
@@ -10363,7 +10451,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     // intervalul 0-180°, indiferent dacă P e tras deasupra sau dedesubt.
     const deg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
     const name = classifyAngle(deg);
-    nameEl.textContent = name;
+    nameEl.textContent = trMsg(name);
 
     document.getElementById('angle-fixed-ray').setAttribute('x1', V.x);
     document.getElementById('angle-fixed-ray').setAttribute('y1', V.y);
@@ -10676,7 +10764,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     const overlapIndicator = document.getElementById('pl-overlap-indicator');
     const linesVisuallyOverlapping = linesParallel && overlapFraction > 0.97;
     overlapIndicator.style.display = linesVisuallyOverlapping ? '' : 'none';
-    overlapIndicator.textContent = linesParallel ? '✓ Dreptele sunt suprapuse' : '✗ Dreptele NU se suprapun (nu sunt paralele)';
+    overlapIndicator.textContent = trMsg(linesParallel ? '✓ Dreptele sunt suprapuse' : '✗ Dreptele NU se suprapun (nu sunt paralele)');
     overlapIndicator.setAttribute('fill', linesParallel ? '#5fff8f' : '#ff6b6b');
     const pointsGap = Math.hypot(P2.pt.x - P1.pt.x, P2.pt.y - P1.pt.y);
     if (!linesParallel && pointsGap < 25) overlapIndicator.style.display = '';
@@ -10832,7 +10920,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   document.getElementById('btn-parallel-lines').onclick = () => {
     backdrop.style.display = 'flex';
     highlightMode = 'none';
-    noteEl.textContent = '';
+    noteEl.textContent = trMsg('');
     linesParallel = true;
     document.getElementById('pl-toggle-parallel').checked = true;
     overlapFraction = 0;
@@ -10854,32 +10942,32 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
 
   document.getElementById('pl-show-corresponding').onclick = () => {
     highlightMode = 'corresponding';
-    noteEl.textContent = 'Unghiurile corespondente sunt congruente (egale).';
+    noteEl.textContent = trMsg('Unghiurile corespondente sunt congruente (egale).');
     render(); hideExtras(); startPairCycle();
   };
   document.getElementById('pl-show-alt-int').onclick = () => {
     highlightMode = 'altInt';
-    noteEl.textContent = 'Unghiurile alterne interne sunt congruente (egale).';
+    noteEl.textContent = trMsg('Unghiurile alterne interne sunt congruente (egale).');
     render(); hideExtras(); startPairCycle();
   };
   document.getElementById('pl-show-alt-ext').onclick = () => {
     highlightMode = 'altExt';
-    noteEl.textContent = 'Unghiurile alterne externe sunt congruente (egale).';
+    noteEl.textContent = trMsg('Unghiurile alterne externe sunt congruente (egale).');
     render(); hideExtras(); startPairCycle();
   };
   document.getElementById('pl-show-same-int').onclick = () => {
     highlightMode = 'sameSideInt';
-    noteEl.textContent = 'Unghiurile interne de aceeași parte a secantei sunt suplementare (suma 180°).';
+    noteEl.textContent = trMsg('Unghiurile interne de aceeași parte a secantei sunt suplementare (suma 180°).');
     render(); hideExtras(); startPairCycle();
   };
   document.getElementById('pl-show-same-ext').onclick = () => {
     highlightMode = 'sameSideExt';
-    noteEl.textContent = 'Unghiurile externe de aceeași parte a secantei sunt suplementare (suma 180°).';
+    noteEl.textContent = trMsg('Unghiurile externe de aceeași parte a secantei sunt suplementare (suma 180°).');
     render(); hideExtras(); startPairCycle();
   };
   document.getElementById('pl-show-none').onclick = () => {
     highlightMode = 'none';
-    noteEl.textContent = '';
+    noteEl.textContent = trMsg('');
     render(); hideExtras(); stopPairCycle();
   };
 
@@ -11001,7 +11089,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       const p2m = { x: P2.pt.x - Lm * Math.cos(dirA), y: P2.pt.y - Lm * Math.sin(dirA) };
       verticalMarker.setAttribute('d', `M ${p1m.x} ${p1m.y} L ${P2.pt.x} ${P2.pt.y} L ${p2m.x} ${p2m.y}`);
       verticalMarker.style.display = '';
-      noteEl.textContent = 'Translația arată corespondentele egale; la P2, cele două unghiuri sunt opuse la vârf — egale prin definiție. Deci unghiurile alterne sunt egale.';
+      noteEl.textContent = trMsg('Translația arată corespondentele egale; la P2, cele două unghiuri sunt opuse la vârf — egale prin definiție. Deci unghiurile alterne sunt egale.');
     } else if (highlightMode === 'sameSideInt' || highlightMode === 'sameSideExt') {
       // Unghiurile de aceeași parte a secantei (interne sau externe) sunt
       // ADIACENTE (au o latură comună, nu sunt opuse la vârf) — bisectoarele
@@ -11015,9 +11103,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       const p2m = { x: P2.pt.x + Lm * Math.cos(dirB), y: P2.pt.y + Lm * Math.sin(dirB) };
       straightMarker.setAttribute('d', `M ${p1m.x} ${p1m.y} L ${P2.pt.x} ${P2.pt.y} L ${p2m.x} ${p2m.y}`);
       straightMarker.style.display = '';
-      noteEl.textContent = 'Translația arată corespondentele egale; la P2, unghiul translatat se așază în prelungirea celuilalt, pe aceeași dreaptă — formând un unghi alungit (180°), deci sunt suplementare.';
+      noteEl.textContent = trMsg('Translația arată corespondentele egale; la P2, unghiul translatat se așază în prelungirea celuilalt, pe aceeași dreaptă — formând un unghi alungit (180°), deci sunt suplementare.');
     } else {
-      noteEl.textContent = 'Translația arată direct, prin suprapunere exactă, că unghiurile corespondente sunt congruente.';
+      noteEl.textContent = trMsg('Translația arată direct, prin suprapunere exactă, că unghiurile corespondente sunt congruente.');
     }
   }
 
@@ -11036,9 +11124,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     }
     // Nota de suprapunere rămasă de dinainte (ex. „coincid exact”) nu mai e adevărată după comutare.
     if (overlapFraction > 0.5) updateOverlapNote();
-    else if (OVERLAP_NOTE_RE.test(noteEl.textContent)) noteEl.textContent = '';
+    else if (OVERLAP_NOTE_RE.test(noteEl.textContent)) noteEl.textContent = trMsg('');
     if (!linesParallel && highlightMode !== 'none') {
-      noteEl.textContent = '⚠ Dreptele NU mai sunt paralele — relația din teoremă nu se mai verifică (unghiurile nu mai sunt egale).';
+      noteEl.textContent = trMsg('⚠ Dreptele NU mai sunt paralele — relația din teoremă nu se mai verifică (unghiurile nu mai sunt egale).');
     }
   });
 
@@ -11058,9 +11146,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       document.getElementById('pl-overlap-slider').value = Math.round(overlapFraction * 100);
       render();
       if (t < 1) { requestAnimationFrame(step); return; }
-      noteEl.textContent = linesParallel
+      noteEl.textContent = trMsg(linesParallel
         ? 'Dreptele suprapuse — unghiurile corespunzătoare se văd acum exact una peste alta.'
-        : '⚠ Chiar suprapuse la acest punct, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.';
+        : '⚠ Chiar suprapuse la acest punct, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.');
       setTimeout(() => { overlapFraction = 0; document.getElementById('pl-overlap-slider').value = 0; render(); }, 2200);
     }
     requestAnimationFrame(step);
@@ -11071,14 +11159,14 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   // văzând clar, pas cu pas, cum se suprapun (sau revin la loc) cele două
   // drepte și unghiurile lor.
   // Nota despre starea de suprapunere (după poziția slider-ului și după paralel/neparalel).
-  const OVERLAP_NOTE_RE = /^(✓ Dreptele sunt suprapuse perfect|⚠ Chiar și la acest punct comun|Dreptele se apropie)/;
+  const OVERLAP_NOTE_RE = /^(✓ Dreptele sunt suprapuse perfect|⚠ Chiar și la acest punct comun|Dreptele se apropie|✓ The lines are perfectly overlapped|⚠ Even at this common point|The lines are getting closer)/;
   function updateOverlapNote() {
     if (overlapFraction > 0.97) {
-      noteEl.textContent = linesParallel
+      noteEl.textContent = trMsg(linesParallel
         ? '✓ Dreptele sunt suprapuse perfect — unghiurile corespunzătoare coincid exact.'
-        : '⚠ Chiar și la acest punct comun, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.';
+        : '⚠ Chiar și la acest punct comun, dreptele au direcții diferite — unghiurile NU coincid, pentru că nu sunt paralele.');
     } else if (overlapFraction > 0.5) {
-      noteEl.textContent = 'Dreptele se apropie — observă cum unghiurile ' + (linesParallel ? 'rămân' : 'nu rămân') + ' aceleași pe măsură ce se apropie.';
+      noteEl.textContent = LANG === 'en' ? 'The lines are getting closer — notice how the angles ' + (linesParallel ? 'stay' : 'do not stay') + ' the same as they approach.' : 'Dreptele se apropie — observă cum unghiurile ' + (linesParallel ? 'rămân' : 'nu rămân') + ' aceleași pe măsură ce se apropie.';
     }
   }
   document.getElementById('pl-overlap-slider').addEventListener('input', (e) => {
@@ -12439,6 +12527,785 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     modeSel.onchange = start; lvSel.onchange = start;
   })();
 
+  /* ---------------- Demonstrații vizuale ---------------- */
+  (function () {
+    const backdrop = $('dv-backdrop'), svg = $('dv-svg'), cap = $('dv-cap'), sel = $('dv-sel'), slider = $('dv-t'), playBtn = $('dv-play');
+    const NSV = 'http://www.w3.org/2000/svg', D2R = Math.PI / 180;
+    const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+    const ease = (t) => t * t * (3 - 2 * t);
+    const es = (t, a, b) => ease(clamp((t - a) / (b - a), 0, 1));
+    const P = (x, y) => ({ x, y });
+    const rotp = (p, c, th) => { const dx = p.x - c.x, dy = p.y - c.y, co = Math.cos(th), si = Math.sin(th); return { x: c.x + dx * co - dy * si, y: c.y + dx * si + dy * co }; };
+    const rigid = (pts, p0, p1, th, t) => pts.map(p => { const q = rotp(p, p0, th * t); return { x: q.x + (p1.x - p0.x) * t, y: q.y + (p1.y - p0.y) * t }; });
+    const arcPts = (c, r, a0, a1, n) => { const o = []; n = n || 24; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; o.push(P(c.x + r * Math.cos(a), c.y + r * Math.sin(a))); } return o; };
+    const sector = (c, r, a0, a1, n) => [c, ...arcPts(c, r, a0, a1, n)];
+    const rect = (x0, y0, x1, y1) => [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
+    const fmtN = (v) => String(v).replace('.', EN() ? '.' : ',');
+    function makeG() {
+      let sc = 50, ox = 0, oy = 0;
+      const el = (tag, a) => { const e = document.createElementNS(NSV, tag); Object.keys(a).forEach(k => e.setAttribute(k, a[k])); svg.appendChild(e); return e; };
+      const X = (x) => ox + x * sc, Y = (y) => oy - y * sc;
+      return {
+        view(s, x, y) { sc = s; ox = x; oy = y; },
+        poly(pts, fill, o) { o = o || {}; el('polygon', { points: pts.map(p => X(p.x).toFixed(1) + ',' + Y(p.y).toFixed(1)).join(' '), fill: fill || 'none', 'fill-opacity': o.o == null ? 1 : o.o, stroke: o.stroke || 'none', 'stroke-width': o.w || 1.5, 'stroke-linejoin': 'round', 'stroke-dasharray': o.dash || '' }); },
+        line(a, b, col, w, dash) { el('line', { x1: X(a.x), y1: Y(a.y), x2: X(b.x), y2: Y(b.y), stroke: col || '#ccc', 'stroke-width': w || 2, 'stroke-dasharray': dash || '', 'stroke-linecap': 'round' }); },
+        circle(c, r, fill, stroke, o) { el('circle', { cx: X(c.x), cy: Y(c.y), r: r * sc, fill: fill || 'none', 'fill-opacity': o == null ? 1 : o, stroke: stroke || 'none', 'stroke-width': 2 }); },
+        dot(c, r, fill) { el('circle', { cx: X(c.x), cy: Y(c.y), r, fill }); },
+        text(p, str, size, fill, anchor, o) { const e = el('text', { x: X(p.x), y: Y(p.y) + (size || 18) * 0.35, 'text-anchor': anchor || 'middle', 'font-size': size || 18, 'font-weight': 700, fill: fill || '#fff', 'fill-opacity': o == null ? 1 : o }); e.textContent = str; },
+        px(x, y, str, size, fill, anchor, o) { const e = el('text', { x, y, 'text-anchor': anchor || 'middle', 'font-size': size || 20, 'font-weight': 800, fill: fill || '#fff', 'fill-opacity': o == null ? 1 : o }); e.textContent = str; },
+        sc: () => sc
+      };
+    }
+    const COL = { a: '#6cc28f', b: '#c792ea', c: '#4da6ff', t: '#e0ae52', t2: '#d98c3f', w: '#fff', r: '#ff8a80' };
+
+    const DEMOS = [];
+    // 1. Pitagora
+    DEMOS.push({
+      ro: 'Teorema lui Pitagora', en: 'Pythagorean theorem', dur: 14000,
+      steps: [
+        { at: 0, ro: 'Pătratul mare are latura a + b. În el stau 4 triunghiuri dreptunghice identice și un pătrat înclinat, cu latura c: aria lui este c².', en: 'The big square has side a + b. Inside are 4 identical right triangles and a tilted square with side c: its area is c².' },
+        { at: 0.2, ro: 'Mutăm cele 4 triunghiuri, fără să le deformăm. Pătratul mare rămâne același, deci aria lui nu se schimbă.', en: 'We move the 4 triangles without changing them. The big square stays the same, so its area does not change.' },
+        { at: 0.75, ro: 'Au rămas două pătrate: unul cu latura a și unul cu latura b. Aceeași arie liberă: a² + b² = c². (Aici: 9 + 16 = 25)', en: 'Two squares are left: one with side a and one with side b. The same free area: a² + b² = c². (Here: 9 + 16 = 25)' }],
+      draw(g, t) {
+        g.view(45, 142, 358); const a = 3, b = 4, s = 7;
+        const A = [[P(0, 0), P(a, 0), P(0, b)], [P(s, 0), P(s, a), P(a, 0)], [P(s, s), P(b, s), P(s, a)], [P(0, s), P(0, b), P(b, s)]];
+                const B = [[P(0, a), P(a, a), P(0, s)], [P(s, 0), P(s, a), P(a, 0)], [P(a, s), P(0, s), P(a, a)], [P(a, a), P(a, 0), P(s, a)]];
+        // A2 -> B2(index1) rămâne pe loc; A3 -> B3; A4 -> B4
+        g.poly(rect(0, 0, s, s), 'none', { stroke: '#aaa', w: 2 });
+        g.poly([P(a, 0), P(s, a), P(b, s), P(0, b)], COL.c, { o: .6 * (1 - es(t, .05, .2)) });
+        g.poly(rect(0, 0, a, a), COL.a, { o: .6 * es(t, .75, .9) }); g.poly(rect(a, a, s, s), COL.b, { o: .6 * es(t, .75, .9) });
+        const m = es(t, .2, .7);
+        A.forEach((tri, i) => { const tb = B[i], dA = Math.atan2(tri[1].y - tri[0].y, tri[1].x - tri[0].x), dB = Math.atan2(tb[1].y - tb[0].y, tb[1].x - tb[0].x); const th = dB - dA; g.poly(rigid(tri, tri[0], tb[0], th, m), i % 2 ? COL.t2 : COL.t, { o: .95, stroke: '#222', w: 1.5 }); });
+        g.text(P(3.5, 3.5), 'c²', 26, '#fff', 'middle', 1 - es(t, .05, .2));
+        g.text(P(1.5, 1.5), 'a² = 9', 20, '#fff', 'middle', es(t, .8, .95)); g.text(P(5, 5), 'b² = 16', 22, '#fff', 'middle', es(t, .8, .95));
+        g.text(P(1.5, -.4), 'a', 18, COL.a); g.text(P(5, -.4), 'b', 18, COL.b);
+        g.text(P(5.55, 1.2), 'c', 18, COL.c, 'middle', 1 - es(t, .2, .3));
+        g.px(300, 392, '9 + 16 = 25', 20, '#fff', 'middle', es(t, .85, 1));
+      }
+    });
+    // Pitagora — a doua demonstrație (Euclid, forfecare)
+    DEMOS.push({
+      ro: 'Pitagora — a doua demonstrație (forfecare, Euclid)', en: 'Pythagoras — second proof (shearing, Euclid)', dur: 46000,
+      steps: [
+        { at: 0, ro: 'Triunghi dreptunghic ABC (unghi drept în A), cu pătrate pe laturi. Înălțimea din A, prelungită, împarte pătratul de pe ipotenuză în două dreptunghiuri. Vom arăta că fiecare pătrat de pe catetă are aceeași arie cu dreptunghiul de lângă el.', en: 'Right triangle ABC (right angle at A), with squares on the sides. The altitude from A, extended, splits the hypotenuse square into two rectangles. We will show that each leg square has the same area as the rectangle next to it.' },
+        { at: .1, ro: 'Pătratul mare AB² (latura 4): îl forfecăm. Baza și înălțimea rămân aceleași, deci aria nu se schimbă. Vârful A alunecă pe dreapta AC până în C.', en: 'The big square AB² (side 4): shear it. The base and height stay the same, so the area does not change. Vertex A slides along line AC up to C.' },
+        { at: .22, ro: 'Rotim paralelogramul cu 90° în jurul lui B (rotația păstrează aria): C ajunge în D.', en: 'Rotate the parallelogram by 90° about B (a rotation keeps the area): C goes to D.' },
+        { at: .31, ro: 'Forfecăm încă o dată, de-a lungul BD, până obținem dreptunghiul din dreapta. AB² = 16 = aria dreptunghiului BDLL′.', en: 'Shear once more, along BD, until we get the right-hand rectangle. AB² = 16 = the area of rectangle BDLL′.' },
+        { at: .46, ro: 'Acum pătratul mic AC² (latura 3): același procedeu. Îl forfecăm, păstrând latura CH; vârful A alunecă pe dreapta AB până în B.', en: 'Now the small square AC² (side 3): same method. Shear it, keeping side CH; vertex A slides along line AB up to B.' },
+        { at: .57, ro: 'Rotim paralelogramul cu 90° în jurul lui C: B ajunge în E.', en: 'Rotate the parallelogram by 90° about C: B goes to E.' },
+        { at: .66, ro: 'Forfecăm de-a lungul CE până obținem dreptunghiul din stânga. AC² = 9 = aria dreptunghiului CEL L′: pătratul mic are aceeași arie cu zona din stânga.', en: 'Shear along CE until we get the left-hand rectangle. AC² = 9 = the area of rectangle CELL′: the small square has the same area as the left-hand region.' },
+        { at: .84, ro: 'Cele două dreptunghiuri umplu pătratul de pe ipotenuză: AB² + AC² = 16 + 9 = 25 = BC².', en: 'The two rectangles fill the hypotenuse square: AB² + AC² = 16 + 9 = 25 = BC².' }],
+      draw(g, t) {
+        g.view(30, 190, 250); const A = P(0, 0), B = P(4, 0), C = P(0, 3), D = P(7, 4), E = P(3, 7), F = P(4, -4), G = P(0, -4), H = P(-3, 3), K = P(-3, 0), L0 = P(1.44, 1.92), L = P(4.44, 5.92);
+        const a1 = es(t, .1, .22), a2 = es(t, .22, .3), a3 = es(t, .3, .42), b1 = es(t, .46, .57), b2 = es(t, .57, .65), b3 = es(t, .65, .78);
+        const rA = es(t, .36, .44), rB = es(t, .72, .8);
+        g.poly([B, D, E, C], 'none', { stroke: '#888', w: 1.5 }); g.poly([A, B, F, G], 'none', { stroke: '#888', w: 1.5 }); g.poly([A, C, H, K], 'none', { stroke: '#888', w: 1.5 });
+        g.poly([B, D, L, L0], COL.c, { o: .15 + .45 * rA }); g.poly([L0, L, E, C], COL.t, { o: .15 + .45 * rB });
+        g.poly([A, B, C], '#fff', { o: .12, stroke: '#fff', w: 2.5 });
+        g.line(A, L, COL.r, 2, '5 4');
+        let p1 = null, p2 = null;
+        if (t >= .1 && t < .46) p1 = a2 <= 0 && a3 <= 0 ? [B, F, lerp2(G, P(0, -1), a1), lerp2(A, C, a1)] : a3 <= 0 ? rigid([B, F, P(0, -1), C], B, B, -Math.PI / 2, a2) : [B, lerp2(A, L0, a3), lerp2(P(3, 4), L, a3), D];
+        else if (t >= .46) p1 = [B, lerp2(A, L0, 1), lerp2(P(3, 4), L, 1), D];
+        if (t >= .46 && t < .84) p2 = b2 <= 0 && b3 <= 0 ? [C, H, lerp2(K, P(1, 0), b1), lerp2(A, B, b1)] : b3 <= 0 ? rigid([C, H, P(1, 0), B], C, C, Math.PI / 2, b2) : [C, lerp2(A, L0, b3), lerp2(P(3, 4), L, b3), E];
+        else if (t >= .84) p2 = [C, L0, L, E];
+        if (t >= .84) p1 = [B, L0, L, D];
+        if (p1) g.poly(p1, COL.c, { o: .75, stroke: '#fff', w: 2 });
+        if (p2) g.poly(p2, COL.t, { o: .75, stroke: '#fff', w: 2 });
+        if (t < .1) { g.poly([A, B, F, G], COL.c, { o: .6, stroke: '#fff', w: 2 }); g.poly([A, C, H, K], COL.t, { o: .6, stroke: '#fff', w: 2 }); }
+        if (t >= .1 && t < .46) g.poly([A, C, H, K], COL.t, { o: .35, stroke: '#fff', w: 1.5 });
+        g.text(P(2, -2), 'AB²', 20, '#fff', 'middle', t < .1 ? 1 : 0); g.text(P(-1.5, 1.5), 'AC²', 19, '#fff', 'middle', t < .46 ? 1 : 0); g.text(P(4.5, 3.8), 'BC²', 20, '#ccc', 'middle', 0);
+        [[A, 'A', -.4, -.35], [B, 'B', .4, -.3], [C, 'C', -.35, .35], [D, 'D', .4, .2], [E, 'E', -.2, .4], [L0, 'L′', -.4, -.1], [L, 'L', .35, .3], [H, 'H', -.3, .3]].forEach(([p, s, dx, dy]) => g.text(P(p.x + dx, p.y + dy), s, 17));
+        g.px(300, 392, t < .31 ? (EN() ? 'area stays constant: AB² = 16' : 'aria rămâne constantă: AB² = 16') : t < .46 ? 'AB² = ' + (EN() ? 'rectangle' : 'dreptunghi') + ' BDLL′ = 16' : t < .78 ? (EN() ? 'area stays constant: AC² = 9' : 'aria rămâne constantă: AC² = 9') : t < .84 ? 'AC² = ' + (EN() ? 'rectangle' : 'dreptunghi') + ' CELL′ = 9' : 'AB² + AC² = 16 + 9 = 25 = BC²', 20, '#fff');
+      }
+    });
+    // 2. (a+b)^2
+    DEMOS.push({
+      ro: 'Pătratul unei sume: (a + b)²', en: 'Square of a sum: (a + b)²', dur: 13000,
+      steps: [
+        { at: 0, ro: 'Un pătrat cu latura a + b (aici a = 3, b = 2). Aria lui este (a + b)².', en: 'A square with side a + b (here a = 3, b = 2). Its area is (a + b)².' },
+        { at: .2, ro: 'Îl tăiem în patru părți: un pătrat a·a, un pătrat b·b și două dreptunghiuri a·b.', en: 'We cut it into four parts: an a·a square, a b·b square and two a·b rectangles.' },
+        { at: .55, ro: 'Despărțim piesele: se vede clar suma ariilor lor.', en: 'We pull the pieces apart: the sum of their areas is clear.' },
+        { at: .8, ro: '(a + b)² = a² + 2ab + b²   (aici: 25 = 9 + 12 + 4)', en: '(a + b)² = a² + 2ab + b²   (here: 25 = 9 + 12 + 4)' }],
+      draw(g, t) {
+        g.view(50, 175, 335); const a = 3, b = 2, s = 5, e = es(t, .55, .7) * 0.3;
+        const cut = es(t, .2, .4), fill = es(t, .3, .5);
+        const pieces = [[0, 0, a, a, COL.a, 'a²', -1, -1], [a, 0, s, a, COL.t, 'ab', 1, -1], [0, a, a, s, COL.t, 'ab', -1, 1], [a, a, s, s, COL.b, 'b²', 1, 1]];
+        pieces.forEach(([x0, y0, x1, y1, c, lab, dx, dy]) => { const ox2 = dx * e, oy2 = dy * e; g.poly(rect(x0 + ox2, y0 + oy2, x1 + ox2, y1 + oy2), c, { o: .65 * fill, stroke: '#fff', w: 2 }); g.text(P((x0 + x1) / 2 + ox2, (y0 + y1) / 2 + oy2), lab, 24, '#fff', 'middle', fill); });
+        if (t < .55) g.poly(rect(0, 0, s, s), 'none', { stroke: '#aaa', w: 2 });
+        if (t < .55) { g.line(P(a, 0), P(a, s * cut), '#fff', 2, '6 4'); g.line(P(0, a), P(s * cut, a), '#fff', 2, '6 4'); }
+        g.text(P(1.5, -.4), 'a', 18, COL.a); g.text(P(4, -.4), 'b', 18, COL.b); g.text(P(-.4, 1.5), 'a', 18, COL.a); g.text(P(-.4, 4), 'b', 18, COL.b);
+        g.px(300, 392, '(a + b)² = a² + 2ab + b²', 22, '#fff', 'middle', es(t, .8, .95));
+      }
+    });
+    // 3. diferenta de patrate
+    DEMOS.push({
+      ro: 'Diferența de pătrate: a² − b²', en: 'Difference of squares: a² − b²', dur: 14000,
+      steps: [
+        { at: 0, ro: 'Pătratul de latură a (aici a = 5). Aria lui este a².', en: 'The square of side a (here a = 5). Its area is a².' },
+        { at: .2, ro: 'Scoatem din colț pătratul de latură b (b = 2). Rămâne a² − b².', en: 'We remove the corner square of side b (b = 2). What is left is a² − b².' },
+        { at: .45, ro: 'Tăiem figura rămasă în două dreptunghiuri.', en: 'We cut the remaining shape into two rectangles.' },
+        { at: .6, ro: 'Rotim dreptunghiul de sus și îl lipim în dreapta: se formează un dreptunghi cu laturile (a − b) și (a + b).', en: 'We rotate the top rectangle and attach it on the right: a rectangle with sides (a − b) and (a + b) appears.' },
+        { at: .88, ro: 'a² − b² = (a − b)(a + b)   (aici: 25 − 4 = 3 · 7 = 21)', en: 'a² − b² = (a − b)(a + b)   (here: 25 − 4 = 3 · 7 = 21)' }],
+      draw(g, t) {
+        g.view(50, 110, 335); const a = 5, b = 2, d = a - b;
+        const rem = es(t, .2, .4);
+        g.poly(rect(0, 0, a, d), COL.a, { o: .65, stroke: '#fff', w: 2 });
+        const up = rect(0, d, d, a), c0 = P(d / 2, d + b / 2), c1 = P(a + b / 2, d / 2), m = es(t, .6, .85);
+        g.poly(rigid(up, c0, c1, -Math.PI / 2, m), COL.t, { o: .7, stroke: '#fff', w: 2 });
+        const sq = rect(d, d, a, a);
+        const k = 1 - rem; if (k > 0) g.poly(sq.map(p => P(p.x + rem * 2.2, p.y + rem * 1.2)), COL.r, { o: .6 * k, stroke: '#fff', w: 2 });
+        if (t < .6 && t > .4) g.line(P(0, d), P(d, d), '#fff', 2, '6 4');
+        g.text(P(2.5, 1.5), '(a − b)', 18, '#fff', 'middle', 1); g.text(P(d / 2 + (a + b / 2 - d / 2) * m, 4 - 2.5 * m + 0), 'b·(a−b)', 14, '#fff', 'middle', 0.0);
+        g.text(P(d + b / 2 + rem * 2.2, d + b / 2 + rem * 1.2), 'b²', 22, '#fff', 'middle', 1 - rem);
+        g.text(P(2.5, -.4), 'a', 18, COL.a, 'middle', 1 - m); g.text(P(a + b / 2, -.4), 'b', 18, COL.t, 'middle', m);
+        g.text(P(3.5, d + .45), 'a + b', 20, '#fff', 'middle', m); g.text(P(-.45, d / 2), 'a − b', 16, '#fff', 'middle', m);
+        g.px(300, 392, 'a² − b² = (a − b)(a + b)', 22, '#fff', 'middle', es(t, .88, 1));
+      }
+    });
+    // 4. suma unghiurilor (paralela prin vârf)
+    DEMOS.push({
+      ro: 'Suma unghiurilor unui triunghi (paralelă prin vârf)', en: 'Angle sum of a triangle (parallel through a vertex)', dur: 20000,
+      steps: [
+        { at: 0, ro: 'Triunghiul ABC are unghiurile α (în A), β (în B) și γ (în C).', en: 'Triangle ABC has angles α (at A), β (at B) and γ (at C).' },
+        { at: .15, ro: 'Construim prin vârful C dreapta d paralelă cu latura AB.', en: 'Through vertex C we draw the line d parallel to side AB.' },
+        { at: .3, ro: 'Dreptele paralele d și AB sunt tăiate de secanta AC. Unghiurile alterne interne sunt egale: unghiul format de d cu CA este egal cu α.', en: 'The parallels d and AB are cut by the transversal AC. Alternate interior angles are equal: the angle between d and CA equals α.' },
+        { at: .52, ro: 'La fel, secanta BC: unghiul format de d cu CB este egal cu β (alterne interne).', en: 'Likewise for the transversal BC: the angle between d and CB equals β (alternate interior).' },
+        { at: .75, ro: 'În C, unghiurile α, γ și β formează împreună un unghi alungit: α + γ + β = 180°.', en: 'At C the angles α, γ and β together make a straight angle: α + γ + β = 180°.' }],
+      draw(g, t) {
+        g.view(55, 105, 290); const A = P(0, 0), B = P(7, 0), C = P(2.5, 3.6), r = .95;
+        const ang = (u, v) => Math.atan2(v.y - u.y, v.x - u.x), nrm = (x) => { while (x < 0) x += 2 * Math.PI; while (x >= 2 * Math.PI) x -= 2 * Math.PI; return x; };
+        const fA = ang(A, B), wA = nrm(ang(A, C) - ang(A, B)), fB = ang(B, C), wB = nrm(ang(B, A) - ang(B, C)), fC = ang(C, A), wC = nrm(ang(C, B) - ang(C, A));
+        const dA = Math.round(wA / D2R), dB = Math.round(wB / D2R), dC = 180 - dA - dB;
+        g.poly([A, B, C], '#4da6ff', { o: .15, stroke: '#fff', w: 2.5 });
+        const p = es(t, .15, .3);
+        if (p > 0) { g.line(P(C.x - 3.4 * p, C.y), P(C.x + 4.2 * p, C.y), COL.r, 2.5); if (p >= 1) { g.text(P(C.x + 4.3, C.y + .35), 'd', 20, COL.r); g.text(P(-.8, 0), '', 1); } }
+        const dim = (pts, c, o) => g.poly(pts, c, { o, stroke: '#fff', w: 1.2 });
+        const sA = sector(A, r, fA, fA + wA, 18), sB = sector(B, r, fB, fB + wB, 18), sC = sector(C, r, fC, fC + wC, 18);
+        const m1 = es(t, .3, .5), m2 = es(t, .52, .72);
+        dim(sA, COL.a, t > .3 ? .35 : .85); dim(sB, COL.t, t > .52 ? .35 : .85); dim(sC, COL.b, .85);
+        if (t >= .3) dim(rigid(sA, A, C, Math.PI, m1), COL.a, .9);
+        if (t >= .52) dim(rigid(sB, B, C, Math.PI, m2), COL.t, .9);
+        const lab = (V, f, w, s, col, rr, th, m, to) => { const mid = P(V.x + rr * Math.cos(f + w / 2), V.y + rr * Math.sin(f + w / 2)), q = rigid([mid], V, to || V, th || 0, m || 0)[0]; g.text(q, s, 17, '#111'); };
+        lab(A, fA, wA, 'α'); lab(B, fB, wB, 'β'); lab(C, fC, wC, 'γ', null, r * .62);
+        if (t >= .3) lab(A, fA, wA, 'α', null, r * .62, Math.PI, m1, C);
+        if (t >= .52) lab(B, fB, wB, 'β', null, r * .62, Math.PI, m2, C);
+        g.text(P(A.x - .3, A.y - .3), 'A', 18); g.text(P(B.x + .3, B.y - .3), 'B', 18); g.text(P(C.x, C.y + .4 + (p > 0 ? .0 : 0)), 'C', 18);
+        if (t >= .3 && t < .52) g.px(300, 385, 'α = ' + dA + '° (alterne interne)', 20, COL.a);
+        if (t >= .52 && t < .75) g.px(300, 385, 'β = ' + dB + '° (alterne interne)'.replace('alterne interne', EN() ? 'alternate interior' : 'alterne interne'), 20, COL.t);
+        if (t >= .75) g.px(300, 385, 'α + γ + β = ' + dA + '° + ' + dC + '° + ' + dB + '° = 180°', 22, '#fff', 'middle', es(t, .75, .9));
+        if (t >= .3 && t < .52) g.px(300, 385, (EN() ? 'α = ' : 'α = ') + dA + '° (' + (EN() ? 'alternate interior' : 'alterne interne') + ')', 20, COL.a);
+      }
+    });
+    // 5. unghi înscris în cerc (cazul general, triunghiuri isoscele)
+    DEMOS.push({
+      ro: 'Unghiul înscris în cerc (cazul general)', en: 'Inscribed angle (general case)', dur: 26000,
+      steps: [
+        { at: 0, ro: 'Pe un cerc cu centrul O avem punctele A, B și P. Unghiul înscris ∠APB și unghiul la centru ∠AOB „văd” același arc AB. Vrem să arătăm că ∠AOB = 2 · ∠APB.', en: 'On a circle with centre O we have points A, B and P. The inscribed angle ∠APB and the central angle ∠AOB “see” the same arc AB. We want to show ∠AOB = 2 · ∠APB.' },
+        { at: .13, ro: 'Ducem diametrul PQ, prin centrul O. Razele OA, OP, OB sunt egale (= r).', en: 'Draw the diameter PQ through the centre O. The radii OA, OP, OB are equal (= r).' },
+        { at: .28, ro: 'Triunghiul AOP are OA = OP, deci este isoscel: ∠OAP = ∠OPA = α.', en: 'Triangle AOP has OA = OP, so it is isosceles: ∠OAP = ∠OPA = α.' },
+        { at: .43, ro: '∠AOQ este unghi exterior al triunghiului AOP: este egal cu suma celor două unghiuri neadiacente, deci ∠AOQ = α + α = 2α.', en: '∠AOQ is an exterior angle of triangle AOP: it equals the sum of the two non-adjacent angles, so ∠AOQ = α + α = 2α.' },
+        { at: .58, ro: 'La fel, triunghiul BOP este isoscel (OB = OP): ∠OBP = ∠OPB = β, iar unghiul exterior ∠QOB = 2β.', en: 'Likewise triangle BOP is isosceles (OB = OP): ∠OBP = ∠OPB = β, and the exterior angle ∠QOB = 2β.' },
+        { at: .73, ro: 'Atunci ∠AOB = ∠AOQ + ∠QOB = 2α + 2β = 2(α + β) = 2 · ∠APB.', en: 'Then ∠AOB = ∠AOQ + ∠QOB = 2α + 2β = 2(α + β) = 2 · ∠APB.' },
+        { at: .88, ro: 'Mutăm P pe arcul mare: unghiul înscris rămâne același (jumătate din unghiul la centru), oriunde ar fi P.', en: 'We move P along the major arc: the inscribed angle stays the same (half the central angle), wherever P is.' }],
+      draw(g, t) {
+        g.view(46, 300, 192); const r = 3, O = P(0, 0), rad = (d) => d * D2R, pt = (d) => P(r * Math.cos(rad(d)), r * Math.sin(rad(d)));
+        const A = pt(200), B = pt(320), ph = 90 + 35 * es(t, .88, 1), Pp = pt(ph), Q = pt(ph + 180);
+        const ang = (u, v) => Math.atan2(v.y - u.y, v.x - u.x);
+        const dif = (a1, a2) => { let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+        const sec2 = (c, a1, a2, rr) => sector(c, rr, a1, a1 + dif(a1, a2), 16);
+        const lbl = (V, a1, a2, rr, s, o, col) => { const m = a1 + dif(a1, a2) / 2; g.text(P(V.x + rr * Math.cos(m), V.y + rr * Math.sin(m)), s, 15, col || '#111', 'middle', o); };
+        const alpha = Math.abs(dif(ang(Pp, O), ang(Pp, A))) / D2R, beta = Math.abs(dif(ang(Pp, O), ang(Pp, B))) / D2R;
+        g.circle(O, r, '#4da6ff', '#fff', .08);
+        const e1 = es(t, .13, .25), e2 = es(t, .28, .38), e3 = es(t, .43, .55), e4 = es(t, .58, .68), e5 = es(t, .73, .85);
+        g.poly([A, O, Pp], COL.a, { o: .2 * e2 * (1 - e4 * .6) }); g.poly([B, O, Pp], COL.t, { o: .2 * e4 });
+        g.line(Pp, Q, '#aaa', 2, '6 4'); if (e1 < 1) g.line(Pp, Q, '#111', 0); 
+        g.line(Pp, A, '#fff', 2.5); g.line(Pp, B, '#fff', 2.5); g.line(O, A, '#fff', 2); g.line(O, B, '#fff', 2);
+        if (e1 > 0) [[O, A], [O, Pp], [O, B]].forEach(([u, v]) => { const mid = P((u.x + v.x) / 2, (u.y + v.y) / 2), dx = v.x - u.x, dy = v.y - u.y, l = Math.hypot(dx, dy), nx = -dy / l * .15, ny = dx / l * .15; g.line(P(mid.x - nx, mid.y - ny), P(mid.x + nx, mid.y + ny), '#fff', 3); });
+        if (e2 > 0) { g.poly(sec2(Pp, ang(Pp, O), ang(Pp, A), .7), COL.a, { o: .9 * e2, stroke: '#fff', w: 1 }); g.poly(sec2(A, ang(A, O), ang(A, Pp), .7), COL.a, { o: .9 * e2, stroke: '#fff', w: 1 }); lbl(Pp, ang(Pp, O), ang(Pp, A), .5, 'α', e2); lbl(A, ang(A, O), ang(A, Pp), .5, 'α', e2); }
+        if (e3 > 0) { g.poly(sec2(O, ang(O, A), ang(O, Q), .95), '#ff8a80', { o: 0 } ? '#ff8a80' : '#ff8a80', { o: .55 * e3, stroke: '#fff', w: 1.2 }); lbl(O, ang(O, A), ang(O, Q), .62, '2α', e3, '#fff'); }
+        if (e4 > 0) { g.poly(sec2(Pp, ang(Pp, O), ang(Pp, B), .7), COL.t, { o: .9 * e4, stroke: '#fff', w: 1 }); g.poly(sec2(B, ang(B, O), ang(B, Pp), .7), COL.t, { o: .9 * e4, stroke: '#fff', w: 1 }); lbl(Pp, ang(Pp, O), ang(Pp, B), .5, 'β', e4); lbl(B, ang(B, O), ang(B, Pp), .5, 'β', e4); g.poly(sec2(O, ang(O, Q), ang(O, B), .95), COL.t, { o: .55 * e4, stroke: '#fff', w: 1.2 }); lbl(O, ang(O, Q), ang(O, B), .62, '2β', e4, '#fff'); }
+        if (e5 > 0) { g.poly(sec2(Pp, ang(Pp, A), ang(Pp, B), 1.05), '#fff', { o: .12 * e5, stroke: '#fff', w: 2 }); }
+        g.text(P(A.x - .35, A.y - .1), 'A', 19); g.text(P(B.x + .35, B.y - .1), 'B', 19); g.text(P(Pp.x, Pp.y + .4), 'P', 19); g.text(P(O.x + .22, O.y + .3), 'O', 17); if (e1 > 0) g.text(P(Q.x + .1, Q.y - .45), 'Q', 19, '#fff', 'middle', e1);
+        const aa = Math.round(alpha + beta), cc = Math.round(Math.abs(dif(ang(O, A), ang(O, B))) / D2R);
+        const st = t < .13 ? '∠AOB = 2 · ∠APB ?' : t < .28 ? 'OA = OP = OB = r' : t < .43 ? 'OA = OP  ⇒  ∠OAP = ∠OPA = α' : t < .58 ? '∠AOQ = α + α = 2α  (' + (EN() ? 'exterior angle' : 'unghi exterior') + ')' : t < .73 ? 'OB = OP  ⇒  ∠OBP = ∠OPB = β,  ∠QOB = 2β' : t < .88 ? '∠AOB = 2α + 2β = 2(α + β) = 2 · ∠APB' : '∠APB = ' + aa + '°   ∠AOB = ' + cc + '° = 2 · ' + aa + '°';
+        g.px(300, 392, st, 20, '#fff');
+      }
+    });
+    // 6. paralelogram
+    DEMOS.push({
+      ro: 'Aria paralelogramului', en: 'Area of a parallelogram', dur: 11000,
+      steps: [
+        { at: 0, ro: 'Un paralelogram cu baza b și înălțimea h.', en: 'A parallelogram with base b and height h.' },
+        { at: .25, ro: 'Tăiem un triunghi dreptunghic pe verticală, de la un capăt.', en: 'We cut a right triangle off one end, along the vertical.' },
+        { at: .45, ro: 'Îl mutăm la celălalt capăt: paralelogramul devine un dreptunghi cu aceeași arie.', en: 'We move it to the other end: the parallelogram becomes a rectangle with the same area.' },
+        { at: .8, ro: 'Aria dreptunghiului este b · h, deci aria paralelogramului este A = b · h.', en: 'The rectangle has area b · h, so the parallelogram has area A = b · h.' }],
+      draw(g, t) {
+        g.view(55, 100, 300); const b = 5, d = 2, h = 3, m = es(t, .45, .7);
+        g.poly([P(d, 0), P(b + d, 0), P(b + d, h), P(d, h)].concat([]), COL.c, { o: m * .2 });
+        g.poly([P(0, 0), P(b, 0), P(b + d, h), P(d, h)], COL.c, { o: .55, stroke: '#fff', w: 2 });
+        const tri = [P(0, 0), P(d, 0), P(d, h)]; g.poly(tri.map(p => P(p.x + b * m, p.y)), COL.t, { o: .85, stroke: '#fff', w: 2 });
+        if (t > .2) g.line(P(d, 0), P(d, h), '#fff', 2, '6 4');
+        g.line(P(d, 0), P(d, h), COL.r, 2.5, '5 4'); g.text(P(d - .3, h / 2), 'h', 20, COL.r); g.text(P(b / 2 + d / 2 + .8, -.4), 'b', 20, '#fff');
+        g.px(300, 392, 'A = b · h', 24, '#fff', 'middle', es(t, .8, .95));
+      }
+    });
+    // 7. triunghi
+    DEMOS.push({
+      ro: 'Aria triunghiului', en: 'Area of a triangle', dur: 11000,
+      steps: [
+        { at: 0, ro: 'Un triunghi cu baza b și înălțimea h.', en: 'A triangle with base b and height h.' },
+        { at: .2, ro: 'Copiem triunghiul și îl rotim cu 180° în jurul mijlocului unei laturi.', en: 'We copy the triangle and rotate it 180° around the midpoint of a side.' },
+        { at: .65, ro: 'Cele două triunghiuri formează un paralelogram cu aria b · h. Un triunghi este jumătate din el.', en: 'The two triangles form a parallelogram of area b · h. One triangle is half of it.' },
+        { at: .85, ro: 'A = (b · h) / 2', en: 'A = (b · h) / 2' }],
+      draw(g, t) {
+        g.view(55, 100, 300); const A = P(0, 0), B = P(5, 0), C = P(1.5, 3), M = P(3.25, 1.5), m = es(t, .2, .65);
+        g.poly([A, B, C].map(p => rotp(p, M, Math.PI * m)), COL.t, { o: .7, stroke: '#fff', w: 2 });
+        g.poly([A, B, C], COL.c, { o: .75, stroke: '#fff', w: 2 });
+        g.line(P(1.5, 0), P(1.5, 3), COL.r, 2.5, '5 4'); g.text(P(1.2, 1.5), 'h', 20, COL.r); g.text(P(2.5, -.4), 'b', 20, '#fff');
+        g.px(300, 392, 'A = (b · h) / 2', 24, '#fff', 'middle', es(t, .85, 1));
+      }
+    });
+    // 8. cerc arie
+    DEMOS.push({
+      ro: 'Aria cercului: π · r²', en: 'Area of a circle: π · r²', dur: 16000,
+      steps: [
+        { at: 0, ro: 'Tăiem cercul în sectoare egale (aici 18), ca felii dintr-o pizza.', en: 'We cut the circle into equal sectors (18 here), like pizza slices.' },
+        { at: .2, ro: 'Le așezăm alternat, cu vârful în sus și în jos: se formează o figură aproape dreptunghiulară.', en: 'We lay them alternately, tip up and tip down: an almost rectangular shape forms.' },
+        { at: .75, ro: 'Lățimea ≈ jumătate din lungimea cercului = π · r, înălțimea = r. Aria ≈ π · r · r = π · r².', en: 'Width ≈ half the circumference = π · r, height = r. Area ≈ π · r · r = π · r².' }],
+      draw(g, t) {
+        g.view(55, 300, 232); const n = 18, r = 1.6, C = P(0, 1.9), s = Math.sin(Math.PI / n), c = Math.cos(Math.PI / n), yb = -2.2, x0 = -(n - 1) * r * s / 2, m = es(t, .2, .7);
+        for (let i = 0; i < n; i++) {
+          const th = i * 2 * Math.PI / n, a0 = th - Math.PI / n, a1 = th + Math.PI / n, up = i % 2 === 0, j = Math.floor(i / 2);
+          const tgt = up ? P(x0 + 2 * j * r * s, yb) : P(x0 + (2 * j + 1) * r * s, yb + r * c);
+          let rot = (up ? Math.PI / 2 : -Math.PI / 2) - th; while (rot > Math.PI) rot -= 2 * Math.PI; while (rot < -Math.PI) rot += 2 * Math.PI;
+          g.poly(rigid(sector(C, r, a0, a1, 8), C, tgt, rot, m), up ? '#4da6ff' : '#4dd0e1', { o: .8, stroke: '#111', w: 1 });
+        }
+        const k = es(t, .75, .9);
+        if (k > 0) { g.line(P(x0 - .3, yb + r + .3), P(-x0 + .3, yb + r + .3), '#fff', 2, ''); g.text(P(0, yb + r + .65), 'π · r', 22, '#fff', 'middle', k); g.line(P(-x0 + .5, yb), P(-x0 + .5, yb + r), COL.r, 2); g.text(P(-x0 + .85, yb + r / 2), 'r', 20, COL.r, 'middle', k); g.px(300, 392, 'A = π · r · r = π · r²', 22, '#fff', 'middle', k); }
+      }
+    });
+    // 9. lungime cerc
+    DEMOS.push({
+      ro: 'Lungimea cercului: π · d', en: 'Circumference: π · d', dur: 15000,
+      steps: [
+        { at: 0, ro: 'Rostogolim un cerc pe o dreaptă, o tură completă, începând de la punctul marcat.', en: 'We roll a circle along a line, one full turn, starting from the marked point.' },
+        { at: .85, ro: 'Lungimea desfășurată este lungimea cercului. Măsurată cu diametrul: încap 3 diametre și încă puțin (≈ 0,14 din diametru): C = π · d ≈ 3,14 · d.', en: 'The unrolled length is the circumference. Measured with the diameter: 3 diameters and a little more (≈ 0.14 of a diameter): C = π · d ≈ 3.14 · d.' }],
+      draw(g, t) {
+        const r = 1, d = 2; g.view(62, 300 - Math.PI * 62, 235); const L = 2 * Math.PI * Math.min(t / .8, 1), ph = L / r;
+        g.line(P(-1.2, 0), P(7.6, 0), '#aaa', 2);
+        const tr = []; for (let u = 0; u <= ph + 1e-6; u += .1) tr.push(P(u * r - r * Math.sin(u), r - r * Math.cos(u))); if (tr.length > 1) tr.forEach((p, i) => { if (i) g.line(tr[i - 1], p, '#ffd54f', 1.5); });
+        g.circle(P(L, r), r, '#4da6ff', '#fff', .25);
+        const mp = P(L - r * Math.sin(ph), r - r * Math.cos(ph)); g.line(P(L, r), mp, '#fff', 1.5);
+        g.circle(mp, .06, COL.r, COL.r, 1);
+        g.line(P(0, -.12), P(L, -.12), COL.t, 5); g.circle(P(0, 0), .05, COL.r, COL.r, 1);
+        const q = es(t, .85, .97);
+        if (q > 0) { const bars = [[0, 2], [2, 4], [4, 6], [6, 2 * Math.PI]]; bars.forEach(([x0, x1], i) => { const x1b = x0 + (x1 - x0) * q; g.line(P(x0, -.55), P(x1b, -.55), i === 3 ? COL.r : (i % 2 ? COL.b : COL.a), 7); }); g.text(P(Math.PI, -1), '3 · d + 0,14 · d = π · d ≈ 3,14 · d', 20, '#fff', 'middle', q); }
+        g.px(300, 392, 'C = π · d = 2 · π · r', 22, '#fff', 'middle', es(t, .85, 1));
+      }
+    });
+    // 10. suma numerelor impare
+    DEMOS.push({
+      ro: 'Suma numerelor impare = pătrat perfect', en: 'Sum of odd numbers = perfect square', dur: 13000,
+      steps: [
+        { at: 0, ro: 'Un pătrat de 1 × 1: 1 = 1².', en: 'A 1 × 1 square: 1 = 1².' },
+        { at: .17, ro: 'Adăugăm un colț cu 3 pătrățele: 1 + 3 = 4 = 2².', en: 'We add an L-shape of 3 squares: 1 + 3 = 4 = 2².' },
+        { at: .34, ro: 'Alt colț, cu 5 pătrățele: 1 + 3 + 5 = 9 = 3².', en: 'Another L-shape of 5 squares: 1 + 3 + 5 = 9 = 3².' },
+        { at: .6, ro: 'Fiecare colț nou are cu 2 pătrățele mai mult și completează pătratul următor.', en: 'Each new L-shape has 2 squares more and completes the next square.' },
+        { at: .9, ro: '1 + 3 + 5 + 7 + 9 + 11 = 36 = 6²: suma primelor n numere impare este n².', en: '1 + 3 + 5 + 7 + 9 + 11 = 36 = 6²: the sum of the first n odd numbers is n².' }],
+      draw(g, t) {
+        g.view(52, 144, 352); const n = 6, p = t * n, cols = ['#6cc28f', '#4da6ff', '#e0ae52', '#c792ea', '#ff8a80', '#4dd0e1'];
+        for (let k = 1; k <= n; k++) { const al = clamp(p - (k - 1), 0, 1); if (al <= 0) continue; for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) if (Math.max(i, j) === k - 1) g.poly(rect(i + .03, j + .03, i + .97, j + .97), cols[k - 1], { o: .85 * al }); }
+        for (let i = 0; i <= n; i++) { g.line(P(i, 0), P(i, n), '#444', 1); g.line(P(0, i), P(n, i), '#444', 1); }
+        const K = clamp(Math.ceil(p - 1e-9), 1, n), odd = Array.from({ length: K }, (_, i) => 2 * i + 1);
+        g.px(300, 392, odd.join(' + ') + ' = ' + K * K + ' = ' + K + '²', 24, '#fff');
+      }
+    });
+    // 11. suma 1..n
+    DEMOS.push({
+      ro: 'Suma 1 + 2 + … + n', en: 'Sum 1 + 2 + … + n', dur: 13000,
+      steps: [
+        { at: 0, ro: 'Construim „scara” cu 1 + 2 + 3 + 4 + 5 + 6 pătrățele (n = 6).', en: 'We build the “staircase” with 1 + 2 + 3 + 4 + 5 + 6 squares (n = 6).' },
+        { at: .2, ro: 'Copiem scara și o rotim cu 180°.', en: 'We copy the staircase and rotate it by 180°.' },
+        { at: .65, ro: 'Cele două scări se potrivesc și formează un dreptunghi n × (n + 1) = 6 × 7 = 42 de pătrățele.', en: 'The two staircases fit together into an n × (n + 1) = 6 × 7 = 42 squares rectangle.' },
+        { at: .85, ro: 'O scară este jumătate: 1 + 2 + … + n = n(n + 1) / 2 = 21.', en: 'One staircase is half: 1 + 2 + … + n = n(n + 1) / 2 = 21.' }],
+      draw(g, t) {
+        g.view(40, 40, 340); const n = 6, m = es(t, .2, .65), p0 = P(3 + 7, 3), p1 = P(3, 4);
+        for (let i = 0; i < n; i++) for (let j = 0; j <= i; j++) g.poly(rect(i + .03, j + .03, i + .97, j + .97), COL.c, { o: .85 });
+        for (let i = 0; i < n; i++) for (let j = 0; j <= i; j++) { const sq = rect(i + .03 + 7, j + .03, i + .97 + 7, j + .97); g.poly(rigid(sq, p0, p1, Math.PI, m), COL.t, { o: .85 }); }
+        g.px(300, 392, 'n(n + 1) / 2 = 6 · 7 / 2 = 21', 22, '#fff', 'middle', es(t, .85, 1));
+        if (t > .65) g.line(P(0, 7.3), P(6, 7.3), '#fff', 2); if (t > .65) { g.text(P(3, 7.7), 'n = 6', 16, '#fff', 'middle', es(t, .65, .8)); g.text(P(6.6, 3.5), 'n + 1 = 7', 16, '#fff', 'start', es(t, .65, .8)); }
+      }
+    });
+
+    // ===== demonstrații suplimentare =====
+    const mid2 = (u, v) => P((u.x + v.x) / 2, (u.y + v.y) / 2);
+    const lerp2 = (u, v, k) => P(u.x + (v.x - u.x) * k, u.y + (v.y - u.y) * k);
+    const dist2 = (u, v) => Math.hypot(u.x - v.x, u.y - v.y);
+    // 12. Thales
+    DEMOS.push({
+      ro: 'Teorema lui Thales (paralele tăiate de secante)', en: 'Thales\' theorem (parallels cut by transversals)', dur: 20000,
+      steps: [
+        { at: 0, ro: 'Două drepte (secante) care pornesc din O taie dreapta AB. Ducem prin punctele A′ ∈ OA și B′ ∈ OB o dreaptă A′B′ paralelă cu AB.', en: 'Two lines (transversals) from O are cut by line AB. Through A′ ∈ OA and B′ ∈ OB we draw A′B′ parallel to AB.' },
+        { at: .15, ro: 'Mutăm paralela A′B′ de-a lungul secantelor. Raportul OA′/OA este mereu egal cu raportul OB′/OB.', en: 'We slide the parallel A′B′ along the transversals. The ratio OA′/OA is always equal to OB′/OB.' },
+        { at: .6, ro: 'Teorema lui Thales: paralelele determină pe secante segmente proporționale: OA′/A′A = OB′/B′B. Și A′B′/AB are aceeași valoare (triunghiuri asemenea).', en: 'Thales\' theorem: parallels cut proportional segments on the transversals: OA′/A′A = OB′/B′B. A′B′/AB has the same value (similar triangles).' }],
+      draw(g, t) {
+        g.view(60, 90, 300); const O = P(0, 0), A = P(7, .5), B = P(4, 4), u = clamp((t - .15) / .7, 0, 1), k = .5 + .33 * Math.sin(2 * Math.PI * u) * (t < .15 ? 0 : 1);
+        const A2 = lerp2(O, A, k), B2 = lerp2(O, B, k);
+        g.poly([O, A, B], '#4da6ff', { o: .1 }); g.poly([O, A2, B2], COL.t, { o: .22 });
+        g.line(O, lerp2(O, A, 1.12), '#aaa', 2); g.line(O, lerp2(O, B, 1.12), '#aaa', 2);
+        g.line(A, B, '#fff', 3); g.line(A2, B2, COL.r, 3);
+        g.line(O, A2, COL.a, 5); g.line(A2, A, COL.t, 5); g.line(O, B2, COL.a, 5); g.line(B2, B, COL.t, 5);
+        [[O, 'O', -.3, -.3], [A, 'A', .35, 0], [B, 'B', 0, .4], [A2, 'A′', .2, -.4], [B2, 'B′', -.4, .1]].forEach(([p, s, dx, dy]) => { g.dot(P(0, 0), 0, 'none'); g.text(P(p.x + dx, p.y + dy), s, 19); });
+        g.text(P(0, -1), '', 1);
+        const r1 = dist2(O, A2) / dist2(O, A), r2 = dist2(O, B2) / dist2(O, B), r3 = dist2(A2, B2) / dist2(A, B), q1 = dist2(O, A2) / dist2(A2, A), q2 = dist2(O, B2) / dist2(B2, B);
+        const f = (x) => (Math.round(x * 100) / 100).toString().replace('.', EN() ? '.' : ',');
+        g.px(300, 368, "OA′/OA = " + f(r1) + "   OB′/OB = " + f(r2) + "   A′B′/AB = " + f(r3), 18, '#fff');
+        g.px(300, 392, "OA′/A′A = " + f(q1) + "   OB′/B′B = " + f(q2), 18, '#ffd54f', 'middle', es(t, .5, .65));
+      }
+    });
+    // 13. linia mijlocie
+    DEMOS.push({
+      ro: 'Linia mijlocie în triunghi', en: 'Midsegment of a triangle', dur: 20000,
+      steps: [
+        { at: 0, ro: 'M este mijlocul lui AB, N este mijlocul lui AC. Unim M cu N: MN este linia mijlocie. Vrem: MN ∥ BC și MN = BC / 2.', en: 'M is the midpoint of AB, N the midpoint of AC. Join M and N: MN is the midsegment. We want: MN ∥ BC and MN = BC / 2.' },
+        { at: .2, ro: 'Rotim triunghiul AMN cu 180° în jurul lui N (mijlocul lui AC): A ajunge în C, iar M într-un punct P.', en: 'Rotate triangle AMN by 180° around N (the midpoint of AC): A goes to C, and M goes to a point P.' },
+        { at: .6, ro: 'CP = AM = MB și CP ∥ AM, deci MBCP este paralelogram: MP ∥ BC și MP = BC.', en: 'CP = AM = MB and CP ∥ AM, so MBCP is a parallelogram: MP ∥ BC and MP = BC.' },
+        { at: .82, ro: 'N este și mijlocul lui MP, deci MN = MP / 2 = BC / 2 și MN ∥ BC.', en: 'N is also the midpoint of MP, so MN = MP / 2 = BC / 2 and MN ∥ BC.' }],
+      draw(g, t) {
+        g.view(48, 60, 295); const A = P(3, 4.2), B = P(0, 0), C = P(7, 0), M = mid2(A, B), N = mid2(A, C), m = es(t, .2, .55), Pp = rotp(M, N, Math.PI);
+        g.poly([A, B, C], '#4da6ff', { o: .15, stroke: '#fff', w: 2.5 });
+        g.poly([A, M, N].map(p => rotp(p, N, Math.PI * m)), COL.t, { o: .7, stroke: '#fff', w: 1.5 });
+        g.poly([A, M, N], COL.a, { o: .6, stroke: '#fff', w: 1.5 });
+        g.line(M, N, COL.r, 3.5);
+        const e = es(t, .55, .7); if (e > 0) { g.poly([M, B, C, Pp], 'none', { stroke: '#fff', w: 2, dash: '7 5', o: 1 }); g.text(P(Pp.x + .35, Pp.y), 'P', 19, '#fff', 'middle', e); }
+        [[A, 'A', 0, .4], [B, 'B', -.3, -.3], [C, 'C', .3, -.3], [M, 'M', -.35, .1], [N, 'N', .1, .4]].forEach(([p, s, dx, dy]) => g.text(P(p.x + dx, p.y + dy), s, 19));
+        const st = t < .2 ? 'AM = MB,  AN = NC' : t < .6 ? 'AMN → CPN  (rot. 180°)' : t < .82 ? 'MBCP ' + (EN() ? 'parallelogram' : 'paralelogram') + ':  MP ∥ BC,  MP = BC' : 'MN ∥ BC,   MN = BC / 2';
+        g.px(300, 390, st, 21, '#fff');
+      }
+    });
+    // 14. aria trapezului
+    DEMOS.push({
+      ro: 'Aria trapezului', en: 'Area of a trapezoid', dur: 17000,
+      steps: [
+        { at: 0, ro: 'Un trapez cu baza mică a = 3, baza mare b = 6 și înălțimea h = 3.', en: 'A trapezoid with short base a = 3, long base b = 6 and height h = 3.' },
+        { at: .2, ro: 'Copiem trapezul și îl rotim cu 180° în jurul mijlocului unei laturi neparalele.', en: 'We copy the trapezoid and rotate it 180° around the midpoint of a non-parallel side.' },
+        { at: .6, ro: 'Cele două trapeze formează un paralelogram cu baza a + b și înălțimea h. Aria lui: (a + b) · h.', en: 'The two trapezoids form a parallelogram with base a + b and height h. Its area: (a + b) · h.' },
+        { at: .82, ro: 'Un trapez este jumătate din paralelogram: A = (a + b) · h / 2 = (3 + 6) · 3 / 2 = 13,5.', en: 'One trapezoid is half of the parallelogram: A = (a + b) · h / 2 = (3 + 6) · 3 / 2 = 13.5.' }],
+      draw(g, t) {
+        g.view(40, 50, 230); const T = [P(0, 0), P(6, 0), P(4, 3), P(1, 3)], M = P(5, 1.5), m = es(t, .2, .6);
+        g.poly(T.map(p => rotp(p, M, Math.PI * m)), COL.t, { o: .75, stroke: '#fff', w: 2 });
+        g.poly(T, COL.c, { o: .75, stroke: '#fff', w: 2 });
+        g.line(P(1, 3), P(1, 0), COL.r, 2.5, '5 4'); g.text(P(.6, 1.5), 'h', 19, COL.r); g.text(P(2.5, 3.4), 'a', 19, '#fff'); g.text(P(3, -.45), 'b', 19, '#fff');
+        const e = es(t, .6, .8); if (e > 0) { g.line(P(0, -.9), P(9, -.9), '#fff', 2, '', ); g.text(P(4.5, -1.35), 'a + b', 19, '#fff', 'middle', e); g.poly([P(0, 0), P(9, 0), P(10, 3), P(1, 3)], 'none', { stroke: '#fff', w: 2, dash: '7 5' }); }
+        g.px(300, 392, 'A = (a + b) · h / 2 = (3 + 6) · 3 / 2 = ' + (EN() ? '13.5' : '13,5'), 21, '#fff', 'middle', es(t, .8, .95));
+      }
+    });
+    // 15. diagonale perpendiculare
+    DEMOS.push({
+      ro: 'Aria patrulaterului cu diagonale perpendiculare (și a rombului)', en: 'Area of a quadrilateral with perpendicular diagonals (and of a rhombus)', dur: 20000,
+      steps: [
+        { at: 0, ro: 'Patrulaterul ABCD are diagonalele AC = d₁ = 8 și BD = d₂ = 5, perpendiculare.', en: 'Quadrilateral ABCD has perpendicular diagonals AC = d₁ = 8 and BD = d₂ = 5.' },
+        { at: .2, ro: 'Îl încadrăm într-un dreptunghi cu laturile d₁ și d₂. Fiecare latură a patrulaterului taie un colț: un triunghi dreptunghic.', en: 'We enclose it in a rectangle with sides d₁ and d₂. Each side of the quadrilateral cuts off a corner: a right triangle.' },
+        { at: .4, ro: 'Rotim fiecare triunghi din interior cu 180° în jurul mijlocului ipotenuzei: el acoperă exact triunghiul din colț.', en: 'Rotate each inner triangle 180° around the midpoint of its hypotenuse: it covers the corner triangle exactly.' },
+        { at: .82, ro: 'Dreptunghiul are aria d₁ · d₂ și este de două ori patrulaterul: A = d₁ · d₂ / 2 = 8 · 5 / 2 = 20. La romb, d₁ și d₂ sunt diagonalele rombului.', en: 'The rectangle has area d₁ · d₂ and is twice the quadrilateral: A = d₁ · d₂ / 2 = 8 · 5 / 2 = 20. For a rhombus, d₁ and d₂ are its diagonals.' }],
+      draw(g, t) {
+        g.view(42, 110, 280); const A = P(0, 2), B = P(3, 0), C = P(8, 2), D = P(3, 5), O = P(3, 2);
+        const tris = [[A, B, O], [B, C, O], [C, D, O], [D, A, O]], cols = [COL.a, COL.c, COL.a, COL.c], e = es(t, .2, .35), m = es(t, .4, .8);
+        if (e > 0) g.poly(rect(0, 0, 8, 5), 'none', { stroke: '#fff', w: 2, dash: '7 5', o: e });
+        tris.forEach((tr, i) => { const M = mid2(tr[0], tr[1]); g.poly(tr.map(p => rotp(p, M, Math.PI * m)), COL.t, { o: .7 * (t >= .4 ? 1 : 0), stroke: '#fff', w: 1.5 }); });
+        tris.forEach((tr, i) => g.poly(tr, cols[i], { o: .75, stroke: '#fff', w: 1.5 }));
+        g.line(A, C, '#fff', 2, '6 4'); g.line(B, D, '#fff', 2, '6 4');
+        [[A, 'A', -.35, 0], [B, 'B', 0, -.4], [C, 'C', .35, 0], [D, 'D', 0, .4]].forEach(([p, s, dx, dy]) => g.text(P(p.x + dx, p.y + dy), s, 19));
+        g.text(P(5.5, 2.35), 'd₁ = 8', 16, '#fff'); g.text(P(3.7, 4), 'd₂ = 5', 16, '#fff', 'start');
+        g.px(300, 392, 'A = d₁ · d₂ / 2 = 8 · 5 / 2 = 20', 22, '#fff', 'middle', es(t, .82, .95));
+      }
+    });
+    // 16. concurente
+    DEMOS.push({
+      ro: 'Mediane, înălțimi, bisectoare concurente', en: 'Medians, altitudes, angle bisectors — concurrent', dur: 30000,
+      steps: [
+        { at: 0, ro: 'Medianele (de la un vârf la mijlocul laturii opuse) se întâlnesc într-un singur punct G — centrul de greutate. Mutăm vârful C: concurența se păstrează. G împarte fiecare mediană în raportul 2 : 1.', en: 'The medians (from a vertex to the midpoint of the opposite side) meet at a single point G — the centroid. We move vertex C: they stay concurrent. G divides each median in the ratio 2 : 1.' },
+        { at: .34, ro: 'Înălțimile (perpendiculare din vârf pe latura opusă) se întâlnesc în ortocentrul H.', en: 'The altitudes (perpendiculars from a vertex to the opposite side) meet at the orthocentre H.' },
+        { at: .67, ro: 'Bisectoarele se întâlnesc în I — centrul cercului înscris, egal depărtat de laturi.', en: 'The angle bisectors meet at I — the centre of the inscribed circle, equally far from the sides.' }],
+      draw(g, t) {
+        g.view(55, 100, 330); const ph = t < .34 ? 0 : t < .67 ? 1 : 2, lp = (t - ph * .335) / .335, gp = es(lp, 0, .35), u = clamp((lp - .4) / .55, 0, 1);
+        const A = P(0, 0), B = P(7, 0), C = P(2.8 + .7 * Math.sin(2 * Math.PI * u), 4.1 + .3 * Math.cos(2 * Math.PI * u));
+        g.poly([A, B, C], '#4da6ff', { o: .12, stroke: '#fff', w: 2.5 });
+        const seg = (p, q, col, w) => g.line(p, lerp2(p, q, gp), col, w || 2.5);
+        const lab = (p, s, dx, dy) => g.text(P(p.x + dx, p.y + dy), s, 19);
+        lab(A, 'A', -.3, -.3); lab(B, 'B', .3, -.3); lab(C, 'C', 0, .4);
+        if (ph === 0) {
+          const Ma = mid2(B, C), Mb = mid2(A, C), Mc = mid2(A, B), G = P((A.x + B.x + C.x) / 3, (A.y + B.y + C.y) / 3);
+          seg(A, Ma, COL.a); seg(B, Mb, COL.a); seg(C, Mc, COL.a); if (gp > .95) { g.dot(P(0, 0), 0, 'none'); g.poly(arcPts(G, .12, 0, 6.3, 10), COL.r, {}); lab(G, 'G', .3, .3); [Ma, Mb, Mc].forEach(p => g.poly(arcPts(p, .07, 0, 6.3, 8), '#fff', {})); }
+          g.px(300, 392, 'AG : GM = 2 : 1   (' + (EN() ? 'centroid' : 'centrul de greutate') + ')', 20, '#fff', 'middle', gp);
+        } else if (ph === 1) {
+          const Ha = (() => { const dx = C.x - B.x, dy = C.y - B.y, k = ((A.x - B.x) * dx + (A.y - B.y) * dy) / (dx * dx + dy * dy); return P(B.x + dx * k, B.y + dy * k); })(), Hb = (() => { const dx = C.x - A.x, dy = C.y - A.y, k = ((B.x - A.x) * dx + (B.y - A.y) * dy) / (dx * dx + dy * dy); return P(A.x + dx * k, A.y + dy * k); })(), Hc = P(C.x, 0);
+          const H = P(C.x, C.x * (7 - C.x) / C.y);
+          seg(A, Ha, COL.t); seg(B, Hb, COL.t); seg(C, Hc, COL.t); if (gp > .95) { g.poly(arcPts(H, .12, 0, 6.3, 10), COL.r, {}); lab(H, 'H', .3, .3); }
+          g.px(300, 392, EN() ? 'the orthocentre H' : 'ortocentrul H', 20, '#fff', 'middle', gp);
+        } else {
+          const a = dist2(B, C), b = dist2(A, C), c = dist2(A, B), s = a + b + c, I = P((a * A.x + b * B.x + c * C.x) / s, (a * A.y + b * B.y + c * C.y) / s);
+          const Da = P((b * B.x + c * C.x) / (b + c), (b * B.y + c * C.y) / (b + c)), Db = P((a * A.x + c * C.x) / (a + c), (a * A.y + c * C.y) / (a + c)), Dc = P((a * A.x + b * B.x) / (a + b), (a * A.y + b * B.y) / (a + b));
+          seg(A, Da, COL.b); seg(B, Db, COL.b); seg(C, Dc, COL.b);
+          if (gp > .95) { g.poly(arcPts(I, .12, 0, 6.3, 10), COL.r, {}); lab(I, 'I', .3, .3); g.circle(I, I.y, 'none', '#fff', 0); g.poly(arcPts(I, I.y, 0, 6.3, 60), 'none', { stroke: '#fff', w: 2, dash: '' }); }
+          g.px(300, 392, EN() ? 'the incentre I (inscribed circle)' : 'centrul cercului înscris I', 20, '#fff', 'middle', gp);
+        }
+      }
+    });
+    // 17. teorema catetei / înălțimii (triunghiuri asemenea)
+    DEMOS.push({
+      ro: 'Teorema înălțimii și teorema catetei', en: 'Altitude theorem and leg theorem', dur: 28000,
+      steps: [
+        { at: 0, ro: 'Triunghiul ABC este dreptunghic în A, iar AD este înălțimea pe ipotenuză. AD îl împarte în două triunghiuri dreptunghice: ABD și ADC.', en: 'Triangle ABC has a right angle at A and AD is the altitude to the hypotenuse. AD splits it into two right triangles: ABD and ADC.' },
+        { at: .22, ro: 'Le despărțim. Toate trei au unghiuri egale (β în B, γ în C, unghi drept): sunt asemenea.', en: 'We pull them apart. All three have equal angles (β at B, γ at C, a right angle): they are similar.' },
+        { at: .5, ro: 'Din ABD ∼ CAD: AD / BD = DC / AD, adică AD² = BD · DC  (teorema înălțimii). Aici: 3² = 2 · 4,5 = 9.', en: 'From ABD ∼ CAD: AD / BD = DC / AD, so AD² = BD · DC  (altitude theorem). Here: 3² = 2 · 4.5 = 9.' },
+        { at: .75, ro: 'Din ABD ∼ CBA: AB / BD = BC / AB, adică AB² = BD · BC  (teorema catetei). Aici: AB² = 13 = 2 · 6,5. La fel AC² = DC · BC = 29,25.', en: 'From ABD ∼ CBA: AB / BD = BC / AB, so AB² = BD · BC  (leg theorem). Here: AB² = 13 = 2 · 6.5. Likewise AC² = DC · BC = 29.25.' }],
+      draw(g, t) {
+        g.view(36, 60, 150); const B = P(0, 0), C = P(6.5, 0), D = P(2, 0), A = P(2, 3), s = es(t, .22, .45);
+        const sh = (pts, dx, dy) => pts.map(p => P(p.x + dx * s, p.y + dy * s));
+        g.poly([A, B, C], COL.c, { o: .22, stroke: '#fff', w: 2 });
+        g.poly(sh([A, B, D], -.3, -3.4), COL.a, { o: .55, stroke: '#fff', w: 2 }); g.poly(sh([A, D, C], 1.4, -3.4), COL.t, { o: .55, stroke: '#fff', w: 2 });
+        g.line(A, D, COL.r, 2, '5 4');
+        const arc = (V, p1, p2, col, rr, dx, dy) => { const a1 = Math.atan2(p1.y - V.y, p1.x - V.x), a2 = Math.atan2(p2.y - V.y, p2.x - V.x); let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; const V2 = P(V.x + (dx || 0), V.y + (dy || 0)); g.poly(sector(V2, rr, a1, a1 + d, 12), col, { o: .95, stroke: '#111', w: .8 }); };
+        const dd = (k) => k * 1; const o1 = [0, 0], o2 = [-.3 * s, -3.4 * s], o3 = [1.4 * s, -3.4 * s];
+        arc(B, C, A, COL.a, .6, 0, 0); arc(C, A, B, COL.t, .6, 0, 0);
+        arc(B, D, A, COL.a, .6, o2[0], o2[1]); arc(A, B, D, COL.t, .6, o2[0], o2[1]);
+        arc(C, A, D, COL.t, .6, o3[0], o3[1]); arc(A, D, C, COL.a, .6, o3[0], o3[1]);
+        g.text(P(0, -.35), 'B', 18); g.text(P(6.5, -.35), 'C', 18); g.text(P(2, 3.4), 'A', 18); g.text(P(2.15, -.35), 'D', 18, '#fff', 'middle', 1 - s);
+        const f = (x) => String(x).replace('.', EN() ? '.' : ',');
+        g.px(300, 330, 'AD² = BD · DC  :  9 = 2 · ' + f(4.5), 19, COL.r, 'middle', es(t, .5, .62));
+        g.px(300, 358, 'AB² = BD · BC  :  13 = 2 · ' + f(6.5) + '     AC² = DC · BC', 17, '#fff', 'middle', es(t, .75, .87));
+        g.px(300, 384, 'AD / BD = DC / AD', 16, '#ccc', 'middle', es(t, .5, .62) * (1 - es(t, .75, .8))); g.px(300, 384, 'AB / BD = BC / AB', 16, '#ccc', 'middle', es(t, .75, .87));
+      }
+    });
+    // 19. simetria
+    DEMOS.push({
+      ro: 'Simetria: reflexia, rotația, translația', en: 'Symmetry: reflection, rotation, translation', dur: 24000,
+      steps: [
+        { at: 0, ro: 'Simetria față de o dreaptă (reflexia): fiecare punct ajunge pe aceeași perpendiculară pe axă, la aceeași distanță de axă, de cealaltă parte.', en: 'Reflection in a line: each point goes to the same perpendicular to the axis, at the same distance from it, on the other side.' },
+        { at: .34, ro: 'Rotația în jurul unui punct O cu 90°: fiecare punct se rotește pe un arc de cerc cu centrul în O; distanța la O se păstrează.', en: 'Rotation about a point O by 90°: every point moves on a circular arc centred at O; the distance to O is kept.' },
+        { at: .68, ro: 'Translația cu un vector v: toate punctele se deplasează în aceeași direcție, cu aceeași lungime. Forma și orientarea rămân la fel.', en: 'Translation by a vector v: all points move in the same direction by the same length. The shape and its orientation stay the same.' }],
+      draw(g, t) {
+        g.view(52, 135, 230); const F = [P(0, 0), P(.8, 0), P(.8, 1.1), P(1.8, 1.1), P(1.8, 1.7), P(.8, 1.7), P(.8, 2.4), P(2.4, 2.4), P(2.4, 3), P(0, 3)];
+        const ph = t < .34 ? 0 : t < .68 ? 1 : 2, lp = clamp((t - ph * .34) / .34, 0, 1), m = es(lp, .15, .75);
+        g.poly(F, COL.c, { o: .75, stroke: '#fff', w: 2 });
+        let C2;
+        if (ph === 0) {
+          const ax = 3.4; g.line(P(ax, -.8), P(ax, 3.8), COL.r, 2.5, '8 5'); g.text(P(ax + .2, 3.95), EN() ? 'axis' : 'axa', 17, COL.r, 'start');
+          C2 = F.map(p => P(ax + (p.x - ax) * Math.cos(Math.PI * m), p.y)); g.poly(C2, COL.t, { o: .7, stroke: '#fff', w: 2 });
+          if (m > .95) [F[0], F[4], F[8]].forEach((p, i) => { const q = P(2 * ax - p.x, p.y); g.line(p, q, '#fff', 1.2, '4 4'); });
+        } else if (ph === 1) {
+          const O = P(4, 1.5); g.dot(O, 0, 'none'); C2 = F.map(p => rotp(p, O, Math.PI / 2 * m)); g.poly(C2, COL.t, { o: .7, stroke: '#fff', w: 2 });
+          g.poly(arcPts(O, .4, 0, 6.3, 20), 'none', { stroke: 'none' }); g.text(P(O.x + .25, O.y + .3), 'O', 19); g.poly(arcPts(O, .06, 0, 6.3, 8), COL.r, {});
+          const p0 = F[4], p1 = rotp(p0, O, Math.PI / 2 * m); g.line(O, p0, '#fff', 1.2, '4 4'); g.line(O, p1, '#fff', 1.2, '4 4');
+          const rr = dist2(O, p0), a0 = Math.atan2(p0.y - O.y, p0.x - O.x); if (m > 0) g.poly(arcPts(O, rr, a0, a0 + Math.PI / 2 * m, 24), 'none', { stroke: COL.r, w: 2 });
+          if (m > .95) g.text(P(O.x + 1.4, O.y - .2), '90°', 17, '#fff');
+        } else {
+          const v = P(4.2, .6); C2 = F.map(p => P(p.x + v.x * m, p.y + v.y * m)); g.poly(C2, COL.t, { o: .7, stroke: '#fff', w: 2 });
+          [F[0], F[4], F[8]].forEach(p => { const q = P(p.x + v.x * m, p.y + v.y * m); g.line(p, q, '#fff', 1.2, '4 4'); });
+          if (m > .5) g.text(P(2.2 + v.x * .5, 3.5), 'v', 20, COL.r);
+        }
+        g.px(300, 392, ph === 0 ? (EN() ? 'Reflection' : 'Simetrie axială (reflexie)') : ph === 1 ? (EN() ? 'Rotation by 90°' : 'Rotație de 90° în jurul lui O') : (EN() ? 'Translation by vector v' : 'Translație cu vectorul v'), 21, '#fff');
+      }
+    });
+    // 20. fracții echivalente
+    DEMOS.push({
+      ro: 'Fracții echivalente', en: 'Equivalent fractions', dur: 18000,
+      steps: [
+        { at: 0, ro: 'O bară împărțită în 3 părți egale; colorăm 2 părți: fracția 2/3.', en: 'A bar split into 3 equal parts; 2 parts coloured: the fraction 2/3.' },
+        { at: .2, ro: 'Împărțim fiecare treime în 2: bara are 6 părți, iar colorate sunt 4. Partea colorată a rămas la fel: 2/3 = 4/6.', en: 'Split every third in 2: the bar has 6 parts and 4 are coloured. The coloured part is the same: 2/3 = 4/6.' },
+        { at: .4, ro: 'Împărțim fiecare treime în 3: 9 părți, 6 colorate: 2/3 = 6/9.', en: 'Split every third in 3: 9 parts, 6 coloured: 2/3 = 6/9.' },
+        { at: .6, ro: 'Împărțim fiecare treime în 4: 12 părți, 8 colorate: 2/3 = 8/12.', en: 'Split every third in 4: 12 parts, 8 coloured: 2/3 = 8/12.' },
+        { at: .8, ro: 'Dacă înmulțim numărătorul și numitorul cu același număr, fracția nu se schimbă: 2/3 = (2·k)/(3·k).', en: 'If we multiply the numerator and the denominator by the same number, the fraction does not change: 2/3 = (2·k)/(3·k).' }],
+      draw(g, t) {
+        g.view(40, 30, 340); const W = 12, rows = [[3, 2], [6, 4], [9, 6], [12, 8]];
+        rows.forEach(([n, k], i) => { const y = 3.8 - i * 1.15, ap = es(t, i * .2, i * .2 + .12); if (ap <= 0) return; const w = W / n;
+          for (let j = 0; j < n; j++) g.poly(rect(j * w, y, (j + 1) * w, y + .85), j < k ? COL.c : '#222', { o: (j < k ? .85 : 1) * ap, stroke: '#fff', w: 1.5 });
+          g.text(P(W + .4, y + .42), k + '/' + n, 22, '#fff', 'start', ap); });
+        const e = es(t, .2, .35); if (e > 0) g.line(P(8, -.5), P(8, 4.9), COL.r, 2, '6 4');
+        const txt = t < .2 ? '2/3' : t < .4 ? '2/3 = 4/6' : t < .6 ? '2/3 = 4/6 = 6/9' : '2/3 = 4/6 = 6/9 = 8/12';
+        g.px(300, 392, txt, 23, '#fff');
+      }
+    });
+    // 21. MA >= MG
+    DEMOS.push({
+      ro: 'Inegalitatea mediilor: MG ≤ MA', en: 'AM–GM inequality', dur: 24000,
+      steps: [
+        { at: 0, ro: 'Pe un diametru de lungime a + b punem punctul C, cu AC = a și CB = b. Ridicăm perpendiculara CD pe diametru, până la semicerc: CD = √(a·b) (media geometrică).', en: 'On a diameter of length a + b we put point C, with AC = a and CB = b. Raise the perpendicular CD to the semicircle: CD = √(a·b) (the geometric mean).' },
+        { at: .15, ro: 'Raza OD este jumătate din diametru: (a + b) / 2 (media aritmetică). Mutăm punctul C și comparăm perpendiculara cu raza.', en: 'The radius OD is half the diameter: (a + b) / 2 (the arithmetic mean). We move C and compare the perpendicular with the radius.' },
+        { at: .6, ro: 'Perpendiculara CD nu poate fi mai lungă decât raza OD: √(a·b) ≤ (a + b) / 2. Egalitate doar când C = O, adică a = b.', en: 'The perpendicular CD can never be longer than the radius OD: √(a·b) ≤ (a + b) / 2. Equality only when C = O, i.e. a = b.' }],
+      draw(g, t) {
+        g.view(48, 300, 250); const r = 4, O = P(0, 0), A = P(-4, 0), B = P(4, 0), a = 4 + 3.2 * Math.cos(2 * Math.PI * 1.5 * t * (t < .15 ? 0 : 1) + (t < .15 ? 0 : 0)), a2 = t < .15 ? 3 : 4 + 3.2 * Math.cos(2 * Math.PI * 1.5 * (t - .15) / .85 * 1 + 0.9), b = 8 - a2;
+        const xc = -4 + a2, Cc = P(xc, 0), Dd = P(xc, Math.sqrt(Math.max(0, r * r - xc * xc)));
+        g.poly(arcPts(O, r, 0, Math.PI, 60), '#4da6ff', { o: .1, stroke: '#fff', w: 2 });
+        g.line(A, Cc, COL.a, 6); g.line(Cc, B, COL.t, 6);
+        g.line(Cc, Dd, COL.r, 4); g.line(O, Dd, '#fff', 2, '6 4');
+        g.text(P((xc + 4) / 2 + (xc) * 0, -.45), '', 1);
+        g.text(P(-4 + a2 / 2, -.5), 'a', 18, COL.a); g.text(P(xc + b / 2, -.5), 'b', 18, COL.t);
+        g.text(P(A.x - .3, 0), 'A', 18); g.text(P(B.x + .3, 0), 'B', 18); g.text(P(xc, -1), 'C', 18); g.text(P(Dd.x + .3, Dd.y + .3), 'D', 18);
+        const mg = Math.sqrt(a2 * b), ma = 4, f = (x) => (Math.round(x * 100) / 100).toString().replace('.', EN() ? '.' : ',');
+        g.line(P(-4, -1.6), P(-4 + ma, -1.6), '#fff', 8); g.line(P(-4, -2.15), P(-4 + mg, -2.15), COL.r, 8);
+        g.text(P(-4 + ma + .2, -1.6), 'MA = (a+b)/2 = ' + f(ma), 15, '#fff', 'start'); g.text(P(-4 + mg + .2, -2.15), 'MG = √(a·b) = ' + f(mg), 15, COL.r, 'start');
+        if (Math.abs(a2 - b) < .12) g.px(300, 20, 'a = b  ⇒  MG = MA', 20, '#7be3a3');
+      }
+    });
+    // 22. numere negative
+    DEMOS.push({
+      ro: 'Numere negative: adunare și scădere pe axă', en: 'Negative numbers: adding and subtracting on the number line', dur: 24000,
+      steps: [
+        { at: 0, ro: 'Adunarea unui număr pozitiv: ne mutăm la dreapta. 2 + 4 = 6.', en: 'Adding a positive number: we move right. 2 + 4 = 6.' },
+        { at: .25, ro: 'Adunarea unui număr negativ: ne mutăm la stânga. 2 + (−5) = 2 − 5 = −3.', en: 'Adding a negative number: we move left. 2 + (−5) = 2 − 5 = −3.' },
+        { at: .5, ro: 'Scăderea unui număr pozitiv: ne mutăm la stânga. −3 − 4 = −7.', en: 'Subtracting a positive number: we move left. −3 − 4 = −7.' },
+        { at: .75, ro: 'Scăderea unui număr negativ: ne mutăm la dreapta (scăderea lui −5 înseamnă adunarea lui 5). −2 − (−5) = −2 + 5 = 3.', en: 'Subtracting a negative number: we move right (subtracting −5 means adding 5). −2 − (−5) = −2 + 5 = 3.' }],
+      draw(g, t) {
+        g.view(34, 300, 230); const EX = [[2, 6, '2 + 4 = 6'], [2, -3, '2 + (−5) = −3'], [-3, -7, '−3 − 4 = −7'], [-2, 3, '−2 − (−5) = −2 + 5 = 3']];
+        g.line(P(-8.5, 0), P(8.5, 0), '#aaa', 2); for (let i = -8; i <= 8; i++) { g.line(P(i, -.15), P(i, .15), '#aaa', 1.5); g.text(P(i, -.6), String(i).replace('-', '−'), 14, i === 0 ? '#fff' : '#bbb'); }
+        const i = clamp(Math.floor(t * 4), 0, 3), lp = clamp(t * 4 - i, 0, 1), [s, e, txt] = EX[i], pr = es(lp, .15, .8), x = s + (e - s) * pr, col = e > s ? COL.a : COL.r;
+        g.poly(arcPts(P(s, 0), .12, 0, 6.3, 10), '#fff', {}); 
+        if (pr > 0) { g.line(P(s, .9), P(x, .9), col, 5); const dir = e > s ? 1 : -1; g.line(P(x, .9), P(x - dir * .3, 1.15), col, 5); g.line(P(x, .9), P(x - dir * .3, .65), col, 5); g.line(P(s, .9), P(s, 0), col, 1.5, '4 4'); }
+        g.poly(arcPts(P(x, 0), .17, 0, 6.3, 12), col, {}); g.text(P(s, -1.2), EN() ? 'start' : 'start', 14, '#fff');
+        g.px(300, 120, txt, 30, '#fff', 'middle', es(lp, 0, .2)); g.px(300, 340, (EN() ? 'result: ' : 'rezultat: ') + String(e).replace('-', '−'), 22, col, 'middle', es(lp, .8, .95));
+      }
+    });
+    // 23. trigonometrie din cercul unitate
+    DEMOS.push({
+      ro: 'Funcțiile sin și cos din cercul unitate', en: 'Sine and cosine from the unit circle', dur: 22000,
+      steps: [
+        { at: 0, ro: 'Un punct P se rotește pe cercul de rază 1. Unghiul θ crește de la 0° la 360°.', en: 'A point P rotates on the circle of radius 1. The angle θ grows from 0° to 360°.' },
+        { at: .12, ro: 'Proiecția lui P pe verticală este sin θ, proiecția pe orizontală este cos θ.', en: 'The vertical projection of P is sin θ, the horizontal projection is cos θ.' },
+        { at: .3, ro: 'Notăm valorile lui sin θ (portocaliu) și cos θ (albastru) în funcție de θ: se desenează graficele.', en: 'We record the values of sin θ (orange) and cos θ (blue) against θ: the graphs are drawn.' },
+        { at: .85, ro: 'Graficele se repetă după 360°: sin și cos sunt periodice, cu valori între −1 și 1.', en: 'The graphs repeat after 360°: sin and cos are periodic, with values between −1 and 1.' }],
+      draw(g, t) {
+        g.view(48, 336, 200); const R = 2, C0 = P(-4.2, 0), x0 = -1.6, th = 2 * Math.PI * t, Pp = P(C0.x + R * Math.cos(th), R * Math.sin(th));
+        g.poly(arcPts(C0, R, 0, 6.3, 60), 'none', { stroke: '#888', w: 1.5 }); g.line(P(C0.x - R - .3, 0), P(C0.x + R + .3, 0), '#555', 1.5); g.line(P(C0.x, -R - .3), P(C0.x, R + .3), '#555', 1.5);
+        g.line(P(x0, 0), P(x0 + 2 * Math.PI + .3, 0), '#aaa', 1.5); g.line(P(x0, -R - .3), P(x0, R + .3), '#555', 1.5);
+        [[Math.PI, 'π'], [2 * Math.PI, '2π']].forEach(([v, s]) => { g.line(P(x0 + v, -.1), P(x0 + v, .1), '#aaa', 1.5); g.text(P(x0 + v, -.4), s, 14, '#bbb'); });
+        g.text(P(x0 - .3, R), '1', 13, '#bbb'); g.text(P(x0 - .35, -R), '−1', 13, '#bbb');
+        g.line(C0, Pp, '#fff', 2.5);
+        const pr = es(t, .12, .22); if (pr > 0) { g.line(P(Pp.x, 0), Pp, COL.t, 3.5 * 1); g.line(C0, P(Pp.x, 0), COL.c, 3.5); }
+        const sp = [], cp = []; for (let u = 0; u <= th + 1e-6; u += .06) { sp.push(P(x0 + u, R * Math.sin(u))); cp.push(P(x0 + u, R * Math.cos(u))); }
+        if (t > .12) { sp.forEach((p, i) => { if (i) g.line(sp[i - 1], p, COL.t, 2.5); }); cp.forEach((p, i) => { if (i) g.line(cp[i - 1], p, COL.c, 2.5); }); g.line(Pp, P(x0 + th, Pp.y), COL.t, 1.2, '4 4'); g.poly(arcPts(P(x0 + th, Pp.y), .07, 0, 6.3, 8), COL.t, {}); g.poly(arcPts(P(x0 + th, R * Math.cos(th)), .07, 0, 6.3, 8), COL.c, {}); }
+        g.poly(arcPts(Pp, .08, 0, 6.3, 8), COL.r, {});
+        const f = (x) => (Math.round(x * 100) / 100).toString().replace('.', EN() ? '.' : ',').replace('-', '−');
+        g.px(300, 392, 'θ = ' + Math.round(th / D2R) + '°    sin θ = ' + f(Math.sin(th)) + '    cos θ = ' + f(Math.cos(th)), 20, '#fff');
+      }
+    });
+    // 24. derivata ca limită
+    DEMOS.push({
+      ro: 'Panta tangentei ca limită a secantelor (derivata)', en: 'Tangent slope as the limit of secants (the derivative)', dur: 22000,
+      steps: [
+        { at: 0, ro: 'Graficul lui f(x) = x²/4, punctul fix P(2; 1) și un al doilea punct Q la distanța h pe orizontală. Secanta PQ are panta (f(2 + h) − f(2)) / h.', en: 'The graph of f(x) = x²/4, a fixed point P(2; 1) and a second point Q at horizontal distance h. The secant PQ has slope (f(2 + h) − f(2)) / h.' },
+        { at: .25, ro: 'Apropiem Q de P (h → 0). Secanta se rotește și se apropie de o poziție limită.', en: 'We move Q towards P (h → 0). The secant rotates and approaches a limiting position.' },
+        { at: .85, ro: 'Poziția limită este tangenta în P. Panta ei este limita pantelor secantelor: f′(2) = lim (f(2 + h) − f(2)) / h = 1.', en: 'The limiting position is the tangent at P. Its slope is the limit of the secant slopes: f′(2) = lim (f(2 + h) − f(2)) / h = 1.' }],
+      draw(g, t) {
+        g.view(55, 120, 335); const f = (x) => x * x / 4, x0 = 2, h = t < .25 ? 2.4 - .6 * es(t, 0, .25) : 1.8 * Math.pow(0.03 / 1.8, es(t, .25, .9)), Pq = P(x0, f(x0)), Qq = P(x0 + h, f(x0 + h)), sl = (f(x0 + h) - f(x0)) / h;
+        g.line(P(-.5, 0), P(4.9, 0), '#555', 1.5); g.line(P(0, -.5), P(0, 6.4), '#555', 1.5);
+        const cv = []; for (let x = -.2; x <= 4.8; x += .08) cv.push(P(x, f(x))); cv.forEach((p, i) => { if (i) g.line(cv[i - 1], p, '#4da6ff', 3); });
+        const tg = es(t, .88, .98); if (tg > 0) g.line(P(1.1, 1 + (1.1 - x0)), P(4.2, 1 + (4.2 - x0)), COL.a, 3, '8 5');
+        g.line(P(x0 - .9, 1 - sl * .9), P(x0 + 2.2, 1 + sl * 2.2), COL.r, 2.5);
+        if (h > .25) { g.line(Pq, P(x0 + h, f(x0)), '#fff', 1.5, '4 4'); g.line(P(x0 + h, f(x0)), Qq, '#fff', 1.5, '4 4'); g.text(P(x0 + h / 2, f(x0) - .3), 'h', 16, '#fff'); g.text(P(x0 + h + .3, (f(x0) + f(x0 + h)) / 2), 'Δy', 16, '#fff'); }
+        g.poly(arcPts(Pq, .09, 0, 6.3, 10), '#fff', {}); g.poly(arcPts(Qq, .09, 0, 6.3, 10), COL.t, {}); g.text(P(x0 - .3, f(x0) + .4), 'P', 18); g.text(P(x0 + h + .1, f(x0 + h) + .35), 'Q', 18, COL.t);
+        const fm = (x, d) => (Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).toString().replace('.', EN() ? '.' : ',');
+        g.px(300, 388, 'h = ' + fm(h, 2) + '     ' + (EN() ? 'secant slope' : 'panta secantei') + ' = ' + fm(sl, 3), 20, '#fff');
+        if (tg > 0) g.px(300, 18, "f′(2) = 1", 22, COL.a, 'middle', tg);
+      }
+    });
+    // 25. Riemann
+    DEMOS.push({
+      ro: 'Aria sub curbă ca sumă de dreptunghiuri (Riemann)', en: 'Area under a curve as a sum of rectangles (Riemann)', dur: 24000,
+      steps: [
+        { at: 0, ro: 'Vrem aria de sub graficul lui f(x) = x²/4, între 0 și 4. O aproximăm cu 2 dreptunghiuri (înălțimea = valoarea funcției la marginea din stânga).', en: 'We want the area under the graph of f(x) = x²/4, between 0 and 4. We approximate it with 2 rectangles (height = the function value at the left edge).' },
+        { at: .17, ro: 'Cu 4 dreptunghiuri, aproximarea se apropie de aria adevărată.', en: 'With 4 rectangles, the approximation gets closer to the true area.' },
+        { at: .34, ro: '8, apoi 16 dreptunghiuri: golurile dintre dreptunghiuri și curbă se micșorează.', en: '8, then 16 rectangles: the gaps between the rectangles and the curve shrink.' },
+        { at: .67, ro: '32 și 64 de dreptunghiuri: suma lor se apropie de 16/3 ≈ 5,33.', en: '32 and 64 rectangles: their sum approaches 16/3 ≈ 5.33.' },
+        { at: .9, ro: 'Când n → ∞, suma ariilor devine aria exactă: integrala ∫₀⁴ x²/4 dx = 16/3.', en: 'As n → ∞ the sum of areas becomes the exact area: the integral ∫₀⁴ x²/4 dx = 16/3.' }],
+      draw(g, t) {
+        g.view(70, 160, 330); const f = (x) => x * x / 4, NS2 = [2, 4, 8, 16, 32, 64], st = Math.min(5, Math.floor(t * 6)), n = NS2[st], fr = t * 6 - st, ap = st === 5 ? 1 : es(fr, 0, .35), w = 4 / n;
+        let S = 0; for (let i = 0; i < n; i++) { const x = i * w, h = f(x); S += h * w; g.poly(rect(x, 0, x + w, h * ap), COL.c, { o: .6, stroke: '#fff', w: n > 16 ? .5 : 1.2 }); }
+        g.line(P(-.3, 0), P(4.4, 0), '#aaa', 1.5); g.line(P(0, -.3), P(0, 4.5), '#aaa', 1.5);
+        const cv = []; for (let x = 0; x <= 4.001; x += .05) cv.push(P(x, f(x))); cv.forEach((p, i) => { if (i) g.line(cv[i - 1], p, COL.t, 3); });
+        g.text(P(4, -.4), '4', 15, '#bbb'); g.text(P(-.3, 4), '4', 15, '#bbb');
+        const fm = (x) => (Math.round(x * 100) / 100).toString().replace('.', EN() ? '.' : ',');
+        g.px(300, 388, 'n = ' + n + '     S = ' + fm(S) + '     ' + (EN() ? 'exact' : 'exact') + ' = 16/3 ≈ ' + fm(16 / 3), 20, '#fff');
+        if (t >= .9) g.px(300, 22, '∫₀⁴ x²/4 dx = 16/3', 22, COL.a, 'middle', es(t, .9, .97));
+      }
+    });
+
+    // ===== demonstrații algebrice suplimentare =====
+    const addAfter = (key, d) => { const i = DEMOS.findIndex(x => x.ro.indexOf(key) === 0); DEMOS.splice(i + 1, 0, d); };
+    const shade = (hex, k) => { const n = parseInt(hex.slice(1), 16); let r = n >> 16, gg = (n >> 8) & 255, b = n & 255; if (k > 1) { r += (255 - r) * (k - 1); gg += (255 - gg) * (k - 1); b += (255 - b) * (k - 1); } else { r *= k; gg *= k; b *= k; } return 'rgb(' + Math.round(r) + ',' + Math.round(gg) + ',' + Math.round(b) + ')'; };
+    // (a - b)^2
+    addAfter('Pătratul unei sume', {
+      ro: 'Pătratul unei diferențe: (a − b)²', en: 'Square of a difference: (a − b)²', dur: 20000,
+      steps: [
+        { at: 0, ro: 'Un pătrat cu latura a (aici a = 5, b = 2). Pătratul albastru din colț, cu latura a − b = 3, este chiar (a − b)².', en: 'A square with side a (here a = 5, b = 2). The blue square in the corner, with side a − b = 3, is exactly (a − b)².' },
+        { at: .15, ro: 'Ca să-l obținem, scoatem din a² fâșia din dreapta, de arie a·b.', en: 'To get it, we remove from a² the right-hand strip, of area a·b.' },
+        { at: .35, ro: 'Scoatem și fâșia de sus, tot de arie a·b.', en: 'We also remove the top strip, again of area a·b.' },
+        { at: .55, ro: 'Pătratul din colț, b · b, a fost scos de două ori: o dată cu fiecare fâșie.', en: 'The corner square, b · b, was removed twice: once with each strip.' },
+        { at: .7, ro: 'Îl punem înapoi o dată: (a − b)² = a² − 2ab + b²   (aici: 9 = 25 − 20 + 4).', en: 'We put it back once: (a − b)² = a² − 2ab + b²   (here: 9 = 25 − 20 + 4).' }],
+      draw(g, t) {
+        g.view(55, 160, 330); const a = 5, b = 2, s = a - b;
+        g.poly(rect(0, 0, a, a), '#fff', { o: .08, stroke: '#aaa', w: 2 });
+        g.poly(rect(0, 0, s, s), COL.c, { o: .6, stroke: '#fff', w: 2 });
+        const r1 = es(t, .15, .3), r2 = es(t, .35, .5), r3 = es(t, .55, .65), r4 = es(t, .7, .85);
+        g.poly(rect(s, 0, a, a), COL.r, { o: .5 * r1, stroke: '#fff', w: 1.5 });
+        g.poly(rect(0, s, a, a), COL.t, { o: .5 * r2, stroke: '#fff', w: 1.5 });
+        if (r3 > 0) g.poly(rect(s, s, a, a), COL.b, { o: .55 * r3 * (1 - r4), stroke: '#fff', w: 2.5 });
+        if (r4 > 0) g.poly(rect(s, s, a, a), COL.a, { o: .75 * r4, stroke: '#fff', w: 2.5 });
+        g.text(P(1.5, 1.5), '(a − b)²', 18, '#fff'); g.text(P(4, 1.5), 'ab', 20, '#fff', 'middle', r1); g.text(P(1.5, 4), 'ab', 20, '#fff', 'middle', r2);
+        g.text(P(4, 4), t < .7 ? 'b²' : '+ b²', 20, '#fff', 'middle', r3 || r4);
+        g.text(P(1.5, -.4), 'a − b', 17, COL.c); g.text(P(4, -.4), 'b', 17, COL.r); g.text(P(-.5, 1.5), 'a − b', 17, COL.c, 'end'); g.text(P(-.5, 4), 'b', 17, COL.r, 'end');
+        const st = t < .15 ? 'a²' : t < .35 ? 'a² − ab' : t < .55 ? 'a² − ab − ab' : t < .7 ? 'a² − 2ab   (b² ' + (EN() ? 'removed twice' : 'scos de două ori') + ')' : '(a − b)² = a² − 2ab + b²  =  25 − 20 + 4 = 9';
+        g.px(300, 388, st, 21, '#fff');
+      }
+    });
+    // (a + b)^3
+    addAfter('Pătratul unei sume', {
+      ro: 'Cubul unei sume: (a + b)³', en: 'Cube of a sum: (a + b)³', dur: 22000,
+      steps: [
+        { at: 0, ro: 'Un cub cu muchia a + b (aici a = 3, b = 2). Volumul lui este (a + b)³ = 125.', en: 'A cube with edge a + b (here a = 3, b = 2). Its volume is (a + b)³ = 125.' },
+        { at: .2, ro: 'Îl tăiem cu câte un plan în fiecare direcție, la distanța a de colț: obținem 8 piese.', en: 'We cut it with one plane in each direction, at distance a from the corner: we get 8 pieces.' },
+        { at: .5, ro: 'Despărțim piesele: un cub a³, trei plăci a²b, trei bare ab² și un cub b³.', en: 'We pull the pieces apart: one a³ cube, three a²b slabs, three ab² bars and one b³ cube.' },
+        { at: .8, ro: '(a + b)³ = a³ + 3a²b + 3ab² + b³   (aici: 125 = 27 + 54 + 36 + 8).', en: '(a + b)³ = a³ + 3a²b + 3ab² + b³   (here: 125 = 27 + 54 + 36 + 8).' }],
+      draw(g, t) {
+        g.view(32, 160, 325); const a = 3, b = 2, ex = es(t, .3, .55) * 1.3, kx = .476, ky = .275, cut = es(t, .2, .3);
+        const Q = (x, y, z) => P(x + kx * z, y + ky * z);
+        const iv = [[0, a], [a, a + b]], cols = [COL.c, COL.a, COL.t, COL.r], labs = ['a³', 'a²b', 'ab²', 'b³'];
+        const pcs = []; for (let iz = 0; iz < 2; iz++) for (let iy = 0; iy < 2; iy++) for (let ix = 0; ix < 2; ix++) pcs.push({ ix, iy, iz, k: ix + iy + iz });
+        pcs.sort((p, q) => (q.iz - p.iz) || (p.iy - q.iy) || (p.ix - q.ix));
+        const sep = (t < .2) ? 0 : 1;
+        pcs.forEach(p => {
+          const x0 = iv[p.ix][0] + p.ix * ex, x1 = iv[p.ix][1] + p.ix * ex, y0 = iv[p.iy][0] + p.iy * ex, y1 = iv[p.iy][1] + p.iy * ex, z0 = iv[p.iz][0] + p.iz * ex, z1 = iv[p.iz][1] + p.iz * ex;
+          const c = t < .2 ? '#4da6ff' : cols[p.k], mix = cut;
+          const col = (k) => t < .2 ? shade('#4da6ff', k) : shade(cols[p.k], k);
+          g.poly([Q(x0, y0, z0), Q(x1, y0, z0), Q(x1, y1, z0), Q(x0, y1, z0)], col(1), { o: .95, stroke: '#fff', w: 1.4 });
+          g.poly([Q(x0, y1, z0), Q(x1, y1, z0), Q(x1, y1, z1), Q(x0, y1, z1)], col(1.35), { o: .95, stroke: '#fff', w: 1.4 });
+          g.poly([Q(x1, y0, z0), Q(x1, y0, z1), Q(x1, y1, z1), Q(x1, y1, z0)], col(.7), { o: .95, stroke: '#fff', w: 1.4 });
+          if (p.iz === 0 && t >= .2) { const m = Q((x0 + x1) / 2, (y0 + y1) / 2, z0); g.text(m, labs[p.k], 16, '#111', 'middle', es(t, .45, .6)); }
+        });
+        const lg = es(t, .5, .65);
+        [['a³ × 1', COL.c, 120], ['a²b × 3', COL.a, 240], ['ab² × 3', COL.t, 360], ['b³ × 1', COL.r, 480]].forEach(([s, c, x]) => g.px(x, 364, s, 19, c, 'middle', lg));
+        g.px(300, 392, t < .8 ? '(a + b)³' : '(a + b)³ = a³ + 3a²b + 3ab² + b³  :  125 = 27 + 54 + 36 + 8', t < .8 ? 22 : 18, '#fff');
+      }
+    });
+    // completarea pătratului
+    addAfter('Diferența de pătrate', {
+      ro: 'Completarea pătratului (ecuația de gradul 2)', en: 'Completing the square (quadratic equation)', dur: 30000,
+      steps: [
+        { at: 0, ro: 'Vrem să scriem x² + 6x ca pătrat. x² este un pătrat cu latura x (aici x = 4); 6x este un dreptunghi cu laturile x și 6.', en: 'We want to write x² + 6x as a square. x² is a square with side x (here x = 4); 6x is a rectangle with sides x and 6.' },
+        { at: .15, ro: 'Tăiem dreptunghiul 6x în două dreptunghiuri egale, 3x fiecare.', en: 'We cut the 6x rectangle into two equal rectangles, 3x each.' },
+        { at: .3, ro: 'Mutăm unul deasupra pătratului x² (îl rotim cu 90°). Figura seamănă cu un pătrat de latură x + 3, căruia îi lipsește colțul.', en: 'We move one on top of the x² square (rotating it 90°). The figure looks like a square of side x + 3 with the corner missing.' },
+        { at: .55, ro: 'Colțul lipsă este un pătrat 3 · 3 = 9. Adăugându-l, completăm pătratul: x² + 6x + 9 = (x + 3)².', en: 'The missing corner is a 3 · 3 = 9 square. Adding it, we complete the square: x² + 6x + 9 = (x + 3)².' },
+        { at: .8, ro: 'Deci x² + 6x = (x + 3)² − 9. În general, x² + bx = (x + b/2)² − b²/4, iar ecuația x² + bx + c = 0 devine (x + b/2)² = b²/4 − c, de unde formula soluțiilor.', en: 'So x² + 6x = (x + 3)² − 9. In general, x² + bx = (x + b/2)² − b²/4, and x² + bx + c = 0 becomes (x + b/2)² = b²/4 − c, which gives the quadratic formula.' }],
+      draw(g, t) {
+        g.view(34, 110, 312); const x = 4, h = 3, c1 = es(t, .15, .3), m = es(t, .3, .55), c2 = es(t, .55, .7);
+        g.poly(rect(0, 0, x, x), COL.c, { o: .7, stroke: '#fff', w: 2 });
+        g.poly(rect(x, 0, x + h, x), COL.a, { o: .7, stroke: '#fff', w: 2 });
+        g.poly(rigid(rect(x + h, 0, x + 2 * h, x), P(x + h, 0), P(x, x), Math.PI / 2, m), COL.a, { o: .7, stroke: '#fff', w: 2 });
+        if (c1 > 0 && m < 1) g.line(P(x + h, 0), P(x + h, x * c1), '#fff', 2, '6 4');
+        if (c2 > 0) g.poly(rect(x, x, x + h, x + h), COL.r, { o: .7 * c2, stroke: '#fff', w: 2, dash: c2 < 1 ? '6 4' : '' });
+        g.text(P(2, 2), 'x²', 22, '#fff');
+        g.text(P(x + h, x / 2), '6x', 19, '#fff', 'middle', 1 - c1);
+        g.text(P(x + h / 2, x / 2), '3x', 19, '#fff', 'middle', c1); g.text(P(x + 1.5 * h, x / 2), '3x', 19, '#fff', 'middle', c1 * (1 - m)); g.text(P(x / 2, x + h / 2), '3x', 19, '#fff', 'middle', m);
+        g.text(P(x + h / 2, x + h / 2), '9', 22, '#fff', 'middle', c2);
+        g.text(P(2, -.45), 'x', 18, COL.c); g.text(P(x + h / 2, -.45), '3', 18, COL.a, 'middle', c1); g.text(P(-.5, 2), 'x', 18, COL.c, 'end'); g.text(P(-.5, x + h / 2), '3', 18, COL.a, 'end', m);
+        const st = t < .55 ? 'x² + 6x' : t < .8 ? 'x² + 6x + 9 = (x + 3)²' : 'x² + 6x = (x + 3)² − 9';
+        g.px(300, 368, st, 22, '#fff');
+        g.px(300, 392, '(x + b/2)² = b²/4 − c   ⇒   x = −b/2 ± √(b²/4 − c)', 17, '#ffd54f', 'middle', es(t, .85, .97));
+      }
+    });
+    // progresia aritmetică
+    addAfter('Suma 1 + 2', {
+      ro: 'Suma unei progresii aritmetice', en: 'Sum of an arithmetic progression', dur: 24000,
+      steps: [
+        { at: 0, ro: 'O progresie aritmetică: a₁ = 2, rația r = 3, n = 6 termeni: 2, 5, 8, 11, 14, 17. Fiecare termen este o coloană; aₖ = a₁ + (k − 1)·r.', en: 'An arithmetic progression: a₁ = 2, common difference r = 3, n = 6 terms: 2, 5, 8, 11, 14, 17. Each term is a column; aₖ = a₁ + (k − 1)·r.' },
+        { at: .25, ro: 'Punem peste ea o copie răsturnată (termenii în ordine inversă).', en: 'We put on top of it a reversed copy (the terms in reverse order).' },
+        { at: .55, ro: 'Fiecare coloană are acum înălțimea a₁ + aₙ = 2 + 17 = 19 (primul termen + ultimul): obținem un dreptunghi n · (a₁ + aₙ).', en: 'Every column now has height a₁ + aₙ = 2 + 17 = 19 (first term + last term): we get a rectangle n · (a₁ + aₙ).' },
+        { at: .8, ro: 'Dreptunghiul are aria 2S, deci S = n · (a₁ + aₙ) / 2 = 6 · 19 / 2 = 57. Pentru a₁ = 1, r = 1 obținem 1 + 2 + … + n = n(n + 1)/2.', en: 'The rectangle has area 2S, so S = n · (a₁ + aₙ) / 2 = 6 · 19 / 2 = 57. For a₁ = 1, r = 1 we get 1 + 2 + … + n = n(n + 1)/2.' }],
+      draw(g, t) {
+        g.view(16, 156, 335); const n = 6, a1 = 2, r = 3, w = 3, tot = a1 + (a1 + (n - 1) * r), v = k => a1 + k * r;
+        for (let k = 0; k < n; k++) {
+          const ap = es(t, .02 + .03 * k, .1 + .03 * k), hh = v(k) * ap;
+          g.poly(rect(k * w, 0, (k + 1) * w, hh), COL.c, { o: .75, stroke: '#fff', w: 1.5 });
+          g.text(P(k * w + w / 2, v(k) / 2), String(v(k)), 16, '#fff', 'middle', ap);
+        }
+        const m = es(t, .25, .5);
+        if (t >= .25) for (let k = 0; k < n; k++) {
+          const hh = v(n - 1 - k), y0 = v(k) + (1 - m) * 4;
+          g.poly(rect(k * w, y0, (k + 1) * w, y0 + hh), COL.t, { o: .75 * m, stroke: '#fff', w: 1.5, so: m });
+          g.text(P(k * w + w / 2, y0 + hh / 2), String(hh), 16, '#fff', 'middle', m);
+        }
+        const d = es(t, .55, .7); if (d > 0) { g.poly(rect(0, 0, n * w, tot), 'none', { stroke: '#fff', w: 2, dash: '8 5', o: d }); g.text(P(n * w + .5, tot / 2), '19', 20, '#ffd54f', 'start', d); g.text(P(n * w / 2, -.8), 'n = 6', 18, '#ffd54f', 'middle', d); }
+        const st = t < .25 ? 'a₁ = 2,  r = 3:   2 + 5 + 8 + 11 + 14 + 17' : t < .55 ? 'S + S  (' + (EN() ? 'the second copy reversed' : 'a doua copie răsturnată') + ')' : t < .8 ? '2S = n · (a₁ + aₙ) = 6 · 19 = 114' : 'S = n · (a₁ + aₙ) / 2 = 6 · 19 / 2 = 57';
+        g.px(300, 388, st, 21, '#fff');
+        g.px(300, 24, '1 + 2 + … + n = n(n + 1)/2', 19, '#ffd54f', 'middle', es(t, .85, .97));
+      }
+    });
+    // adunarea fracțiilor
+    addAfter('Fracții echivalente', {
+      ro: 'Adunarea fracțiilor cu numitori diferiți', en: 'Adding fractions with different denominators', dur: 26000,
+      steps: [
+        { at: 0, ro: 'Vrem să calculăm 1/2 + 1/3. Primul dreptunghi este împărțit în 2 părți egale (una colorată), al doilea în 3 părți egale (una colorată). Părțile au mărimi diferite, deci nu le putem număra împreună.', en: 'We want to compute 1/2 + 1/3. The first rectangle is split into 2 equal parts (one coloured), the second into 3 equal parts (one coloured). The parts have different sizes, so we cannot count them together.' },
+        { at: .2, ro: 'Tăiem ambele dreptunghiuri într-o rețea de 6 părți egale (6 = cel mai mic multiplu comun al lui 2 și 3). Acum 1/2 = 3/6, iar 1/3 = 2/6.', en: 'We cut both rectangles into a grid of 6 equal parts (6 = the least common multiple of 2 and 3). Now 1/2 = 3/6 and 1/3 = 2/6.' },
+        { at: .5, ro: 'Părțile au aceeași mărime, deci le putem aduna: mutăm cele 3 pătrățele și cele 2 pătrățele într-un singur dreptunghi.', en: 'The parts now have the same size, so we can add them: we move the 3 cells and the 2 cells into one rectangle.' },
+        { at: .8, ro: '1/2 + 1/3 = 3/6 + 2/6 = 5/6.', en: '1/2 + 1/3 = 3/6 + 2/6 = 5/6.' }],
+      draw(g, t) {
+        g.view(1, 0, 400); const W = 75, Hh = 40, y0 = 170, xs = [20, 220, 420], f = es(t, .2, .35), mv = es(t, .55, .8), ca = es(t, .5, .6);
+        const cell = (x0, c, rw) => rect(x0 + c * W, y0 + (2 - rw) * Hh, x0 + (c + 1) * W, y0 + (3 - rw) * Hh);
+        const fl = (p, q, k) => P(p.x + (q.x - p.x) * k, p.y + (q.y - p.y) * k);
+        const mvCell = (a0, q0, k) => a0.map((p, i) => fl(p, q0[i], k));
+        // A și B
+        const ghost = 1 - .75 * mv;
+        for (let rw = 0; rw < 3; rw++) { g.poly(cell(xs[0], 0, rw), COL.a, { o: .75 * ghost }); }
+        for (let c = 0; c < 2; c++) { g.poly(cell(xs[1], c, 0), COL.t, { o: .75 * ghost }); }
+        [0, 1].forEach(i => g.poly(rect(xs[i], y0, xs[i] + 2 * W, y0 + 3 * Hh), 'none', { stroke: '#fff', w: 2.5 }));
+        g.line(P(xs[0] + W, y0), P(xs[0] + W, y0 + 3 * Hh), '#fff', 2);
+        [1, 2].forEach(k => g.line(P(xs[1], y0 + k * Hh), P(xs[1] + 2 * W, y0 + k * Hh), '#fff', 2));
+        if (f > 0) { g.line(P(xs[0], y0 + Hh), P(xs[0] + 2 * W * f, y0 + Hh), '#fff', 1.5, '5 4'); g.line(P(xs[0], y0 + 2 * Hh), P(xs[0] + 2 * W * f, y0 + 2 * Hh), '#fff', 1.5, '5 4');
+        g.line(P(xs[1] + W, y0), P(xs[1] + W, y0 + 3 * Hh * f), '#fff', 1.5, '5 4'); }
+        // C
+        if (ca > 0) { g.poly(rect(xs[2], y0, xs[2] + 2 * W, y0 + 3 * Hh), 'none', { stroke: '#fff', w: 2.5, o: ca }); g.line(P(xs[2] + W, y0), P(xs[2] + W, y0 + 3 * Hh), '#fff', 1.5, '5 4'); [1, 2].forEach(k => g.line(P(xs[2], y0 + k * Hh), P(xs[2] + 2 * W, y0 + k * Hh), '#fff', 1.5, '5 4')); }
+        if (mv > 0) {
+          for (let rw = 0; rw < 3; rw++) g.poly(mvCell(cell(xs[0], 0, rw), cell(xs[2], 0, rw), mv), COL.a, { o: .8, stroke: '#fff', w: 1.5 });
+          for (let c = 0; c < 2; c++) g.poly(mvCell(cell(xs[1], c, 0), cell(xs[2], 1, c), mv), COL.t, { o: .8, stroke: '#fff', w: 1.5 });
+        }
+        g.text(P(195, y0 + 60), '+', 34, '#fff'); g.text(P(395, y0 + 60), '=', 34, '#fff');
+        const l1 = 1 - f;
+        g.text(P(xs[0] + W, y0 - 30), '1/2', 26, COL.a, 'middle', l1); g.text(P(xs[1] + W, y0 - 30), '1/3', 26, COL.t, 'middle', l1);
+        g.text(P(xs[0] + W, y0 - 30), '3/6', 26, COL.a, 'middle', f); g.text(P(xs[1] + W, y0 - 30), '2/6', 26, COL.t, 'middle', f);
+        g.text(P(xs[2] + W, y0 - 30), '5/6', 28, '#fff', 'middle', es(t, .8, .92));
+        const st = t < .2 ? '1/2 + 1/3 = ?' : t < .5 ? (EN() ? 'common denominator 6:   1/2 = 3/6,   1/3 = 2/6' : 'numitor comun 6:   1/2 = 3/6,   1/3 = 2/6') : '1/2 + 1/3 = 3/6 + 2/6 = 5/6';
+        g.px(300, 388, st, 22, '#fff');
+      }
+    });
+
+    let cur = 0, tt = 0, playing = false, raf = null, last = 0;
+    function stepIndex(d) { let k = 0; d.steps.forEach((s, i) => { if (tt >= s.at - 1e-9) k = i; }); return k; }
+    function render() {
+      const d = DEMOS[cur]; svg.innerHTML = ''; const g = makeG();
+      const bg = document.createElementNS(NSV, 'rect'); bg.setAttribute('width', 600); bg.setAttribute('height', 400); bg.setAttribute('fill', '#111'); svg.appendChild(bg);
+      d.draw(g, tt);
+      const s = d.steps[stepIndex(d)]; cap.textContent = EN() ? s.en : s.ro;
+      slider.value = Math.round(tt * 1000);
+      playBtn.textContent = playing ? '⏸' : (tt >= 1 ? '↺' : '▶');
+    }
+    function tick(now) { if (!playing) return; const dt = now - last; last = now; tt = Math.min(1, tt + dt / DEMOS[cur].dur); render(); if (tt >= 1) { playing = false; render(); return; } raf = requestAnimationFrame(tick); }
+    function play() { if (tt >= 1) tt = 0; playing = true; last = performance.now(); raf = requestAnimationFrame(tick); render(); }
+    function pause() { playing = false; cancelAnimationFrame(raf); render(); }
+    function load(i) { cur = i; tt = 0; pause(); render(); }
+    function fill() { const c = sel.value || '0'; sel.innerHTML = DEMOS.map((d, i) => `<option value="${i}">${i + 1}. ${EN() ? d.en : d.ro}</option>`).join(''); sel.value = c; $('dv-title').textContent = T('Demonstrații vizuale', 'Visual demonstrations'); }
+    playBtn.onclick = () => { playing ? pause() : play(); };
+    $('dv-reset').onclick = () => { tt = 0; pause(); };
+    $('dv-prev').onclick = () => { pause(); const d = DEMOS[cur], k = stepIndex(d); tt = (tt - d.steps[k].at > .02 || k === 0) ? d.steps[k].at : d.steps[k - 1].at; render(); };
+    $('dv-next').onclick = () => { pause(); const d = DEMOS[cur], k = stepIndex(d); tt = k + 1 < d.steps.length ? d.steps[k + 1].at : 1; render(); };
+    slider.oninput = () => { const v = slider.value / 1000; pause(); tt = v; render(); };
+    sel.onchange = () => { load(+sel.value); play(); };
+    $('btn-visual-demos').onclick = () => { fill(); backdrop.style.display = 'flex'; load(+sel.value || 0); };
+    const closeIt = () => { pause(); backdrop.style.display = 'none'; };
+    $('dv-close').onclick = closeIt;
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) closeIt(); });
+  })();
+
   /* ---------------- Exerciții cu instrumente geometrice ---------------- */
   (function () {
     const panel = $('gt-panel'), textEl = $('gt-text'), msgEl = $('gt-msg'), ansRow = $('gt-ans-row'), ansIn = $('gt-ans'), ansUnit = $('gt-unit'), statsEl = $('gt-stats');
@@ -12740,7 +13607,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     $('gt-fold').onclick = () => { const b = $('gt-body'); b.style.display = b.style.display === 'none' ? 'flex' : 'none'; $('gt-fold').textContent = b.style.display === 'none' ? '▸' : '▾'; };
   })();
 
-  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-miliardar', 'btn-balance', 'btn-area-grid', 'btn-geo-tasks'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
+  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-miliardar', 'btn-balance', 'btn-area-grid', 'btn-visual-demos', 'btn-geo-tasks'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
 })();
 
 document.getElementById('btn-circle').onclick = () => setTool('circle');
@@ -17227,7 +18094,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v392</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v401</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -17264,6 +18131,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Turnurile din Hanoi (joc)</b> — mută toate discurile de pe tija A pe tija C, câte unul odată, fără a pune un disc mare peste unul mic. Alegi între 3 și 6 discuri; vezi numărul de mutări față de minimul 2ⁿ − 1.</li>
   <li><b>Balanța (ecuații)</b> — o balanță în echilibru cu pungi „x” și greutăți de 1: elevul scoate din ambele talere (unități, pungi x) sau împarte în grupe egale, până când x rămâne singur și se afișează valoarea lui. Cu „Doar stânga/dreapta” vede ce se întâmplă dacă face o operație doar pe un taler: balanța se înclină și pasul se anulează. Trei niveluri: x + a = b, 2x + a = b, 3x + a = x + b.</li>
   <li><b>Lipire între instrumente (🧲)</b> — butonul de lângă „Lipire de punct”, activ implicit: când muți sau rotești rigla ori echerul și o muchie a unuia se apropie de o muchie a celuilalt, se aliniază exact paralel și se lipesc (corpurile pe părți opuse). Apoi poți glisa echerul de-a lungul riglei fără să se desprindă — exact ca la construcția paralelei printr-un punct exterior unei drepte.</li>
+  <li><b>Demonstrații vizuale</b> — animații pas cu pas pentru idei importante din matematică: teorema lui Pitagora, (a + b)², diferența de pătrate, suma unghiurilor unui triunghi, unghiul înscris în cerc (jumătate din unghiul la centru), aria paralelogramului, triunghiului și cercului, lungimea cercului, suma numerelor impare, suma 1 + 2 + … + n, teorema lui pătratul unei diferențe, cubul unei sume, completarea pătratului, suma progresiei aritmetice, adunarea fracțiilor, Thales, linia mijlocie, aria trapezului și a patrulaterului cu diagonale perpendiculare, mediane/înălțimi/bisectoare concurente, teorema înălțimii și a catetei, a doua demonstrație a teoremei lui Pitagora (forfecare), simetria (reflexie, rotație, translație), fracții echivalente, inegalitatea mediilor, numere negative pe axă, sin și cos din cercul unitate, derivata ca limită a secantelor și suma Riemann. Cu ▶/⏸ pornești sau oprești animația, cu ◀ ▶ sari între pași, iar cu cursorul o derulezi manual. Sub desen apare explicația fiecărui pas.</li>
   <li><b>Arii și perimetre pe caroiaj</b> — o figură colorată pe caroiaj (un pătrățel = 1 cm²): elevul calculează aria, perimetrul sau ambele; dacă greșește, pătrățelele sau laturile conturului se numerotează ca să le numere. Varianta „Desenează figura”: se cer o arie și un perimetru, iar elevul colorează pătrățele (poate trage degetul) până se potrivesc; sub grilă vede aria și perimetrul figurii lui. Trei niveluri: dreptunghiuri, figuri din 6–10 pătrățele, figuri din 10–16.</li>
   <li><b>Exerciții cu instrumente</b> — deschide tu instrumentele de care ai nevoie (sunt listate în panou); dacă greșești, apare „▶ Arată cum”, o animație pas cu pas a rezolvării corecte (pornește singură la a doua greșeală). Sarcini pe tablă cu rigla, echerul, raportorul și compasul: măsori un segment sau un unghi și scrii răspunsul, apoi desenezi segmente, unghiuri, perpendiculare, paralele, cercuri, mediatoare și bisectoare. Butonul „Verifică” controlează desenul tău (toleranță mică, de ordinul unui milimetru sau al câtorva grade); „Altă sarcină” trece mai departe și șterge desenele sarcinii.</li>
   <li><b>Tangram (joc)</b> — reconstruiești o siluetă din cele 7 piese (2 triunghiuri mari, 1 mediu, 2 mici, un pătrat și un paralelogram). Tragi piesele, atingi o piesă ca s-o rotești cu 45° și poți întoarce paralelogramul. Butonul „Indiciu” arată conturul pieselor.</li>
@@ -17370,7 +18238,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v392</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v401</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -17407,6 +18275,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Tower of Hanoi (game)</b> — move all discs from peg A to peg C, one at a time, never placing a larger disc on a smaller one. Choose 3 to 6 discs; the move count is compared with the minimum 2ⁿ − 1.</li>
   <li><b>The balance (equations)</b> — a balanced scale with “x” bags and 1-unit weights: the student removes from both pans (units, x bags) or splits into equal groups until x is alone and its value shows. With “Left only/Right only” they see what happens when only one pan is changed: the scale tips and the step is undone. Three levels: x + a = b, 2x + a = b, 3x + a = x + b.</li>
   <li><b>Snap between tools (🧲)</b> — the button next to “Snap to point”, on by default: when you move or rotate the ruler or the set square and an edge of one gets close to an edge of the other, they align exactly parallel and stick together (bodies on opposite sides). You can then slide the set square along the ruler without it coming loose — just like when constructing a parallel through a point outside a line.</li>
+  <li><b>Visual demonstrations</b> — step-by-step animations of key ideas: the Pythagorean theorem, (a + b)², difference of squares, angle sum of a triangle, inscribed angle (half the central angle), areas of a parallelogram, triangle and circle, circumference, sum of odd numbers, 1 + 2 + … + n, square of a difference, cube of a sum, completing the square, arithmetic progression sum, adding fractions, Thales' theorem, the midsegment, areas of a trapezoid and of a quadrilateral with perpendicular diagonals, concurrent medians/altitudes/bisectors, the altitude and leg theorems, the second (shearing) proof of Pythagoras, symmetry (reflection, rotation, translation), equivalent fractions, the AM–GM inequality, negative numbers on the number line, sine and cosine from the unit circle, the derivative as a limit of secants and Riemann sums. ▶/⏸ plays or pauses, ◀ ▶ jump between steps, and the slider scrubs manually. The explanation of each step appears under the drawing.</li>
   <li><b>Areas and perimeters on a grid</b> — a coloured figure on a grid (one square = 1 cm²): the student works out the area, the perimeter or both; after a mistake the squares or outline sides get numbered so they can be counted. The “Draw the figure” variant gives an area and a perimeter, and the student colours squares (dragging works) until they match; below the grid the area and perimeter of their figure are shown. Three levels: rectangles, figures of 6–10 squares, figures of 10–16.</li>
   <li><b>Tool exercises</b> — open the tools you need yourself (they are listed in the panel); if you get it wrong, “▶ Show how” appears, a step-by-step animation of the correct method (it starts by itself after the second mistake). Tasks on the whiteboard using the ruler, set square, protractor and compass: measure a segment or an angle and type the answer, then draw segments, angles, perpendiculars, parallels, circles, perpendicular bisectors and angle bisectors. “Check” verifies your drawing (small tolerance, about a millimeter or a few degrees); “Another task” moves on and clears the task drawings.</li>
   <li><b>Tangram (game)</b> — rebuild a silhouette from the 7 pieces (2 large triangles, 1 medium, 2 small, a square and a parallelogram). Drag the pieces, tap a piece to rotate it by 45°, and flip the parallelogram. The “Hint” button shows the outline of the pieces.</li>
@@ -17632,7 +18501,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v392';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v401';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
