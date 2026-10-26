@@ -67,6 +67,9 @@ const UI_TEXT = {
   'Corpuri geometrice': 'Geometric solids',
   'Figuri geometrice': 'Geometric figures',
   'Lipire de rețea — elementele desenate se lipesc de nodurile caroiajului': 'Snap to grid — drawn elements snap to the grid nodes',
+  'Lipire între instrumente — rigla și echerul se lipesc una de alta (muchie pe muchie) ca să le poți glisa ușor, de exemplu la paralela printr-un punct': 'Snap between tools — the ruler and set square stick to each other (edge to edge) so you can slide them easily, e.g. when drawing a parallel through a point',
+  '✓ Lipire între instrumente activă — rigla și echerul se lipesc una de alta când muchiile se apropie': '✓ Snap between tools is on — the ruler and set square stick together when their edges get close',
+  'Lipire între instrumente dezactivată': 'Snap between tools is off',
   'Lipire de punct — elementele desenate se lipesc de punctele speciale ale instrumentelor geometrice (diviziunea 0 a riglei, vârful unghiului drept al echerului, centrul raportorului, centrul cercului la compas)': 'Snap to point — drawn elements snap to special points on the geometric tools (the ruler\'s 0 mark, the set square\'s right-angle vertex, the protractor\'s center, the compass\'s circle center)',
   'Spațiu vertical — trage în sus/jos pentru a insera sau elimina spațiu pe tablă': 'Vertical space — drag up/down to insert or remove space on the board',
   'Corp 3D interactiv (rotește liber, apoi inserează)': 'Interactive 3D solid (rotate freely, then insert)',
@@ -11134,104 +11137,163 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
   const $ = (id) => document.getElementById(id);
 
-  /* ---------------- Tabla înmulțirii ---------------- */
+  /* ---------------- Tabla înmulțirii + celelalte operații ---------------- */
   (function () {
     const backdrop = $('mult-backdrop'), field = $('mult-field'), qEl = $('mult-question'),
-      stats = $('mult-stats'), msg = $('mult-msg'), sel = $('mult-table');
+      stats = $('mult-stats'), msg = $('mult-msg'), sel = $('mult-table'), opSel = $('mult-op');
     const ROUND = 10, COLORS = ['#4da6ff', '#6cc28f', '#e0ae52', '#c792ea', '#ff8a80', '#4dd0e1'];
     let q = null, n = 0, ok = 0, streak = 0, best = 0, locked = false, missed = [], pool = [];
 
+    const OPS = () => [['mul', T('Înmulțire ×', 'Multiplication ×')], ['div', T('Împărțire ÷', 'Division ÷')], ['add', T('Adunare +', 'Addition +')], ['sub', T('Scădere −', 'Subtraction −')], ['mix', T('Toate operațiile (amestec)', 'All operations (mixed)')], ['multi', T('Mai multe operații într-un exercițiu', 'Several operations in one exercise')]];
     function fillSelect() {
-      const cur = sel.value || 'mix';
-      sel.innerHTML = `<option value="mix">${T('Toate (2–9)', 'All (2–9)')}</option><option value="mix10">${T('Toate (2–10)', 'All (2–10)')}</option>` +
-        Array.from({ length: 9 }, (_, i) => `<option value="${i + 2}">${T('Tabla lui ', 'Table of ')}${i + 2}</option>`).join('');
-      sel.value = cur;
-      $('mult-table-label').textContent = T('Tabla:', 'Table:');
-      $('mult-title').textContent = T('Tabla înmulțirii — atinge rezultatul corect', 'Times tables — tap the correct result');
+      const curOp = opSel.value || 'mul';
+      opSel.innerHTML = OPS().map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+      opSel.value = curOp;
+      fillSecond();
+      $('mult-op-label').textContent = T('Operația:', 'Operation:');
+      $('mult-title').textContent = T('Calcul rapid — atinge rezultatul corect', 'Quick math — tap the correct result');
     }
-    function factors() {
-      const v = sel.value;
-      if (v === 'mix') return [rnd(2, 9), rnd(2, 9)];
-      if (v === 'mix10') return [rnd(2, 10), rnd(2, 10)];
-      const a = +v, b = rnd(1, 10);
-      return Math.random() < 0.5 ? [a, b] : [b, a];
+    function fillSecond() {
+      const op = opSel.value, cur = sel.value;
+      let html, lab;
+      if (op === 'mul' || op === 'div') {
+        lab = T('Tabla:', 'Table:');
+        html = `<option value="mix">${T('Toate (2–9)', 'All (2–9)')}</option><option value="mix10">${T('Toate (2–10)', 'All (2–10)')}</option>` + Array.from({ length: 9 }, (_, i) => `<option value="${i + 2}">${T('Tabla lui ', 'Table of ')}${i + 2}</option>`).join('');
+      } else if (op === 'add' || op === 'sub') {
+        lab = T('Numere până la:', 'Numbers up to:');
+        html = ['20', '100', '1000'].map(v => `<option value="${v}">${v}</option>`).join('');
+      } else {
+        lab = T('Nivel:', 'Level:');
+        html = `<option value="1">${T('Ușor', 'Easy')}</option><option value="2">${T('Mediu', 'Medium')}</option><option value="3">${T('Greu', 'Hard')}</option>`;
+      }
+      sel.innerHTML = html;
+      if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+      $('mult-table-label').textContent = lab;
     }
-    function pickQuestion() {
-      // exercițiile greșite revin în runda următoare
-      if (pool.length) return pool.shift();
-      return factors();
+    // ----- generatoare: {text, right, opts[3 distractori], key}
+    function distract(right, extra, min) {
+      const cand = new Set(extra.filter(v => Number.isFinite(v) && v >= (min == null ? 0 : min) && v !== right));
+      const sw = +String(Math.abs(right)).split('').reverse().join(''); if (sw !== right && sw >= 0) cand.add(sw);
+      let opts = shuffle([...cand]).slice(0, 3), g = 0;
+      while (opts.length < 3 && g++ < 200) { const v = right + rnd(-12, 12); if (v !== right && v >= (min == null ? 0 : min) && !opts.includes(v)) opts.push(v); }
+      return opts;
     }
-    function bubbles(a, b) {
-      // 4 variante, una corectă; distractorii sunt rezultate plauzibile
-      const right = a * b, cand = new Set();
-      [[a + 1, b], [a - 1, b], [a, b + 1], [a, b - 1]].forEach(([x, y]) => { if (x > 0 && y > 0) cand.add(x * y); });
-      [right + 10, right - 10, right + a, right - a, right + b, right - b].forEach(v => { if (v > 0) cand.add(v); });
-      const sw = +String(right).split('').reverse().join(''); if (sw !== right && sw > 0) cand.add(sw);
-      cand.delete(right);
-      const opts = shuffle([...cand]).slice(0, 3);
-      let guard = 0;
-      while (opts.length < 3 && guard++ < 100) { const v = rnd(2, 10) * rnd(2, 10); if (v !== right && !opts.includes(v)) opts.push(v); }
-      return shuffle([right, ...opts]);
+    function genMul(p) { if (p == null) p = sel.value;
+      const v = p; let a, b;
+      if (v === 'mix') { a = rnd(2, 9); b = rnd(2, 9); } else if (v === 'mix10') { a = rnd(2, 10); b = rnd(2, 10); }
+      else { a = +v; b = rnd(1, 10); if (Math.random() < .5) [a, b] = [b, a]; }
+      const r = a * b;
+      return { text: `${a} × ${b}`, right: r, opts: distract(r, [(a + 1) * b, (a - 1) * b, a * (b + 1), a * (b - 1), r + 10, r - 10, r + a, r - a, r + b, r - b], 1) };
     }
+    function genDiv(p) { if (p == null) p = sel.value;
+      const v = p; let t, k;
+      if (v === 'mix') t = rnd(2, 9); else if (v === 'mix10') t = rnd(2, 10); else t = +v;
+      k = rnd(1, 10); const d = t * k;
+      return { text: `${d} ÷ ${t}`, right: k, opts: distract(k, [k + 1, k - 1, k + 2, k - 2, t, k * 2, k + t, d - t], 0) };
+    }
+    function genAdd(p) { if (p == null) p = sel.value;
+      const M = +p || 20; let a, b;
+      if (M <= 20) { a = rnd(2, M - 2); b = rnd(2, M - a); } else { a = rnd(10, M - 10); b = rnd(10, M - a); }
+      const r = a + b, ex = [r + 1, r - 1, r + 10, r - 10, r + 2, r - 2];
+      if (M > 20) { ex.push(r + 100, r - 100, (Math.floor(a / 10) + Math.floor(b / 10)) * 10 + ((a % 10) + (b % 10)) % 10); }
+      return { text: `${a} + ${b}`, right: r, opts: distract(r, ex, 0) };
+    }
+    function genSub(p) { if (p == null) p = sel.value;
+      const M = +p || 20; let a, b;
+      a = M <= 20 ? rnd(4, M) : rnd(20, M); b = M <= 20 ? rnd(1, a - 1) : rnd(5, a - 1);
+      const r = a - b, ex = [r + 1, r - 1, r + 10, r - 10, r + 2, r - 2, b - r];
+      if (M > 20) { ex.push(r + 100, r - 100); }
+      return { text: `${a} − ${b}`, right: r, opts: distract(r, ex, 0) };
+    }
+    function genMulti(p) { if (p == null) p = sel.value;
+      const L = +p || 1; let t, val, wrong = [];
+      for (let g = 0; g < 50; g++) {
+        const a = rnd(2, 9), b = rnd(2, 9), c = rnd(2, 9), d = rnd(2, 9), kind = rnd(0, L === 1 ? 2 : L === 2 ? 4 : 6);
+        if (kind === 0) { t = `${a} + ${b} × ${c}`; val = a + b * c; wrong = [(a + b) * c]; }
+        else if (kind === 1) { t = `${a * b} − ${c} × ${d}`; val = a * b - c * d; wrong = [(a * b - c) * d]; if (val < 0) continue; }
+        else if (kind === 2) { const x = rnd(10, 40), y = rnd(5, 30); t = `${x} + ${y} − ${a}`; val = x + y - a; wrong = [x + y + a, x - y - a]; }
+        else if (kind === 3) { t = `(${a} + ${b}) × ${c}`; val = (a + b) * c; wrong = [a + b * c]; }
+        else if (kind === 4) { t = `${a * c} ÷ ${c} + ${b} × ${d}`; val = a + b * d; wrong = [(a + b) * d]; }
+        else if (kind === 5) { t = `${a} × ${b} + ${c} × ${d}`; val = a * b + c * d; wrong = [a * (b + c) * d]; }
+        else { t = `(${a + b} − ${a}) × ${c} + ${d}`; val = b * c + d; wrong = [(a + b - a) * (c + d)]; }
+        if (val > 0) break;
+      }
+      return { text: t, right: val, opts: distract(val, [...wrong, val + 1, val - 1, val + 10, val - 10, val + 2], 0) };
+    }
+    function gen() {
+      let op = opSel.value;
+      if (op === 'mix') {
+        const m = +sel.value || 1; op = ['mul', 'div', 'add', 'sub'][rnd(0, 3)];
+        const par = (op === 'mul' || op === 'div') ? (m === 1 ? 'mix' : 'mix10') : String([20, 100, 1000][m - 1]);
+        return ({ mul: genMul, div: genDiv, add: genAdd, sub: genSub })[op](par);
+      }
+      return ({ mul: genMul, div: genDiv, add: genAdd, sub: genSub, multi: genMulti })[op]();
+    }
+    function pickQuestion() { return pool.length ? pool.shift() : gen(); }
     function statsText() { return T(`Întrebarea ${Math.min(n + 1, ROUND)}/${ROUND}; corecte: ${ok}; serie: ${streak}`, `Question ${Math.min(n + 1, ROUND)}/${ROUND}; correct: ${ok}; streak: ${streak}`); }
     function next() {
       if (n >= ROUND) return finish();
       locked = false; msg.textContent = '';
-      const [a, b] = pickQuestion(); q = { a, b };
-      qEl.textContent = `${a} × ${b} = ?`;
+      q = pickQuestion();
+      qEl.textContent = `${q.text} = ?`;
       field.innerHTML = '';
-      bubbles(a, b).forEach((v, i) => {
+      shuffle([q.right, ...q.opts]).forEach((v, i) => {
         const btn = document.createElement('button');
         btn.dataset.v = v;
         const c = COLORS[i % COLORS.length];
-        btn.innerHTML = `<span style="color:${c}; margin-right:10px;">${'ABCD'[i]}:</span>${v}`;
-        btn.style.cssText = `border-radius:999px; padding:16px 10px; border:3px solid ${c}; background:${c}18; color:#fff; font-size:26px; font-weight:800; cursor:pointer; touch-action:manipulation;`;
+        btn.innerHTML = `<span class="mult-lab" style="color:${c}; margin-right:10px;">${'ABCD'[i]}:</span>${v}`;
+        btn.style.cssText = `border-radius:999px; padding:16px 10px; border:3px solid ${c}; background:${c}18; color:#fff; font-size:26px; font-weight:800; cursor:pointer; touch-action:manipulation; position:relative;`;
         btn.onclick = () => answer(btn, v);
         field.appendChild(btn);
       });
       stats.textContent = statsText();
     }
+    function face(btn, ch) { // fața apare în buton, în locul literei
+      const lab = btn.querySelector('.mult-lab');
+      if (lab) { lab.textContent = ch; lab.style.cssText = 'margin-right:10px; font-size:30px; display:inline-block; animation:multPop .45s ease-out'; }
+    }
     function answer(btn, v) {
       if (locked) return; locked = true;
-      const right = q.a * q.b;
+      const right = q.right;
       n++;
       if (v === right) {
         ok++; streak++; best = Math.max(best, streak);
-        btn.style.background = '#2e8b57'; btn.style.borderColor = '#7be3a3';
+        btn.style.background = '#2e8b57'; btn.style.borderColor = '#7be3a3'; face(btn, '😊');
         msg.textContent = T('Corect! ✓', 'Correct! ✓');
-        setTimeout(next, 650);
+        setTimeout(next, 850);
       } else {
-        streak = 0; missed.push([q.a, q.b]);
-        btn.style.background = '#b53a2e'; btn.style.borderColor = '#ff8a80';
+        streak = 0; missed.push(q);
+        btn.style.background = '#b53a2e'; btn.style.borderColor = '#ff8a80'; face(btn, '😢');
         [...field.children].forEach(c => { if (+c.dataset.v === right) { c.style.background = '#2e8b57'; c.style.borderColor = '#7be3a3'; } });
-        msg.textContent = `${q.a} × ${q.b} = ${right}`;
-        setTimeout(next, 1700);
+        msg.textContent = `${q.text} = ${right}`;
+        setTimeout(next, 1900);
       }
       stats.textContent = statsText();
     }
     function finish() {
       locked = true; stats.textContent = ''; msg.textContent = '';
-      const uniq = [...new Set(missed.map(m => m.join('×')))];
+      const uniq = []; missed.forEach(m => { if (!uniq.some(u => u.text === m.text)) uniq.push(m); });
       qEl.textContent = T(`Rezultat: ${ok}/${ROUND}`, `Score: ${ok}/${ROUND}`);
       field.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:14px; font-size:15px;">
         ${ok === ROUND ? T('Perfect! 🎉', 'Perfect! 🎉') : ok >= 8 ? T('Foarte bine! 👏', 'Very good! 👏') : T('Mai exersăm puțin. 💪', 'Let\'s practice a bit more. 💪')}
         <div style="margin-top:6px; color:#aaa;">${T('Cea mai lungă serie', 'Longest streak')}: ${best}</div>
-        ${uniq.length ? `<div style="margin-top:8px;">${T('De repetat', 'To review')}: <b>${uniq.map(u => u.replace('×', ' × ') + ' = ' + u.split('×').reduce((x, y) => x * y)).join('; ')}</b></div>` : ''}
+        ${uniq.length ? `<div style="margin-top:8px;">${T('De repetat', 'To review')}: <b>${uniq.map(u => u.text + ' = ' + u.right).join('; ')}</b></div>` : ''}
         <button id="mult-again" class="tool" style="margin:12px auto 0; display:block;">${T('Din nou', 'Play again')}</button></div>`;
       $('mult-again').onclick = () => start(true);
     }
     function start(keepMissed) {
-      pool = keepMissed ? [...new Set(missed.map(m => m.join('x')))].slice(0, 5).map(s => s.split('x').map(Number)) : [];
+      const seen = new Set(); pool = keepMissed ? missed.filter(m => !seen.has(m.text) && seen.add(m.text)).slice(0, 5) : [];
       n = 0; ok = 0; streak = 0; best = 0; missed = []; next();
     }
     if (!document.getElementById('mult-style')) {
       const st = document.createElement('style'); st.id = 'mult-style';
-      st.textContent = '@keyframes multFloat{from{transform:translateY(-4px)}to{transform:translateY(5px)}}';
+      st.textContent = '@keyframes multFloat{from{transform:translateY(-4px)}to{transform:translateY(5px)}}@keyframes multPop{0%{transform:scale(.2)}70%{transform:scale(1.4)}100%{transform:scale(1)}}';
       document.head.appendChild(st);
     }
     $('btn-mult-game').onclick = () => { fillSelect(); backdrop.style.display = 'flex'; start(false); };
     $('mult-close').onclick = () => { backdrop.style.display = 'none'; };
     backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+    opSel.onchange = () => { fillSecond(); start(false); };
     sel.onchange = () => start(false);
   })();
 
@@ -11748,7 +11810,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       const w = pickWord();
       cur = { w: w[0], lvl: w[1], cat: w[2], def: w[3] };
       guessed = new Set(); wrong = 0; over = false;
-      defEl.textContent = ''; nextBtn.style.display = 'none'; hintBtn.disabled = false;
+      defEl.textContent = ''; nextBtn.style.display = 'none'; hintBtn.disabled = false; keysEl.style.display = 'flex';
       const tn = { math: 'Math', animals: T('Animale', 'Animals'), flowers: T('Flori', 'Flowers'), objects: T('Obiecte', 'Objects') }[topic];
       cat.textContent = topic === 'math' ? T(`Categorie: ${cur.cat} · ${cur.w.length} litere`, `Category: ${cur.cat} · ${cur.w.length} letters`) : T(`${tn} · ${cur.w.length} litere`, `${tn} · ${cur.w.length} letters`);
       render();
@@ -11762,6 +11824,9 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       render();
       defEl.innerHTML = `<b style="color:${done ? '#7be3a3' : '#ff8a80'}">${done ? T('Bravo! ✓', 'Well done! ✓') : T('Ai pierdut.', 'You lost.')}</b> <b style="font-size:18px">${cur.w}</b><br>${cur.def}`;
       nextBtn.style.display = ''; hintBtn.disabled = true;
+      nextBtn.style.cssText = 'display:block; font-size:17px; font-weight:700; padding:10px 22px; border:1px solid #3b82f6; border-radius:10px; color:#fff;';
+      keysEl.style.display = 'none';                       // pe telefon: butonul „următorul” rămâne vizibil
+      setTimeout(() => nextBtn.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
       nextBtn.textContent = played >= ROUND ? T('Rezultat', 'Result') : T('Următorul cuvânt ›', 'Next word ›');
     }
     function guess(k) {
@@ -11882,19 +11947,29 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
   /* ---------------- Tangram (joc) ---------------- */
   (function () {
     const backdrop = $('tg-backdrop'), svg = $('tg-svg'), msg = $('tg-msg'), sel = $('tg-fig');
-    const NS = 'http://www.w3.org/2000/svg', S = 26;           // pixeli pe unitate
+    const NS = 'http://www.w3.org/2000/svg';
+    let S = 38, W = 860, H = 520, PORTRAIT = false, TRAY_Y = 0;           // pixeli pe unitate; dimensiunea zonei de lucru
     const COL = ['#ef5350', '#42a5f5', '#66bb6a', '#ffca28', '#ab47bc', '#ff7043', '#26c6da'];
     const SQ0 = [[[0, 0], [4, 0], [2, 2]], [[2, 4], [4, 4], [4, 2]], [[1, 3], [3, 3], [2, 2]], [[2, 2], [3, 3], [4, 2], [3, 1]], [[0, 4], [2, 4], [3, 3], [1, 3]]];  // L, M, S, Q, P
-    const BASE = SQ0.map(p => { const c = p.reduce((a, q) => [a[0] + q[0] / p.length, a[1] + q[1] / p.length], [0, 0]); return p.map(q => [(q[0] - c[0]) * S, (q[1] - c[1]) * S]); });
+    const BASE = SQ0.map(p => { const c = p.reduce((a, q) => [a[0] + q[0] / p.length, a[1] + q[1] / p.length], [0, 0]); return p.map(q => [q[0] - c[0], q[1] - c[1]]); });
     // centrul de greutate real (pentru triunghiuri e media vârfurilor; pentru pătrat/paralelogram la fel)
     const FIGS = [[[0,[[0,0],[4,0],[2,2]]],[0,[[0,0],[0,4],[2,2]]],[1,[[2,4],[4,4],[4,2]]],[4,[[0,4],[2,4],[3,3],[1,3]]],[2,[[1,3],[3,3],[2,2]]],[3,[[2,2],[3,3],[4,2],[3,1]]],[2,[[3,1],[4,2],[4,0]]]],[[3,[[-2.5,-0.5],[-1.5,0.5],[-0.5,-0.5],[-1.5,-1.5]]],[2,[[-1.5,0.5],[0.5,0.5],[-0.5,-0.5]]],[0,[[-1.5,-1.5],[2.5,-1.5],[0.5,0.5]]],[1,[[0.5,0.5],[2.5,0.5],[2.5,-1.5]]],[0,[[-1.5,0.5],[2.5,0.5],[0.5,2.5]]],[4,[[2.5,-1.5],[0.5,-1.5],[-0.5,-2.5],[1.5,-2.5]]],[2,[[-1.5,-1.5],[0.5,-1.5],[-0.5,-2.5]]]],[[0,[[-1.207,-1.0],[2.793,-1.0],[0.793,1.0]]],[2,[[-2.207,0.0],[-0.207,0.0],[-1.207,-1.0]]],[1,[[0.793,1.0],[2.793,1.0],[2.793,-1.0]]],[3,[[4.207,-1.0],[2.793,-1.0],[2.793,0.414],[4.207,0.414]]],[4,[[0.793,1.0],[-1.207,1.0],[-2.207,0.0],[-0.207,0.0]]],[0,[[-5.207,-1.0],[-1.207,-1.0],[-3.207,1.0]]],[2,[[4.207,-1.0],[4.207,1.0],[5.207,-0.0]]]],[[2,[[-1.621,0.0],[-0.207,-1.414],[-1.621,-1.414]]],[1,[[1.207,-0.0],[-0.207,-1.414],[-1.621,0.0]]],[4,[[-0.207,-1.414],[1.207,-0.0],[2.621,-0.0],[1.207,-1.414]]],[0,[[-1.621,-0.0],[2.379,-0.0],[0.379,2.0]]],[3,[[1.621,-1.0],[2.621,-0.0],[3.621,-1.0],[2.621,-2.0]]],[2,[[2.621,-2.0],[0.621,-2.0],[1.621,-1.0]]],[0,[[0.379,2.0],[-3.621,2.0],[-1.621,0.0]]]],[[1,[[0.621,1.414],[-0.793,0.0],[-2.207,1.414]]],[0,[[-0.793,0.0],[3.207,0.0],[1.207,2.0]]],[3,[[-2.207,1.414],[-1.207,0.414],[-2.207,-0.586],[-3.207,0.414]]],[2,[[-0.793,0.0],[1.207,0.0],[0.207,-1.0]]],[4,[[3.207,0.0],[1.207,0.0],[0.207,-1.0],[2.207,-1.0]]],[0,[[-2.793,-2.0],[1.207,-2.0],[-0.793,0.0]]],[2,[[0.207,-1.0],[2.207,-1.0],[1.207,-2.0]]]],[[0,[[4.035,-1.621],[1.207,1.207],[1.207,-1.621]]],[3,[[-0.207,-0.207],[-0.207,1.207],[1.207,1.207],[1.207,-0.207]]],[2,[[-0.207,1.207],[-0.207,-0.793],[-1.207,0.207]]],[1,[[0.207,1.621],[-1.207,0.207],[-2.621,1.621]]],[4,[[-4.035,1.621],[-2.621,0.207],[-1.207,0.207],[-2.621,1.621]]],[0,[[-1.207,-1.207],[-4.035,1.621],[-4.035,-1.207]]],[2,[[-1.207,-1.207],[-2.621,0.207],[-1.207,0.207]]]],[[0,[[2.0,-2.586],[2.0,1.414],[-0.0,-0.586]]],[0,[[0.0,3.414],[-0.0,-0.586],[2.0,1.414]]],[2,[[2.0,1.414],[0.586,2.828],[2.0,2.828]]],[1,[[0.0,3.414],[0.0,1.414],[-2.0,1.414]]],[2,[[0.0,1.414],[-0.0,-0.586],[-1.0,0.414]]],[4,[[-1.414,-0.586],[-0.0,-2.0],[1.414,-2.0],[-0.0,-0.586]]],[3,[[-0.0,-3.414],[-0.0,-2.0],[1.414,-2.0],[1.414,-3.414]]]],[[2,[[-3.328,0.707],[-3.328,2.707],[-2.328,1.707]]],[2,[[-2.328,1.707],[-2.328,-0.293],[-3.328,0.707]]],[1,[[-0.328,-0.293],[-2.328,-0.293],[-2.328,1.707]]],[0,[[-2.328,1.707],[0.5,-1.121],[0.5,1.707]]],[4,[[-2.328,-0.293],[-0.328,-0.293],[0.672,-1.293],[-1.328,-1.293]]],[3,[[0.672,-1.293],[0.672,-2.707],[-0.743,-2.707],[-0.743,-1.293]]],[0,[[3.328,-1.121],[0.5,1.707],[0.5,-1.121]]]],[[3,[[-0.0,-2.5],[1.0,-1.5],[2.0,-2.5],[1.0,-3.5]]],[1,[[-0.0,-0.5],[2.0,-0.5],[2.0,-2.5]]],[0,[[2.0,-0.5],[-0.828,2.328],[-0.828,-0.5]]],[4,[[-2.0,-0.5],[-0.0,-0.5],[1.0,-1.5],[-1.0,-1.5]]],[0,[[2.0,-0.5],[2.0,3.5],[-0.0,1.5]]],[2,[[-1.0,-1.5],[1.0,-1.5],[-0.0,-2.5]]],[2,[[-1.0,-3.5],[-1.0,-1.5],[-0.0,-2.5]]]],[[2,[[-2.828,-0.707],[-1.414,-2.121],[-2.828,-2.121]]],[3,[[-4.243,-0.707],[-2.828,-0.707],[-2.828,-2.121],[-4.243,-2.121]]],[1,[[0.0,-0.707],[-1.414,-2.121],[-2.828,-0.707]]],[0,[[0.0,2.121],[-2.828,-0.707],[0.0,-0.707]]],[0,[[2.828,-0.707],[0.0,2.121],[0.0,-0.707]]],[2,[[-1.414,-2.121],[0.0,-0.707],[-0.0,-2.121]]],[4,[[4.243,-0.707],[2.828,0.707],[1.414,0.707],[2.828,-0.707]]]],[[2,[[-2.207,-2.621],[-3.621,-1.207],[-2.207,-1.207]]],[4,[[-2.207,-3.207],[-2.207,-1.207],[-1.207,-0.207],[-1.207,-2.207]]],[2,[[0.207,-0.207],[-1.207,-1.621],[-1.207,-0.207]]],[1,[[-2.621,-0.207],[-1.207,1.207],[0.207,-0.207]]],[0,[[0.793,-0.793],[0.793,3.207],[-1.207,1.207]]],[0,[[0.793,0.379],[3.621,3.207],[0.793,3.207]]],[3,[[0.793,0.379],[1.793,1.379],[2.793,0.379],[1.793,-0.621]]]]];
+    FIGS[0].forEach(([k, pl]) => pl.forEach(p => { p[0] -= 2; p[1] -= 2; }));   // pătratul este centrat în origine
     const KIND = [0, 0, 1, 2, 2, 3, 4];     // tipul fiecăreia dintre cele 7 piese
     let fi = 0, pieces = [], hint = false, selId = -1, drag = null, won = false;
     const mk = (name, attrs) => { const e = document.createElementNS(NS, name); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
-    const poly = (pc) => { const a = pc.rot * Math.PI / 4, ca = Math.cos(a), sa = Math.sin(a); return BASE[pc.kind].map(([x, y]) => { if (pc.flip) x = -x; return [pc.x + x * ca - y * sa, pc.y + x * sa + y * ca]; }); };
+    const poly = (pc) => { const a = pc.rot * Math.PI / 4, ca = Math.cos(a), sa = Math.sin(a); return BASE[pc.kind].map(([x, y]) => { x *= S; y *= S; if (pc.flip) x = -x; return [pc.x + x * ca - y * sa, pc.y + x * sa + y * ca]; }); };
     const inside = (pt, pl) => { let c = false; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) { const [xi, yi] = pl[i], [xj, yj] = pl[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; };
     const sol = () => FIGS[fi];
-    const ORG = [190, 200];      // originea siluetei (în pixeli)
+    let ORG = [240, 260];      // originea siluetei (în pixeli)
+    function layout(i) {          // pe telefon (ecran îngust): zonă verticală, piese cât mai mari
+      PORTRAIT = window.innerWidth < 760;
+      if (PORTRAIT) {
+        const xs = FIGS[i].flatMap(([k, pl]) => pl.map(p => p[0])), ys = FIGS[i].flatMap(([k, pl]) => pl.map(p => p[1]));
+        const fw = Math.max(...xs) - Math.min(...xs), fh = Math.max(...ys) - Math.min(...ys);
+        W = 420; S = Math.min(50, (W - 30) / fw); ORG = [W / 2, 20 + fh * S / 2 + 6]; TRAY_Y = 40 + fh * S;
+      } else { S = 38; W = 860; H = 520; ORG = [240, 260]; }
+    }
     function drawAll() {
       svg.innerHTML = '';
       // silueta
@@ -11904,18 +11979,28 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       if (hint) sol().forEach(([k, pl]) => svg.appendChild(mk('polygon', { points: pl.map(p => (ORG[0] + p[0] * S) + ',' + (ORG[1] + p[1] * S)).join(' '), fill: 'none', stroke: '#94a3b8', 'stroke-width': 1, 'stroke-dasharray': '4 3' })));
       pieces.forEach(pc => {
         const pts = poly(pc).map(p => p[0] + ',' + p[1]).join(' ');
-        const e = mk('polygon', { points: pts, fill: COL[pc.id], stroke: pc.id === selId ? '#fff' : 'rgba(0,0,0,0.5)', 'stroke-width': pc.id === selId ? 2.5 : 1, 'stroke-linejoin': 'round', style: 'cursor:grab; touch-action:none;' });
+        const e = mk('polygon', { points: pts, fill: COL[pc.id], stroke: pc.id === selId ? '#fff' : pc.slot != null ? '#7be3a3' : 'rgba(0,0,0,0.5)', 'stroke-width': pc.id === selId ? 2.5 : pc.slot != null ? 2 : 1, 'stroke-linejoin': 'round', style: 'cursor:grab; touch-action:none;' });
         e.addEventListener('pointerdown', (ev) => down(ev, pc, e));
         svg.appendChild(e);
       });
     }
     function newFigure(i) {
-      fi = i; won = false; selId = -1; hint = false; msg.textContent = '';
+      layout(i); fi = i; won = false; selId = -1; hint = false; msg.textContent = '';
       pieces = KIND.map((kind, id) => {
         const col = id % 4, row = (id / 4) | 0;
         return { id, kind, x: 380 + col * 62 - (row ? 0 : 0) + (row ? 30 : 0), y: 70 + row * 130 + (col % 2) * 30, rot: [0, 1, 2, 3, 4, 5, 6, 7][(id * 3 + i) % 8], flip: 0 };
       });
-      pieces.forEach(pc => { pc.x = 360 + (pc.id % 3) * 90; pc.y = 70 + ((pc.id / 3) | 0) * 120; });
+      if (PORTRAIT) {          // aranjare pe rânduri (fiecare piesă își ocupă diametrul)
+        const rad = pc => Math.max(...BASE[pc.kind].map(([x, y]) => Math.hypot(x, y))) * S + 4;
+        let cx = 6, cy = TRAY_Y, rowH = 0;
+        [...pieces].sort((a, b) => rad(b) - rad(a)).forEach(pc => {
+          const r = rad(pc);
+          if (cx + 2 * r > W - 6) { cx = 6; cy += rowH + 4; rowH = 0; }
+          pc.x = cx + r; pc.y = cy + r; cx += 2 * r + 4; rowH = Math.max(rowH, 2 * r);
+        });
+        H = cy + rowH + 8;
+      } else pieces.forEach(pc => { pc.x = 520 + (pc.id % 3) * 115; pc.y = 90 + ((pc.id / 3) | 0) * 160; });
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.style.maxHeight = PORTRAIT ? '80vh' : '64vh'; $('tg-help').style.display = PORTRAIT ? 'none' : '';
       drawAll(); stats();
     }
     function stats() { $('tg-stats').textContent = T(`Figura ${fi + 1}/${FIGS.length}`, `Figure ${fi + 1}/${FIGS.length}`); }
@@ -11924,30 +12009,51 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       ev.preventDefault();
       selId = pc.id;
       const i = pieces.indexOf(pc); pieces.splice(i, 1); pieces.push(pc);   // în față
-      const r = svg.getBoundingClientRect(), k = 640 / r.width;
+      pc.slot = null;
+      const r = svg.getBoundingClientRect(), k = 1 / Math.min(r.width / W, r.height / H);
       drag = { pc, sx: ev.clientX, sy: ev.clientY, ox: pc.x, oy: pc.y, k, moved: false, rect: r };
       drawAll();
       const top = svg.lastChild; top.setPointerCapture && top.setPointerCapture(ev.pointerId);
       const mv = (e) => {
         const dx = (e.clientX - drag.sx) * drag.k, dy = (e.clientY - drag.sy) * drag.k;
-        if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.moved = true;
         pc.x = drag.ox + dx; pc.y = drag.oy + dy;
-        pc.x = Math.max(10, Math.min(630, pc.x)); pc.y = Math.max(10, Math.min(390, pc.y));
+        pc.x = Math.max(15, Math.min(W - 15, pc.x)); pc.y = Math.max(15, Math.min(H - 15, pc.y));
         top.setAttribute('points', poly(pc).map(p => p[0] + ',' + p[1]).join(' '));
       };
       const up = () => {
         top.removeEventListener('pointermove', mv); top.removeEventListener('pointerup', up); top.removeEventListener('pointercancel', up);
-        if (!drag.moved) pc.rot = (pc.rot + 1) % 8;          // atingere = rotire cu 45°
-        else snap(pc);
+        if (!drag.moved) { pc.rot = (pc.rot + 1) % 8; autoPlace(pc); }          // atingere = rotire cu 45°
+        else if (!autoPlace(pc)) snap(pc);
         drag = null; drawAll(); check();
       };
       top.addEventListener('pointermove', mv); top.addEventListener('pointerup', up); top.addEventListener('pointercancel', up);
+    }
+    // plasare automată: piesa are forma/orientarea unui loc liber din siluetă și este aproape de el
+    function autoPlace(pc) {
+      const mine = poly(pc), cx = mine.reduce((a, p) => a + p[0], 0) / mine.length, cy = mine.reduce((a, p) => a + p[1], 0) / mine.length;
+      const taken = new Set(pieces.filter(q => q !== pc && q.slot != null).map(q => q.slot));
+      let best = null;
+      sol().forEach(([k, pl], idx) => {
+        if (k !== pc.kind || taken.has(idx)) return;
+        const sp = pl.map(p => [ORG[0] + p[0] * S, ORG[1] + p[1] * S]);
+        const sx = sp.reduce((a, p) => a + p[0], 0) / sp.length, sy = sp.reduce((a, p) => a + p[1], 0) / sp.length;
+        const dx = sx - cx, dy = sy - cy, dist = Math.hypot(dx, dy);
+        if (dist > 1.9 * S) return;                                   // prea departe de loc
+        const same = mine.every(a => sp.some(b => Math.hypot(a[0] + dx - b[0], a[1] + dy - b[1]) < 0.12 * S));   // aceeași formă și rotație
+        if (same && (!best || dist < best.dist)) best = { idx, dx, dy, dist };
+      });
+      if (!best) return false;
+      pc.x += best.dx; pc.y += best.dy; pc.slot = best.idx;
+      const n = pieces.filter(q => q.slot != null).length;
+      msg.innerHTML = `<b style="color:#7be3a3">${T(`✓ Piesă plasată corect (${n}/7)`, `✓ Piece placed correctly (${n}/7)`)}</b>`;
+      return true;
     }
     function snap(pc) {
       const mine = poly(pc), tv = [];
       sol().forEach(([k, pl]) => pl.forEach(p => tv.push([ORG[0] + p[0] * S, ORG[1] + p[1] * S])));
       let best = null;
-      mine.forEach(a => tv.forEach(b => { const d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (d < 12 && (!best || d < best.d)) best = { d, dx: b[0] - a[0], dy: b[1] - a[1] }; }));
+      mine.forEach(a => tv.forEach(b => { const d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (d < 0.6 * S && (!best || d < best.d)) best = { d, dx: b[0] - a[0], dy: b[1] - a[1] }; }));
       if (best) { pc.x += best.dx; pc.y += best.dy; }
     }
     function check() {
@@ -11960,12 +12066,12 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         tot++; const c = mine.filter(p => inside([x, y], p)).length;
         if (c >= 1) cov++; if (c >= 2) over++;
       }
-      if (tot && cov / tot >= 0.965 && over / tot <= 0.04) {
+      if (pieces.every(q => q.slot != null) || (tot && cov / tot >= 0.965 && over / tot <= 0.04)) {
         won = true; selId = -1; drawAll();
         msg.innerHTML = `<b style="color:#7be3a3">${T('Bravo! Ai reconstruit figura. 🎉', 'Well done! You rebuilt the figure. 🎉')}</b>`;
       }
     }
-    function flipSel() { const pc = pieces.find(p => p.id === selId); if (pc && pc.kind === 4 && !won) { pc.flip ^= 1; drawAll(); check(); } else if (!won) msg.textContent = T('Întoarcerea are efect doar la paralelogram (selectează-l întâi).', 'Flipping only matters for the parallelogram (select it first).'); }
+    function flipSel() { const pc = pieces.find(p => p.id === selId); if (pc && pc.kind === 4 && !won) { pc.flip ^= 1; pc.slot = null; drawAll(); check(); } else if (!won) msg.textContent = T('Întoarcerea are efect doar la paralelogram (selectează-l întâi).', 'Flipping only matters for the parallelogram (select it first).'); }
     function fill() {
       sel.innerHTML = FIGS.map((f, i) => `<option value="${i}">${i === 0 ? T('Pătratul', 'The square') : T('Figura ', 'Figure ') + (i + 1)}</option>`).join(''); sel.value = fi;
       $('tg-title').textContent = 'Tangram';
@@ -12093,7 +12199,548 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
   })();
 
-  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-miliardar'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
+  /* ---------------- Balanța (ecuații) ---------------- */
+  (function () {
+    const backdrop = $('bal-backdrop'), svg = $('bal-svg'), eqEl = $('bal-eq'), msg = $('bal-msg'), stats = $('bal-stats'), lvSel = $('bal-level');
+    const NS = 'http://www.w3.org/2000/svg', ROUND = 5, PIV = { x: 300, y: 70 }, ARM = 190, DROP = 150;
+    let st = null, S = 0, steps = 0, minSteps = 0, solved = 0, qn = 0, busy = false, mode = 'both', theta = 0, thetaTarget = 0, anim = null, done = false, tot = 0;
+    const el = (t, a, p) => { const e = document.createElementNS(NS, t); Object.keys(a || {}).forEach(k => e.setAttribute(k, a[k])); if (p) p.appendChild(e); return e; };
+    const wL = () => st.L.x * S + st.L.u, wR = () => st.R.x * S + st.R.u;
+
+    function newEq() {
+      const lv = +lvSel.value || 1; S = rnd(2, 9); let L, R, mn;
+      if (lv === 1) { const a = rnd(1, 9); L = { x: 1, u: a }; R = { x: 0, u: S + a }; mn = 1; }
+      else if (lv === 2) {
+        const m = rnd(2, 4);
+        if (Math.random() < .5) { L = { x: m, u: 0 }; R = { x: 0, u: m * S }; mn = 1; }
+        else { const a = rnd(1, 8); L = { x: m, u: a }; R = { x: 0, u: m * S + a }; mn = 2; }
+      } else {
+        for (let g = 0; g < 100; g++) {
+          const m = rnd(2, 5), c = rnd(1, m - 1), b = rnd(0, 6), a = c * S + b - m * S;
+          if (a < 1 || a + m * S > 28) continue;
+          L = { x: m, u: a }; R = { x: c, u: b }; mn = 2 + (b > 0 ? 1 : 0) + (m - c > 1 ? 1 : 0) + (a > 0 ? 0 : 0); break;
+        }
+        if (!L) { L = { x: 3, u: 4 }; R = { x: 1, u: 10 }; S = 3; mn = 4; }
+      }
+      st = { L, R }; steps = 0; minSteps = mn; busy = false; done = false; setMode('both');
+      render(); stats.textContent = statsText(); msg.textContent = T('Scopul: să rămână x singur pe un taler. Ce faci pe un taler, faci și pe celălalt!', 'Goal: get x alone on one pan. Whatever you do on one pan, do on the other!');
+      $('bal-next').style.display = 'none';
+    }
+    const statsText = () => T(`Ecuația ${Math.min(qn + 1, ROUND)}/${ROUND}; rezolvate: ${solved}`, `Equation ${Math.min(qn + 1, ROUND)}/${ROUND}; solved: ${solved}`);
+    function side(o) { const p = []; if (o.x) p.push((o.x > 1 ? o.x : '') + 'x'); if (o.u) p.push(o.u); return p.length ? p.join(' + ') : '0'; }
+    function eqText() { return `${side(st.L)} = ${side(st.R)}`; }
+    function tiltFor() { const d = wL() - wR(); return d === 0 ? 0 : Math.max(-14, Math.min(14, d * 3)); }
+    function draw() {
+      svg.innerHTML = '';
+      el('rect', { x: 0, y: 0, width: 600, height: 340, fill: '#111' }, svg);
+      // stativ
+      el('polygon', { points: `${PIV.x},${PIV.y} ${PIV.x - 18},320 ${PIV.x + 18},320`, fill: '#3a3a44' }, svg);
+      el('rect', { x: PIV.x - 70, y: 316, width: 140, height: 10, rx: 4, fill: '#4a4a56' }, svg);
+      const th = theta * Math.PI / 180, ca = Math.cos(th), sa = Math.sin(th);
+      const Lend = { x: PIV.x - ARM * ca, y: PIV.y + ARM * sa }, Rend = { x: PIV.x + ARM * ca, y: PIV.y - ARM * sa };
+      el('line', { x1: Lend.x, y1: Lend.y, x2: Rend.x, y2: Rend.y, stroke: '#d9c28a', 'stroke-width': 8, 'stroke-linecap': 'round' }, svg);
+      el('circle', { cx: PIV.x, cy: PIV.y, r: 9, fill: '#e0ae52' }, svg);
+      [[Lend, st.L], [Rend, st.R]].forEach(([e, o], idx) => {
+        const py = e.y + DROP;
+        el('line', { x1: e.x, y1: e.y, x2: e.x - 70, y2: py, stroke: '#9a8a60', 'stroke-width': 1.5 }, svg);
+        el('line', { x1: e.x, y1: e.y, x2: e.x + 70, y2: py, stroke: '#9a8a60', 'stroke-width': 1.5 }, svg);
+        el('path', { d: `M ${e.x - 82} ${py} L ${e.x + 82} ${py} Q ${e.x + 70} ${py + 22} ${e.x} ${py + 24} Q ${e.x - 70} ${py + 22} ${e.x - 82} ${py} Z`, fill: '#6b5a3a', stroke: '#d9c28a', 'stroke-width': 2 }, svg);
+        // obiecte, de jos în sus
+        let cx = e.x - 70, cy = py - 4;
+        const bag = (xx, yy) => { el('rect', { x: xx, y: yy - 34, width: 40, height: 34, rx: 8, fill: '#4da6ff', stroke: '#fff', 'stroke-width': 2 }, svg); el('text', { x: xx + 20, y: yy - 10, 'text-anchor': 'middle', 'font-size': 22, 'font-weight': 800, fill: '#fff' }, svg).textContent = 'x'; };
+        const unit = (xx, yy) => { el('circle', { cx: xx + 9, cy: yy - 9, r: 9, fill: '#e0ae52', stroke: '#fff', 'stroke-width': 1.5 }, svg); el('text', { x: xx + 9, y: yy - 4, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 800, fill: '#222' }, svg).textContent = '1'; };
+        let xi = 0;
+        for (let i = 0; i < o.x; i++) { bag(cx + (i % 3) * 46, cy - Math.floor(i / 3) * 38); xi++; }
+        const yRow0 = cy - Math.ceil(o.x / 3) * 38 - (o.x ? 2 : 0);
+        for (let i = 0; i < o.u; i++) unit(cx + (i % 8) * 19, yRow0 - Math.floor(i / 8) * 19 + (o.x ? 0 : 0));
+      });
+      // sprijin: ipoteză x revelat când e singur
+      if (done) { const t = el('text', { x: 300, y: 36, 'text-anchor': 'middle', 'font-size': 26, 'font-weight': 800, fill: '#7be3a3' }, svg); t.textContent = `x = ${S}`; }
+    }
+    function render() { theta = thetaTarget = tiltFor(); draw(); eqEl.textContent = eqText(); }
+    function animateTo(target, ms, cb) {
+      const from = theta, t0 = performance.now(); cancelAnimationFrame(anim);
+      const tick = () => { const t = Math.min(1, (performance.now() - t0) / ms), e = t * t * (3 - 2 * t); theta = from + (target - from) * e; draw(); if (t < 1) anim = requestAnimationFrame(tick); else if (cb) cb(); };
+      tick();
+    }
+    function setMode(m) { mode = m; ['left', 'both', 'right'].forEach(k => { const b = $('bal-m-' + k); const on = k === m; b.style.background = on ? '#2d6cdf' : '#222'; b.style.borderColor = on ? '#7fb0ff' : '#444'; }); }
+    function applyOp(kind, k) {
+      if (busy || done) return;
+      const sides = mode === 'both' ? ['L', 'R'] : mode === 'left' ? ['L'] : ['R'];
+      let err = null;
+      sides.forEach(s => {
+        const o = st[s];
+        if (kind === 'u' && o.u < k) err = T(`Pe taler nu sunt ${k} unități de scos.`, `There are not ${k} units to remove on that pan.`);
+        if (kind === 'x' && o.x < k) err = T('Pe taler nu e niciun x de scos.', 'There is no x to remove on that pan.');
+        if (kind === 'd' && (o.x % k || o.u % k)) err = T(`Nu se pot forma ${k} grupe egale pe taler.`, `You cannot split that pan into ${k} equal groups.`);
+      });
+      if (err) { msg.textContent = '⚠ ' + err; shake(); return; }
+      const before = JSON.stringify(st);
+      sides.forEach(s => { const o = st[s]; if (kind === 'u') o.u -= k; else if (kind === 'x') o.x -= k; else { o.x /= k; o.u /= k; } });
+      if (kind === 'd' && mode === 'both') { S = S; } // grupe: x rămâne același "x" (valoare cunoscută la final)
+      // pentru împărțire, valoarea lui x nu se schimbă; doar numărul de x și unități pe taler
+      if (mode !== 'both') {
+        busy = true; eqEl.textContent = eqText(); const tgt = tiltFor();
+        msg.textContent = T('⚠ Balanța s-a dezechilibrat! Ce faci la un taler trebuie să faci și la celălalt.', '⚠ The scale tipped! What you do to one pan you must do to the other.');
+        animateTo(tgt, 600, () => setTimeout(() => { st = JSON.parse(before); busy = false; msg.textContent = T('Am anulat pasul. Alege „Ambele talere”.', 'Step undone. Choose “Both pans”.'); animateTo(tiltFor(), 500, render); }, 1500));
+        return;
+      }
+      steps++; render(); checkSolved();
+    }
+    function checkSolved() {
+      const iso = (st.L.x === 1 && st.L.u === 0 && st.R.x === 0) || (st.R.x === 1 && st.R.u === 0 && st.L.x === 0);
+      if (!iso) { msg.textContent = T('Balanța rămâne în echilibru. Continuă!', 'The scale is still balanced. Keep going!'); return; }
+      done = true; qn++; solved++; render();
+      const val = st.L.x === 1 ? st.R.u : st.L.u;
+      msg.innerHTML = `<b style="color:#7be3a3">${T(`Bravo! x = ${val}`, `Well done! x = ${val}`)}</b> — ${T(`${steps} pași`, `${steps} steps`)}.`;
+      stats.textContent = statsText();
+      const nx = $('bal-next'); nx.style.display = ''; nx.textContent = qn >= ROUND ? T('Rezultat ›', 'Result ›') : T('Următoarea ›', 'Next ›');
+    }
+    function shake() { const s0 = svg.style.transform; svg.style.transition = 'transform .08s'; let i = 0; const iv = setInterval(() => { svg.style.transform = `translateX(${i % 2 ? 6 : -6}px)`; if (++i > 5) { clearInterval(iv); svg.style.transform = ''; } }, 70); }
+    function start() { qn = 0; solved = 0; newEq(); }
+    function finish() {
+      done = true; svg.innerHTML = ''; eqEl.textContent = T(`Ai rezolvat ${solved}/${ROUND} ecuații`, `You solved ${solved}/${ROUND} equations`);
+      msg.textContent = T('Excelent! Ai învățat că o ecuație este o balanță: ce faci într-o parte, faci și în cealaltă. 🎉', 'Excellent! An equation is a balance: what you do on one side you do on the other. 🎉');
+      const nx = $('bal-next'); nx.style.display = ''; nx.textContent = T('Din nou', 'Play again');
+    }
+    $('bal-next').onclick = () => { if (qn >= ROUND && $('bal-next').textContent !== T('Din nou', 'Play again')) return finish(); if ($('bal-next').textContent === T('Din nou', 'Play again')) return start(); newEq(); };
+    document.querySelectorAll('#bal-ops [data-k]').forEach(b => { b.onclick = () => applyOp(b.dataset.op, +b.dataset.k); });
+    ['left', 'both', 'right'].forEach(k => { $('bal-m-' + k).onclick = () => setMode(k); });
+    function labels() {
+      $('bal-title').textContent = T('Balanța — rezolvă ecuația', 'The balance — solve the equation');
+      $('bal-level-label').textContent = T('Nivel:', 'Level:');
+      const cur = lvSel.value || '1';
+      lvSel.innerHTML = `<option value="1">${T('Ușor: x + a = b', 'Easy: x + a = b')}</option><option value="2">${T('Mediu: 2x = b; 2x + a = b', 'Medium: 2x = b; 2x + a = b')}</option><option value="3">${T('Greu: 3x + a = x + b', 'Hard: 3x + a = x + b')}</option>`; lvSel.value = cur;
+      $('bal-m-left').textContent = T('◀ Doar stânga', '◀ Left only'); $('bal-m-both').textContent = T('⚖ Ambele talere', '⚖ Both pans'); $('bal-m-right').textContent = T('Doar dreapta ▶', 'Right only ▶');
+      $('bal-l-u').textContent = T('Scoate unități:', 'Remove units:'); $('bal-l-x').textContent = T('Scoate x:', 'Remove x:'); $('bal-l-d').textContent = T('Împarte în grupe egale:', 'Split into equal groups:');
+    }
+    $('btn-balance').onclick = () => { labels(); backdrop.style.display = 'flex'; start(); };
+    $('bal-close').onclick = () => { backdrop.style.display = 'none'; cancelAnimationFrame(anim); };
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) { backdrop.style.display = 'none'; cancelAnimationFrame(anim); } });
+    lvSel.onchange = start;
+  })();
+
+  /* ---------------- Arii și perimetre pe caroiaj ---------------- */
+  (function () {
+    const backdrop = $('ap-backdrop'), svg = $('ap-svg'), qEl = $('ap-q'), msg = $('ap-msg'), stats = $('ap-stats'), modeSel = $('ap-mode'), lvSel = $('ap-level'), live = $('ap-live');
+    const NS = 'http://www.w3.org/2000/svg', COLS = 12, ROWS = 9, CS = 40, ROUND = 6;
+    let cells = new Set(), user = new Set(), task = null, qn = 0, okc = 0, tries = 0, locked = false, drag = null, hint = null;
+    const key = (r, c) => r + ',' + c, unkey = (k) => k.split(',').map(Number);
+    const el = (t, a, p) => { const e = document.createElementNS(NS, t); Object.keys(a || {}).forEach(k => e.setAttribute(k, a[k])); if (p) p.appendChild(e); return e; };
+    const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+    const area = (S) => S.size;
+    function perim(S) { let p = 0; S.forEach(k => { const [r, c] = unkey(k); DIRS.forEach(([dr, dc]) => { if (!S.has(key(r + dr, c + dc))) p++; }); }); return p; }
+    function connected(S) { if (!S.size) return false; const seen = new Set(), st = [S.values().next().value]; seen.add(st[0]); while (st.length) { const [r, c] = unkey(st.pop()); DIRS.forEach(([dr, dc]) => { const k = key(r + dr, c + dc); if (S.has(k) && !seen.has(k)) { seen.add(k); st.push(k); } }); } return seen.size === S.size; }
+    function hasHole(S) { // flotează din exterior pe grila extinsă
+      const seen = new Set(), st = [[-1, -1]]; seen.add(key(-1, -1));
+      while (st.length) { const [r, c] = st.pop(); DIRS.forEach(([dr, dc]) => { const nr = r + dr, nc = c + dc, k = key(nr, nc); if (nr < -1 || nc < -1 || nr > ROWS || nc > COLS || seen.has(k) || S.has(k)) return; seen.add(k); st.push([nr, nc]); }); }
+      return (ROWS + 2) * (COLS + 2) - seen.size - S.size > 0;
+    }
+    function genShape(lv) {
+      for (let g = 0; g < 400; g++) {
+        let S = new Set();
+        if (lv === 1) { const w = rnd(2, 7), h = rnd(2, 5); for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) S.add(key(r, c)); }
+        else {
+          const n = lv === 2 ? rnd(6, 10) : rnd(10, 16); S.add(key(0, 0));
+          let guard = 0;
+          while (S.size < n && guard++ < 500) { const [r, c] = unkey([...S][rnd(0, S.size - 1)]), [dr, dc] = DIRS[rnd(0, 3)]; S.add(key(r + dr, c + dc)); }
+        }
+        // normalizare + centrare
+        let rs = [...S].map(k => unkey(k)); const r0 = Math.min(...rs.map(x => x[0])), c0 = Math.min(...rs.map(x => x[1]));
+        rs = rs.map(([r, c]) => [r - r0, c - c0]); const h = Math.max(...rs.map(x => x[0])) + 1, w = Math.max(...rs.map(x => x[1])) + 1;
+        if (h > ROWS - 1 || w > COLS - 1) continue;
+        const or = Math.floor((ROWS - h) / 2), oc = Math.floor((COLS - w) / 2);
+        const T2 = new Set(rs.map(([r, c]) => key(r + or, c + oc)));
+        if (lv > 1 && (hasHole(T2) || perim(T2) === 2 * (w + h))) continue; // evită figuri prea simple/găuri
+        return T2;
+      }
+      return new Set([key(3, 4), key(3, 5), key(4, 4), key(4, 5), key(4, 6)]);
+    }
+    function drawGrid() {
+      svg.innerHTML = '';
+      el('rect', { x: 0, y: 0, width: COLS * CS, height: ROWS * CS, fill: '#161618' }, svg);
+      const show = task && task.kind === 'draw' ? user : cells;
+      show.forEach(k => { const [r, c] = unkey(k); el('rect', { x: c * CS, y: r * CS, width: CS, height: CS, fill: task && task.kind === 'draw' ? '#2d6cdf' : '#4da6ff', 'fill-opacity': .75 }, svg); });
+      for (let i = 0; i <= COLS; i++) el('line', { x1: i * CS, y1: 0, x2: i * CS, y2: ROWS * CS, stroke: '#3a3a44', 'stroke-width': 1 }, svg);
+      for (let j = 0; j <= ROWS; j++) el('line', { x1: 0, y1: j * CS, x2: COLS * CS, y2: j * CS, stroke: '#3a3a44', 'stroke-width': 1 }, svg);
+      // contur gros
+      show.forEach(k => { const [r, c] = unkey(k); [[0, 1, c * CS + CS, r * CS, c * CS + CS, r * CS + CS], [1, 0, c * CS, r * CS + CS, c * CS + CS, r * CS + CS], [0, -1, c * CS, r * CS, c * CS, r * CS + CS], [-1, 0, c * CS, r * CS, c * CS + CS, r * CS]].forEach(([dr, dc, x1, y1, x2, y2]) => { if (!show.has(key(r + dr, c + dc))) el('line', { x1, y1, x2, y2, stroke: '#fff', 'stroke-width': 3, 'stroke-linecap': 'round' }, svg); }); });
+      if (hint === 'area') { let i = 1; [...cells].sort().forEach(k => { const [r, c] = unkey(k); el('text', { x: c * CS + CS / 2, y: r * CS + CS / 2 + 6, 'text-anchor': 'middle', 'font-size': 16, 'font-weight': 800, fill: '#fff' }, svg).textContent = i++; }); }
+      if (hint === 'perim') { let i = 1; [...cells].forEach(k => { const [r, c] = unkey(k); [[0, 1, c * CS + CS, r * CS + CS / 2], [1, 0, c * CS + CS / 2, r * CS + CS], [0, -1, c * CS, r * CS + CS / 2], [-1, 0, c * CS + CS / 2, r * CS]].forEach(([dr, dc, x, y]) => { if (!cells.has(key(r + dr, c + dc))) { el('circle', { cx: x, cy: y, r: 9, fill: '#e0ae52' }, svg); el('text', { x, y: y + 4, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 800, fill: '#222' }, svg).textContent = i++; } }); }); }
+    }
+    const statsText = () => T(`Exercițiul ${Math.min(qn + 1, ROUND)}/${ROUND}; corecte: ${okc}`, `Exercise ${Math.min(qn + 1, ROUND)}/${ROUND}; correct: ${okc}`);
+    function setLive() { if (task && task.kind === 'draw') live.textContent = T(`Figura ta: aria = ${area(user)} cm², perimetrul = ${perim(user)} cm`, `Your figure: area = ${area(user)} cm², perimeter = ${perim(user)} cm`); else live.textContent = ''; }
+    function newTask() {
+      const lv = +lvSel.value || 1, m = modeSel.value; locked = false; tries = 0; hint = null; user = new Set(); msg.textContent = ''; $('ap-next').style.display = 'none';
+      const mode = m === 'mix' ? ['area', 'perim', 'both', 'draw'][rnd(0, 3)] : m;
+      cells = genShape(lv);
+      if (mode === 'draw') {
+        // țintă fezabilă: preia aria și perimetrul unei figuri generate
+        const A = area(cells), P = perim(cells); task = { kind: 'draw', A, P };
+        qEl.textContent = T(`Desenează o figură cu aria ${A} cm² și perimetrul ${P} cm.`, `Draw a figure with area ${A} cm² and perimeter ${P} cm.`);
+        cells = new Set();
+      } else {
+        task = { kind: mode, A: area(cells), P: perim(cells) };
+        qEl.textContent = mode === 'area' ? T('Care este aria figurii? (un pătrățel = 1 cm²)', 'What is the area of the figure? (one square = 1 cm²)') : mode === 'perim' ? T('Care este perimetrul figurii? (latura unui pătrățel = 1 cm)', 'What is the perimeter of the figure? (a square side = 1 cm)') : T('Află aria și perimetrul figurii. (un pătrățel = 1 cm², latura lui = 1 cm)', 'Find the area and the perimeter. (one square = 1 cm², its side = 1 cm)');
+      }
+      $('ap-in-a-wrap').style.display = (task.kind === 'area' || task.kind === 'both') ? 'flex' : 'none';
+      $('ap-in-p-wrap').style.display = (task.kind === 'perim' || task.kind === 'both') ? 'flex' : 'none';
+      $('ap-clear').style.display = task.kind === 'draw' ? '' : 'none';
+      $('ap-a').value = ''; $('ap-p').value = '';
+      stats.textContent = statsText(); setLive(); drawGrid();
+    }
+    function num(id) { const v = parseFloat(String($(id).value).replace(',', '.')); return isNaN(v) ? null : v; }
+    function check() {
+      if (locked || !task) return; tries++;
+      let ok = false, text = '';
+      if (task.kind === 'draw') {
+        if (!user.size) { msg.textContent = T('Colorează pătrățele ca să formezi figura.', 'Colour squares to form the figure.'); tries--; return; }
+        const a = area(user), p = perim(user), conn = connected(user);
+        ok = conn && a === task.A && p === task.P;
+        if (!ok) text = !conn ? T('Figura trebuie să fie într-o singură bucată (pătrățelele se ating cu o latură).', 'The figure must be in one piece (squares must share a side).')
+          : a !== task.A && p !== task.P ? T(`Ai aria ${a} (trebuie ${task.A}) și perimetrul ${p} (trebuie ${task.P}).`, `Your area is ${a} (needs ${task.A}) and perimeter ${p} (needs ${task.P}).`)
+          : a !== task.A ? T(`Perimetrul e bun, dar aria este ${a}, nu ${task.A}.`, `Perimeter is right, but the area is ${a}, not ${task.A}.`)
+          : T(`Aria e bună, dar perimetrul este ${p}, nu ${task.P}. Încearcă să muți pătrățelele.`, `Area is right, but the perimeter is ${p}, not ${task.P}. Try moving squares.`);
+      } else {
+        const a = num('ap-a'), p = num('ap-p'), needA = task.kind !== 'perim', needP = task.kind !== 'area';
+        if ((needA && a === null) || (needP && p === null)) { msg.textContent = T('Scrie răspunsul.', 'Enter your answer.'); tries--; return; }
+        const okA = !needA || a === task.A, okP = !needP || p === task.P; ok = okA && okP;
+        if (!ok) { text = (!okA ? T('Aria nu este corectă. ', 'The area is not correct. ') : '') + (!okP ? T('Perimetrul nu este corect. ', 'The perimeter is not correct. ') : '');
+          if (!okA) hint = 'area'; else if (!okP) hint = 'perim'; drawGrid();
+          text += hint === 'area' ? T('Numără pătrățelele numerotate.', 'Count the numbered squares.') : T('Numără laturile de pe contur.', 'Count the sides along the outline.');
+          if (tries >= 2) text += ' ' + T(`(Aria = ${task.A} cm², perimetrul = ${task.P} cm.)`, `(Area = ${task.A} cm², perimeter = ${task.P} cm.)`); }
+      }
+      if (ok) { locked = true; qn++; if (tries === 1) okc++; msg.innerHTML = `<b style="color:#7be3a3">${T('✓ Corect!', '✓ Correct!')}</b> ` + T(`Aria = ${task.A} cm², perimetrul = ${task.P} cm.`, `Area = ${task.A} cm², perimeter = ${task.P} cm.`); stats.textContent = statsText();
+        const nx = $('ap-next'); nx.style.display = ''; nx.textContent = qn >= ROUND ? T('Rezultat ›', 'Result ›') : T('Următoarea ›', 'Next ›'); }
+      else msg.innerHTML = `<b style="color:#ff8a80">✗</b> ${text}`;
+    }
+    function finish() { svg.innerHTML = ''; qEl.textContent = T(`Rezultat: ${okc}/${ROUND} din prima încercare`, `Score: ${okc}/${ROUND} on the first try`); msg.textContent = okc === ROUND ? '🎉' : T('Mai exersăm! 💪', 'Keep practising! 💪'); live.textContent = ''; $('ap-in-a-wrap').style.display = 'none'; $('ap-in-p-wrap').style.display = 'none'; $('ap-clear').style.display = 'none'; $('ap-check').style.display = 'none'; const nx = $('ap-next'); nx.style.display = ''; nx.textContent = T('Din nou', 'Play again'); task = null; }
+    function start() { qn = 0; okc = 0; $('ap-check').style.display = ''; newTask(); }
+    $('ap-next').onclick = () => { if (!task) return start(); if (qn >= ROUND) return finish(); newTask(); };
+    $('ap-check').onclick = check;
+    $('ap-clear').onclick = () => { user = new Set(); setLive(); drawGrid(); };
+    ['ap-a', 'ap-p'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') check(); }));
+    function cellAt(e) { const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * COLS * CS, y = (e.clientY - r.top) / r.height * ROWS * CS; const c = Math.floor(x / CS), rr = Math.floor(y / CS); return (c < 0 || rr < 0 || c >= COLS || rr >= ROWS) ? null : key(rr, c); }
+    svg.addEventListener('pointerdown', e => { if (!task || task.kind !== 'draw' || locked) return; const k = cellAt(e); if (!k) return; e.preventDefault(); svg.setPointerCapture(e.pointerId); drag = !user.has(k); drag ? user.add(k) : user.delete(k); setLive(); drawGrid(); });
+    svg.addEventListener('pointermove', e => { if (drag === null || !task || task.kind !== 'draw') return; const k = cellAt(e); if (!k) return; if (drag && !user.has(k)) user.add(k); else if (!drag && user.has(k)) user.delete(k); else return; setLive(); drawGrid(); });
+    const up = () => { drag = null; }; svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+    svg.style.touchAction = 'none';
+    function labels() {
+      $('ap-title').textContent = T('Arii și perimetre pe caroiaj', 'Areas and perimeters on a grid');
+      const cm = modeSel.value || 'mix', cl = lvSel.value || '1';
+      modeSel.innerHTML = `<option value="mix">${T('Amestec', 'Mixed')}</option><option value="area">${T('Aria', 'Area')}</option><option value="perim">${T('Perimetrul', 'Perimeter')}</option><option value="both">${T('Aria și perimetrul', 'Area and perimeter')}</option><option value="draw">${T('Desenează figura', 'Draw the figure')}</option>`; modeSel.value = cm;
+      lvSel.innerHTML = `<option value="1">${T('Ușor (dreptunghiuri)', 'Easy (rectangles)')}</option><option value="2">${T('Mediu', 'Medium')}</option><option value="3">${T('Greu', 'Hard')}</option>`; lvSel.value = cl;
+      $('ap-mode-label').textContent = T('Exercițiu:', 'Exercise:'); $('ap-level-label').textContent = T('Nivel:', 'Level:');
+      $('ap-a-label').textContent = T('Aria =', 'Area ='); $('ap-p-label').textContent = T('Perimetrul =', 'Perimeter ='); $('ap-check').textContent = T('Verifică', 'Check'); $('ap-clear').textContent = T('Șterge', 'Clear');
+    }
+    $('btn-area-grid').onclick = () => { labels(); backdrop.style.display = 'flex'; start(); };
+    $('ap-close').onclick = () => { backdrop.style.display = 'none'; };
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
+    modeSel.onchange = start; lvSel.onchange = start;
+  })();
+
+  /* ---------------- Exerciții cu instrumente geometrice ---------------- */
+  (function () {
+    const panel = $('gt-panel'), textEl = $('gt-text'), msgEl = $('gt-msg'), ansRow = $('gt-ans-row'), ansIn = $('gt-ans'), ansUnit = $('gt-unit'), statsEl = $('gt-stats');
+    let CM = 50; const D2R = Math.PI / 180, GIVEN = '#ffd54f';
+    let task = null, page = null, startIdx = 0, tries = 0, done = 0, okc = 0, lastKind = '';
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const fmt = (v) => String(Math.round(v * 10) / 10).replace('.', EN() ? '.' : ',');
+    const vec = (a, b) => ({ x: b.x - a.x, y: b.y - a.y });
+    const len = (v) => Math.hypot(v.x, v.y);
+    const angBetween = (u, v) => Math.acos(Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / ((len(u) * len(v)) || 1)))) / D2R;
+    const lineAng = (u, v) => { const a = angBetween(u, v); return a > 90 ? 180 - a : a; };      // unghi între drepte, 0..90
+    const distLine = (p, a, b) => { const d = vec(a, b), l = len(d) || 1; return Math.abs((p.x - a.x) * d.y - (p.y - a.y) * d.x) / l; };
+    function center() {
+      const r = drawC.getBoundingClientRect();
+      return { x: (r.width / 2 - boardPanX) / boardZoom, y: (r.height / 2 - boardPanY) / boardZoom, w: r.width / boardZoom, h: r.height / boardZoom };
+    }
+    const add = (s) => { s._task = true; page.strokes.push(s); };
+    const seg = (a, b) => add({ points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], color: GIVEN, size: 3, erase: false });
+    const dot = (p, label, dx, dy) => {
+      add({ type: 'circle', cx: p.x, cy: p.y, radius: 3, color: GIVEN, size: 3 });
+      if (label) add({ type: 'text', text: label, x: p.x + (dx == null ? 8 : dx), y: p.y + (dy == null ? -30 : dy), font: 'bold 22px sans-serif', color: GIVEN, fontSize: 22, textAlign: 'left' });
+    };
+    const userStrokes = () => page.strokes.slice(startIdx).filter(s => !s._task);
+    const lines = () => userStrokes().filter(s => !s.type && s.points && s.points.length >= 2).map(s => {
+      const a = s.points[0], b = s.points[s.points.length - 1];
+      let dev = 0; s.points.forEach(p => { dev = Math.max(dev, distLine(p, a, b)); });
+      return { a, b, len: len(vec(a, b)), dev };
+    });
+    const straightMsg = T('Linia nu este dreaptă — folosește rigla sau echerul.', 'The line is not straight — use the ruler or the set square.');
+    const needMsg = T('Nu am găsit încă o linie desenată de tine.', 'I could not find a line drawn by you yet.');
+
+    // ---- tipurile de sarcini; fiecare întoarce {text, tools, ans?, setup(), check()}
+    const KINDS = {
+      measureSeg() {
+        const lenCM0 = CM, c = center(), L = pick([3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8]), th = rnd(-50, 50) * D2R;
+        const maxL = Math.floor(c.w * 0.7 / CM * 2) / 2; const Lc = Math.min(L, Math.max(3, maxL));
+        return { text: T(`Măsoară segmentul AB cu rigla. Cât este lungimea lui?`, `Measure segment AB with the ruler. How long is it?`), tools: ['ruler'], ans: { get v() { return Lc * lenCM0 * boardZoom / 50; }, tol: 0.2, unit: 'cm' },
+          setup() { const h = Lc * CM / 2, d = { x: Math.cos(th), y: Math.sin(th) }; const A = { x: c.x - d.x * h, y: c.y - d.y * h }, B = { x: c.x + d.x * h, y: c.y + d.y * h }; seg(A, B); dot(A, 'A'); dot(B, 'B'); } };
+      },
+      drawSeg() {
+        const L = pick([3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7]);
+        return { text: T(`Desenează cu rigla un segment de ${fmt(L)} cm.`, `Draw with the ruler a segment of ${fmt(L)} cm.`), tools: ['ruler'], setup() {},
+          check() { const ls = lines(); if (!ls.length) return { ok: false, msg: needMsg }; let best = null; ls.forEach(l => { const e = Math.abs(l.len / CM - L); if (!best || e < best.e) best = { e, l }; });
+            if (best.l.dev > 6) return { ok: false, msg: straightMsg };
+            return best.e <= 0.2 ? { ok: true } : { ok: false, msg: T(`Segmentul tău are aproximativ ${fmt(best.l.len / CM)} cm. Încearcă din nou.`, `Your segment is about ${fmt(best.l.len / CM)} cm. Try again.`) }; } };
+      },
+      measureAngle() {
+        const c = center(), a = pick([25, 35, 40, 50, 55, 65, 70, 80, 100, 110, 125, 130, 140, 155]), t0 = rnd(0, 360) * D2R, R = Math.min(4 * CM, c.w * 0.3), sg = Math.random() < .5 ? 1 : -1;
+        return { text: T('Măsoară unghiul cu raportorul. Câte grade are?', 'Measure the angle with the protractor. How many degrees is it?'), tools: ['protractor'], ans: { v: a, tol: 3, unit: '°' },
+          setup() { const V = { x: c.x, y: c.y }; const P1 = { x: V.x + R * Math.cos(t0), y: V.y + R * Math.sin(t0) }, P2 = { x: V.x + R * Math.cos(t0 + sg * a * D2R), y: V.y + R * Math.sin(t0 + sg * a * D2R) }; seg(V, P1); seg(V, P2); dot(V, null); } };
+      },
+      drawAngle() {
+        const a = pick([30, 45, 50, 60, 75, 90, 110, 120, 135, 150]);
+        return { text: T(`Desenează un unghi de ${a}° (cu raportorul și rigla).`, `Draw an angle of ${a}° (with the protractor and ruler).`), tools: ['protractor', 'ruler'], setup() {},
+          check() {
+            const us = userStrokes(), cand = [];
+            us.forEach(s => { if (s.type === 'angle') cand.push(angBetween(vec(s.vertex, s.ray1), vec(s.vertex, s.ray2))); });
+            const ls = lines();
+            for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
+              [[ls[i].a, ls[i].b], [ls[i].b, ls[i].a]].forEach(([vi, fi]) => [[ls[j].a, ls[j].b], [ls[j].b, ls[j].a]].forEach(([vj, fj]) => { if (len(vec(vi, vj)) <= 10) cand.push(angBetween(vec(vi, fi), vec(vj, fj))); }));
+            }
+            if (!cand.length) return { ok: false, msg: T('Nu am găsit un unghi: desenează două semidrepte cu același vârf.', 'I could not find an angle: draw two rays from the same vertex.') };
+            let best = cand[0]; cand.forEach(x => { if (Math.abs(x - a) < Math.abs(best - a)) best = x; });
+            return Math.abs(best - a) <= 3 ? { ok: true } : { ok: false, msg: T(`Unghiul tău are aproximativ ${Math.round(best)}°. Încearcă din nou.`, `Your angle is about ${Math.round(best)}°. Try again.`) };
+          } };
+      },
+      perpendicular(par) {
+        const c = center(), th = rnd(-45, 45) * D2R, Lh = Math.min(4 * CM, c.w * 0.3), d = { x: Math.cos(th), y: Math.sin(th) }, n = { x: -d.y, y: d.x }, off = rnd(2, 2.8) * CM * (Math.random() < .5 ? 1 : -1), sh = rnd(-1, 1) * CM;
+        const A = { x: c.x - d.x * Lh, y: c.y - d.y * Lh }, B = { x: c.x + d.x * Lh, y: c.y + d.y * Lh }, P = { x: c.x + d.x * sh + n.x * off, y: c.y + d.y * sh + n.y * off };
+        return { text: par ? T('Prin punctul P trasează paralela la dreapta AB (echer și riglă).', 'Through point P draw the parallel to line AB (set square and ruler).') : T('Prin punctul P trasează perpendiculara pe dreapta AB (cu echerul).', 'Through point P draw the perpendicular to line AB (with the set square).'), tools: ['setsquare', 'ruler'],
+          setup() { seg(A, B); dot(A, 'A'); dot(B, 'B'); dot(P, 'P'); },
+          check() { const ls = lines().filter(l => l.len >= CM); if (!ls.length) return { ok: false, msg: needMsg };
+            const want = par ? 0 : 90; let best = null;
+            ls.forEach(l => { const e = Math.abs(lineAng(vec(l.a, l.b), vec(A, B)) - want) + distLine(P, l.a, l.b) / 4; if (!best || e < best.e) best = { e, l }; });
+            const l = best.l;
+            if (l.dev > 6) return { ok: false, msg: straightMsg };
+            if (distLine(P, l.a, l.b) > 8) return { ok: false, msg: T('Linia nu trece prin punctul P.', 'The line does not pass through point P.') };
+            const ang = lineAng(vec(l.a, l.b), vec(A, B));
+            return Math.abs(ang - want) <= 3 ? { ok: true } : { ok: false, msg: par ? T(`Linia nu e paralelă (diferență ≈ ${Math.round(ang)}°).`, `The line is not parallel (off by ≈ ${Math.round(ang)}°).`) : T(`Unghiul dintre linii este ≈ ${Math.round(ang)}°, nu 90°.`, `The angle between the lines is ≈ ${Math.round(ang)}°, not 90°.`) }; } };
+      },
+      parallel() { return KINDS.perpendicular(true); },
+      circle() {
+        const c = center(), R = pick([2, 2.5, 3, 3.5, 4, 5]), O = { x: c.x + rnd(-1, 1) * CM, y: c.y + rnd(-.6, .6) * CM };
+        return { text: T(`Desenează cu compasul cercul cu centrul O și raza ${fmt(R)} cm.`, `Draw with the compass the circle with center O and radius ${fmt(R)} cm.`), tools: ['compass'],
+          setup() { dot(O, 'O', 8, 8); },
+          check() { const cs = userStrokes().filter(s => s.type === 'circle'); if (!cs.length) return { ok: false, msg: T('Nu am găsit încă un cerc desenat de tine.', 'I could not find a circle drawn by you yet.') };
+            let best = null; cs.forEach(s => { const e = Math.abs(s.radius - R * CM) + len(vec(O, { x: s.cx, y: s.cy })); if (!best || e < best.e) best = { e, s }; });
+            const s = best.s, dc = len(vec(O, { x: s.cx, y: s.cy })), er = Math.abs(s.radius / CM - R);
+            if (dc > 12) return { ok: false, msg: T('Centrul cercului nu este în punctul O.', 'The center of the circle is not at point O.') };
+            return er <= 0.2 ? { ok: true } : { ok: false, msg: T(`Cercul tău are raza ≈ ${fmt(s.radius / CM)} cm. Încearcă din nou.`, `Your circle has radius ≈ ${fmt(s.radius / CM)} cm. Try again.`) }; } };
+      },
+      bisectorSeg() {
+        const c = center(), th = rnd(-40, 40) * D2R, Lh = Math.min(3.5 * CM, c.w * 0.3), d = { x: Math.cos(th), y: Math.sin(th) };
+        const A = { x: c.x - d.x * Lh, y: c.y - d.y * Lh }, B = { x: c.x + d.x * Lh, y: c.y + d.y * Lh }, M = { x: c.x, y: c.y };
+        return { text: T('Construiește mediatoarea segmentului AB (compas și riglă/echer).', 'Construct the perpendicular bisector of segment AB (compass and ruler/set square).'), tools: ['compass', 'ruler'],
+          setup() { seg(A, B); dot(A, 'A'); dot(B, 'B'); },
+          check() { const ls = lines().filter(l => l.len >= 2 * CM); if (!ls.length) return { ok: false, msg: needMsg };
+            let best = null; ls.forEach(l => { const e = Math.abs(lineAng(vec(l.a, l.b), vec(A, B)) - 90) + distLine(M, l.a, l.b) / 4; if (!best || e < best.e) best = { e, l }; });
+            const l = best.l; if (l.dev > 6) return { ok: false, msg: straightMsg };
+            if (distLine(M, l.a, l.b) > 8) return { ok: false, msg: T('Dreapta nu trece prin mijlocul segmentului AB.', 'The line does not pass through the midpoint of AB.') };
+            const ang = lineAng(vec(l.a, l.b), vec(A, B));
+            return Math.abs(ang - 90) <= 3 ? { ok: true } : { ok: false, msg: T(`Unghiul cu AB este ≈ ${Math.round(ang)}°, nu 90°.`, `The angle with AB is ≈ ${Math.round(ang)}°, not 90°.`) }; } };
+      },
+      bisectorAngle() {
+        const c = center(), a = pick([50, 60, 70, 80, 90, 100, 110, 120, 130]), t0 = rnd(0, 360) * D2R, R = Math.min(4 * CM, c.w * 0.3), V = { x: c.x, y: c.y };
+        const P1 = { x: V.x + R * Math.cos(t0), y: V.y + R * Math.sin(t0) }, P2 = { x: V.x + R * Math.cos(t0 + a * D2R), y: V.y + R * Math.sin(t0 + a * D2R) };
+        return { text: T('Construiește bisectoarea unghiului dat (raportor sau compas, plus riglă).', 'Construct the bisector of the given angle (protractor or compass, plus ruler).'), tools: ['protractor', 'ruler'],
+          setup() { seg(V, P1); seg(V, P2); dot(V, null); },
+          check() { const ls = lines().filter(l => l.len >= CM); if (!ls.length) return { ok: false, msg: needMsg };
+            let best = null; ls.forEach(l => { [[l.a, l.b], [l.b, l.a]].forEach(([s0, e0]) => { const dv = len(vec(V, s0)); if (dv > 12) return; const d = vec(s0, e0), e = Math.abs(angBetween(d, vec(V, P1)) - a / 2) + Math.abs(angBetween(d, vec(V, P2)) - a / 2); if (!best || e < best.e) best = { e, l, a1: angBetween(d, vec(V, P1)), a2: angBetween(d, vec(V, P2)) }; }); });
+            if (!best) return { ok: false, msg: T('Bisectoarea trebuie să înceapă din vârful unghiului.', 'The bisector must start at the vertex of the angle.') };
+            if (best.l.dev > 6) return { ok: false, msg: straightMsg };
+            return best.e <= 6 ? { ok: true } : { ok: false, msg: T(`Semidreapta face ≈ ${Math.round(best.a1)}° și ≈ ${Math.round(best.a2)}° cu laturile; ar trebui ${Math.round(a / 2)}° fiecare.`, `The ray makes ≈ ${Math.round(best.a1)}° and ≈ ${Math.round(best.a2)}° with the sides; it should be ${Math.round(a / 2)}° each.`) }; } };
+      }
+    };
+    const ORDER = ['measureSeg', 'drawSeg', 'measureAngle', 'drawAngle', 'perpendicular', 'parallel', 'circle', 'bisectorSeg', 'bisectorAngle'];
+
+    // ---------- animație: cum trebuia procedat, cu instrumentele reale ----------
+    let demoTok = 0, demoSaved = null;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = () => new Promise(r => requestAnimationFrame(r));
+    const P = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+    const arcPts = (c, r, a0, a1, n) => { const o = []; n = n || 60; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; o.push({ x: c.x + r * Math.cos(a), y: c.y + r * Math.sin(a) }); } return o; };
+    const num = (re) => { const m = task.text.match(re); return m ? parseFloat(m[1].replace(',', '.')) : 0; };
+    const scr = (p) => geoContentToScreen(p, 'board');
+    const ease = (t) => t * t * (3 - 2 * t);
+    const ang = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
+    const unitv = (a, b) => { const d = vec(a, b), l = len(d) || 1; return { x: d.x / l, y: d.y / l }; };
+    const updG = (n) => { if (n === 'compass') renderGeoCompass(); else updateGeoTransform(n); };
+    const fullRender = (n) => { if (n === 'ruler') renderGeoRuler(); else if (n === 'setsquare') renderGeoSetsquare(); else if (n === 'protractor') renderGeoProtractor(); else renderGeoCompass(); updG(n); };
+    function pencilAt(p) {
+      let el = document.getElementById('gt-pencil');
+      if (!el) { el = document.createElement('div'); el.id = 'gt-pencil';
+        el.innerHTML = '<svg width="40" height="40" viewBox="0 0 40 40" style="display:block;overflow:visible"><polygon points="8,24 24,8 32,16 16,32" fill="#f4c542" stroke="#6b4a1a" stroke-width="1"/><polygon points="24,8 28,4 36,12 32,16" fill="#e57b8a" stroke="#6b4a1a" stroke-width="1"/><polygon points="2,38 8,24 16,32" fill="#f0d7a8" stroke="#6b4a1a" stroke-width="1"/><polygon points="2,38 4.4,32.4 7.6,35.6" fill="#333"/></svg>';
+        el.style.cssText = 'position:absolute;z-index:250;pointer-events:none;width:40px;height:40px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6));display:none'; document.getElementById('workspace').appendChild(el); }
+      if (!p) { el.style.display = 'none'; return; }
+      const q = scr(p); el.style.left = (q.x - 2) + 'px'; el.style.top = (q.y - 38) + 'px'; el.style.display = 'block';
+    }
+    function restoreTools() {
+      if (!demoSaved) return;
+      Object.keys(demoSaved).forEach(n => { const sv = demoSaved[n]; if (!sv.vis && geoGuides[n].visible) closeGeoGuide(n); Object.assign(geoGuides[n], sv.st); if (sv.vis) fullRender(n); });
+      demoSaved = null;
+    }
+    function useTool(n) {
+      if (!demoSaved) demoSaved = {};
+      if (!demoSaved[n]) demoSaved[n] = { vis: geoGuides[n].visible, st: Object.assign({}, geoGuides[n]) };
+      if (!geoGuides[n].visible) toggleGeoGuide(n, GEO_GUIDE_BTN_ID[n]);
+    }
+    function demoSteps() {
+      const ts = page.strokes.filter(s => s._task && !s._demo), ln = ts.filter(s => !s.type && s.points).map(s => ({ a: s.points[0], b: s.points[1] })), dots = ts.filter(s => s.type === 'circle').map(s => ({ x: s.cx, y: s.cy }));
+      const k = task.kind, c = center(), z = boardZoom, S = [];
+      const step = (cap, run) => S.push({ cap, run });
+      const rulerLen = (needScreen) => { const st = geoGuides.ruler; if (st.length < needScreen) { st.length = needScreen; } };
+      // ruler: zero la S, muchia spre E
+      const rulerTo = async (X, E, A, ms) => { useTool('ruler'); const sp = scr(X); await A.tw('ruler', { x: sp.x, y: sp.y, angle: ang(X, E) }, ms || 1100); };
+      if (k === 'measureSeg') {
+        const { a: A0, b: B0 } = ln[0], lb = len(vec(A0, B0)) * z / 50;
+        step(T('1. Așază rigla cu diviziunea 0 exact în A și cu muchia de-a lungul segmentului AB.', '1. Place the ruler with its 0 mark exactly at A and its edge along AB.'), async (A) => { useTool('ruler'); rulerLen(len(vec(A0, B0)) * z + 80); fullRender('ruler'); await rulerTo(A0, B0, A, 1500); });
+        step(T('2. Citește diviziunea din dreptul lui B (privește de sus, drept).', '2. Read the mark next to B (look straight down at it).'), async (A) => { await A.dot(B0); await sleep(600); });
+        step(T(`3. Lungimea este ${fmt(lb)} cm.`, `3. The length is ${fmt(lb)} cm.`), async (A) => { const n = { x: -(B0.y - A0.y), y: B0.x - A0.x }, l = len(n) || 1; await A.text(fmt(lb) + ' cm', { x: (A0.x + B0.x) / 2 - n.x / l * 28, y: (A0.y + B0.y) / 2 - n.y / l * 28 }); });
+      } else if (k === 'drawSeg') {
+        const l = num(/([\d.,]+) cm/), A0 = { x: c.x - l * CM / 2, y: c.y }, B0 = { x: c.x + l * CM / 2, y: c.y };
+        step(T('1. Marchează un punct A pe tablă.', '1. Mark a point A on the board.'), async (A) => { await A.dot(A0, 'A'); });
+        step(T(`2. Așază rigla cu 0 în A și marchează diviziunea ${fmt(l)} cm: acolo e punctul B.`, `2. Put the ruler's 0 at A and mark the ${fmt(l)} cm division: that is point B.`), async (A) => { useTool('ruler'); rulerLen(l * 50 + 80); fullRender('ruler'); await rulerTo(A0, B0, A, 1300); await sleep(300); await A.dot(B0, 'B'); });
+        step(T('3. Unește A cu B, trasând cu creionul de-a lungul riglei.', '3. Join A and B, drawing with the pencil along the ruler.'), async (A) => { await A.line(A0, B0); });
+      } else if (k === 'measureAngle' || k === 'drawAngle') {
+        let V, a0, da;
+        if (k === 'measureAngle') { V = ln[0].a; a0 = ang(V, ln[0].b); const a1 = ang(V, ln[1].b); da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; }
+        else { const a = num(/([\d.,]+)°/); V = { x: c.x - 2 * CM, y: c.y + CM }; a0 = 0; da = -a * D2R; }
+        const deg = Math.round(Math.abs(da) / D2R), th = da < 0 ? a0 : a0 + da;   // rotația raportorului: 0° pe prima latură, scala spre cealaltă
+        const R4 = 4 * CM, tip = { x: V.x + R4 * Math.cos(a0 + da), y: V.y + R4 * Math.sin(a0 + da) };
+        if (k === 'measureAngle') {
+          step(T('1. Pune centrul raportorului exact în vârful unghiului.', '1. Put the protractor\'s center exactly on the vertex.'), async (A) => { useTool('protractor'); const s = scr(V); await A.tw('protractor', { x: s.x, y: s.y, angle: th + (da < 0 ? 0 : 0) }, 1300); });
+          step(T('2. Rotește raportorul ca linia de 0° să se suprapună peste una dintre laturi.', '2. Rotate it so the 0° line lies exactly on one side.'), async (A) => { await sleep(900); });
+          step(T('3. Citește gradația în dreptul căreia cealaltă latură taie scala.', '3. Read the mark where the other side crosses the scale.'), async (A) => { await sleep(700); await A.dot({ x: V.x + 3.2 * CM * Math.cos(a0 + da), y: V.y + 3.2 * CM * Math.sin(a0 + da) }); });
+          step(T(`4. Unghiul are ${deg}°.`, `4. The angle is ${deg}°.`), async (A) => { await A.text(deg + '°', { x: V.x + 2.3 * CM * Math.cos(a0 + da / 2), y: V.y + 2.3 * CM * Math.sin(a0 + da / 2) }); });
+        } else {
+          step(T('1. Desenează cu rigla o semidreaptă cu originea în V.', '1. With the ruler, draw a ray starting at V.'), async (A) => { await A.dot(V, 'V'); useTool('ruler'); rulerLen(R4 * z + 80); fullRender('ruler'); await rulerTo(V, { x: V.x + 1, y: V.y }, A, 1200); await A.line(V, { x: V.x + R4, y: V.y }); });
+          step(T(`2. Pune centrul raportorului în V, cu 0° pe semidreaptă, și marchează un punct în dreptul lui ${deg}°.`, `2. Put the protractor's center on V with 0° on the ray, and mark a point at ${deg}°.`), async (A) => { useTool('protractor'); const s = scr(V); await A.tw('protractor', { x: s.x, y: s.y, angle: 0 }, 1300); await A.dot({ x: V.x + R4 * 0.6 * Math.cos(da), y: V.y + R4 * 0.6 * Math.sin(da) }); });
+          step(T('3. Dă raportorul la o parte și unește V cu punctul marcat, folosind rigla.', '3. Move the protractor aside and join V to the mark using the ruler.'), async (A) => { closeGeoGuide('protractor'); await rulerTo(V, tip, A, 1200); await A.line(V, tip); await A.text(deg + '°', { x: V.x + 1.1 * CM * Math.cos(da / 2), y: V.y + 1.1 * CM * Math.sin(da / 2) }); });
+        }
+      } else if (k === 'perpendicular') {
+        const { a: A0, b: B0 } = ln[0], Pp = dots[2], u = unitv(A0, B0), n = { x: -u.y, y: u.x }, tu = ang(A0, B0), dd = vec(A0, Pp), t = dd.x * u.x + dd.y * u.y, F = { x: A0.x + u.x * t, y: A0.y + u.y * t }, side = ((Pp.x - F.x) * n.x + (Pp.y - F.y) * n.y) >= 0 ? 1 : -1, th = side > 0 ? tu + Math.PI : tu, dist = len(vec(F, Pp));
+        const V0 = { x: F.x + u.x * 2 * CM, y: F.y + u.y * 2 * CM };
+        step(T('1. Așază o catetă a echerului pe dreapta AB.', '1. Place one leg of the set square on line AB.'), async (A) => { useTool('setsquare'); const g = geoGuides.setsquare; g.width = Math.max(g.width, 300); g.height = Math.max(g.height, dist * z + 100); fullRender('setsquare'); const s = scr(V0); await A.tw('setsquare', { x: s.x, y: s.y, angle: th }, 1400); });
+        step(T('2. Alunecă echerul pe dreapta AB până când cealaltă catetă (cea perpendiculară) trece prin P.', '2. Slide it along AB until the other leg (the perpendicular one) passes through P.'), async (A) => { const s = scr(F); await A.tw('setsquare', { x: s.x, y: s.y, angle: th }, 1400); });
+        step(T('3. Ține echerul și trasează cu creionul de-a lungul catetei, prin P: dreapta este perpendiculară pe AB.', '3. Hold the set square and draw along its leg, through P: the line is perpendicular to AB.'), async (A) => { await A.line(F, { x: F.x + side * n.x * (dist + CM), y: F.y + side * n.y * (dist + CM) }); });
+      } else if (k === 'parallel') {
+        const { a: A0, b: B0 } = ln[0], Pp = dots[2], u = unitv(A0, B0), n = { x: -u.y, y: u.x }, tu = ang(A0, B0), dd = vec(A0, Pp), t = dd.x * u.x + dd.y * u.y, F = { x: A0.x + u.x * t, y: A0.y + u.y * t }, dist = len(vec(F, Pp));
+        const Z0 = { x: F.x - n.x * 3.2 * CM, y: F.y - n.y * 3.2 * CM };
+        step(T('1. Lipește o catetă a echerului de dreapta AB.', '1. Put one leg of the set square on line AB.'), async (A) => { useTool('setsquare'); const g = geoGuides.setsquare; g.width = Math.max(g.width, 340); g.height = Math.max(g.height, 260); fullRender('setsquare'); const s = scr(F); await A.tw('setsquare', { x: s.x, y: s.y, angle: tu }, 1400); });
+        step(T('2. Sprijină rigla de cealaltă catetă a echerului și ține-o nemișcată.', '2. Rest the ruler against the set square\'s other leg and hold it still.'), async (A) => { useTool('ruler'); rulerLen(dist * z + 400); fullRender('ruler'); const s = scr(Z0); await A.tw('ruler', { x: s.x, y: s.y, angle: tu + Math.PI / 2 }, 1400); });
+        step(T('3. Alunecă echerul de-a lungul riglei până când muchia lui ajunge în punctul P.', '3. Slide the set square along the ruler until its edge reaches P.'), async (A) => { const s = scr(Pp); await A.tw('setsquare', { x: s.x, y: s.y, angle: tu }, 1800); });
+        step(T('4. Trasează cu creionul de-a lungul echerului, prin P: dreapta este paralelă cu AB.', '4. Draw along the set square, through P: the line is parallel to AB.'), async (A) => { await A.line(Pp, { x: Pp.x + u.x * 4 * CM, y: Pp.y + u.y * 4 * CM }); });
+      } else if (k === 'circle') {
+        const O = dots[0], R = num(/([\d.,]+) cm/), Rc = R * CM, oz = scr(O), rz = { x: oz.x - 40, y: Math.max(40, oz.y - Rc * z - 60) };
+        step(T(`1. Deschide compasul: vârful cu ac pe diviziunea 0 a riglei, creionul pe ${fmt(R)} cm.`, `1. Open the compass: needle on the ruler's 0, pencil on ${fmt(R)} cm.`), async (A) => { useTool('ruler'); useTool('compass'); rulerLen(R * 50 + 120); fullRender('ruler'); await A.tw('ruler', { x: rz.x, y: rz.y, angle: 0 }, 900); await A.tw('compass', { x: rz.x, y: rz.y, angle: 0 }, 900); await A.tw('compass', { radius: R * 50 }, 1400); await sleep(500); });
+        step(T('2. Înfige vârful compasului în O, fără să schimbi deschiderea.', '2. Put the needle of the compass at O without changing the opening.'), async (A) => { closeGeoGuide('ruler'); await A.tw('compass', { x: oz.x, y: oz.y, angle: -Math.PI / 2 }, 1400); });
+        step(T('3. Rotește compasul o tură completă, ținând deschiderea neschimbată.', '3. Turn the compass a full circle without changing the opening.'), async (A) => { await A.sweep(O, Rc, -Math.PI / 2, 1.5 * Math.PI, 3200); });
+      } else if (k === 'bisectorSeg') {
+        const { a: A0, b: B0 } = ln[0], u = unitv(A0, B0), n = { x: -u.y, y: u.x }, l = len(vec(A0, B0)), r = l * 0.65, M = P(A0, B0, .5), h = Math.sqrt(r * r - l * l / 4), X = { x: M.x + n.x * h, y: M.y + n.y * h }, Y = { x: M.x - n.x * h, y: M.y - n.y * h }, th = Math.acos(l / 2 / r) + 0.35, aA = ang(A0, B0), aB = aA + Math.PI;
+        step(T('1. Deschide compasul mai mult de jumătate din AB și fixează vârful în A. Trasează un arc deasupra și dedesubtul segmentului.', '1. Open the compass to more than half of AB, put the needle at A and draw an arc above and below the segment.'), async (A) => { useTool('compass'); const s = scr(A0); await A.tw('compass', { x: s.x, y: s.y, angle: aA - th, radius: r * z }, 1300); await A.sweep(A0, r, aA - th, aA + th, 2200); });
+        step(T('2. Păstrează aceeași deschidere, mută vârful în B și trasează alt arc: arcele se taie în X și Y.', '2. Keep the same opening, move the needle to B and draw another arc: the arcs cross at X and Y.'), async (A) => { const s = scr(B0); await A.tw('compass', { x: s.x, y: s.y, angle: aB - th }, 1300); await A.sweep(B0, r, aB - th, aB + th, 2200); await A.dot(X, 'X'); await A.dot(Y, 'Y'); });
+        step(T('3. Unește X cu Y cu rigla: dreapta XY este mediatoarea lui AB.', '3. Join X and Y with the ruler: line XY is the perpendicular bisector of AB.'), async (A) => { closeGeoGuide('compass'); useTool('ruler'); rulerLen(len(vec(X, Y)) * z + 200); fullRender('ruler'); const X2 = { x: X.x + n.x * 20, y: X.y + n.y * 20 }, Y2 = { x: Y.x - n.x * 20, y: Y.y - n.y * 20 }; await rulerTo(X2, Y2, A, 1300); await A.line(X2, Y2); });
+      } else if (k === 'bisectorAngle') {
+        const V = ln[0].a, a0 = ang(V, ln[0].b), a1 = ang(V, ln[1].b); let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        const rho = 1.8 * CM, U1 = { x: V.x + rho * Math.cos(a0), y: V.y + rho * Math.sin(a0) }, U2 = { x: V.x + rho * Math.cos(a0 + da), y: V.y + rho * Math.sin(a0 + da) }, bm = a0 + da / 2, W = { x: V.x + rho * 1.5 * Math.cos(bm), y: V.y + rho * 1.5 * Math.sin(bm) }, r2 = len(vec(U1, W)), d1 = ang(U1, W), d2 = ang(U2, W);
+        step(T('1. Fixează vârful compasului în vârful unghiului și trasează un arc care taie ambele laturi, în U₁ și U₂.', '1. Put the needle on the vertex and draw an arc that crosses both sides, at U₁ and U₂.'), async (A) => { useTool('compass'); const s = scr(V); await A.tw('compass', { x: s.x, y: s.y, angle: a0, radius: rho * z }, 1300); await A.sweep(V, rho, a0, a0 + da, 1800); await A.dot(U1, 'U₁'); await A.dot(U2, 'U₂'); });
+        step(T('2. Din U₁ și apoi din U₂, cu aceeași deschidere, trasează două arce care se taie în W.', '2. From U₁ and then from U₂, with the same opening, draw two arcs that cross at W.'), async (A) => { const s1 = scr(U1), s2 = scr(U2); await A.tw('compass', { x: s1.x, y: s1.y, angle: d1 - 0.4, radius: r2 * z }, 1300); await A.sweep(U1, r2, d1 - 0.4, d1 + 0.4, 1400); await A.tw('compass', { x: s2.x, y: s2.y, angle: d2 + 0.4 }, 1300); await A.sweep(U2, r2, d2 + 0.4, d2 - 0.4, 1400); await A.dot(W, 'W'); });
+        step(T('3. Unește vârful cu W folosind rigla: semidreapta VW este bisectoarea.', '3. Join the vertex to W with the ruler: ray VW is the bisector.'), async (A) => { closeGeoGuide('compass'); useTool('ruler'); rulerLen(4 * CM * z + 120); fullRender('ruler'); const E = { x: V.x + 3.6 * CM * Math.cos(bm), y: V.y + 3.6 * CM * Math.sin(bm) }; await rulerTo(V, E, A, 1300); await A.line(V, E); });
+      }
+      return S;
+    }
+    function clearDemo() { demoTok++; restoreTools(); pencilAt(null); if (!page) return; const n = page.strokes.length; page.strokes = page.strokes.filter(s => !s._demo); if (page === getCurrentPage() && n !== page.strokes.length) redrawStrokes(); $('gt-cap').textContent = ''; }
+    async function playDemo() {
+      if (!task || !page) return;
+      clearDemo(); const tok = demoTok;
+      const ok = () => tok === demoTok && page === getCurrentPage();
+      const chk = () => { if (!ok()) throw 'stop'; };
+      const live = (s) => { s._task = true; s._demo = true; page.strokes.push(s); return s; };
+      const A = {
+        async tw(name, tgt, ms) {
+          const st = geoGuides[name], from = {}, to = {};
+          Object.keys(tgt).forEach(k => { from[k] = st[k]; to[k] = tgt[k]; });
+          if ('angle' in to) { let d = to.angle - from.angle; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; to.angle = from.angle + d; }
+          const t0 = performance.now();
+          for (;;) { chk(); const t = Math.min(1, (performance.now() - t0) / ms), e = ease(t); Object.keys(to).forEach(k => { st[k] = from[k] + (to[k] - from[k]) * e; }); updG(name); if (t >= 1) break; await frame(); }
+        },
+        async dot(p, label) { chk(); pencilAt(p); live({ type: 'circle', cx: p.x, cy: p.y, radius: 3, color: color, size: 3 }); if (label) live({ type: 'text', text: label, x: p.x + 8, y: p.y - 28, font: 'bold 22px sans-serif', color: color, fontSize: 22, textAlign: 'left' }); redrawStrokes(); await sleep(450); pencilAt(null); },
+        async text(txt, at) { chk(); live({ type: 'text', text: txt, x: at.x, y: at.y, font: 'bold 24px sans-serif', color: color, fontSize: 24, textAlign: 'center' }); redrawStrokes(); await sleep(700); },
+        async line(a, b) { const s = live({ points: [], color: color, size: 3, erase: false }), t0 = performance.now(); for (;;) { chk(); const t = Math.min(1, (performance.now() - t0) / 1300); s.points = [a, P(a, b, t)]; pencilAt(P(a, b, t)); redrawStrokes(); if (t >= 1) break; await frame(); } await sleep(300); pencilAt(null); },
+        async sweep(c0, R, a0, a1, ms) { const st = geoGuides.compass, s = live({ points: [], color: color, size: 3, erase: false }), t0 = performance.now(), sp = scr(c0); st.x = sp.x; st.y = sp.y; st.radius = R * boardZoom;
+          for (;;) { chk(); const t = Math.min(1, (performance.now() - t0) / ms), a = a0 + (a1 - a0) * t; st.angle = a; renderGeoCompass(); s.points = arcPts(c0, R, a0, a, Math.max(2, Math.round(80 * t))); pencilAt({ x: c0.x + R * Math.cos(a), y: c0.y + R * Math.sin(a) }); redrawStrokes(); if (t >= 1) break; await frame(); } await sleep(400); pencilAt(null); }
+      };
+      try {
+        const steps = demoSteps();
+        for (const st of steps) { chk(); $('gt-cap').textContent = st.cap; await st.run(A); await sleep(900); }
+        $('gt-cap').textContent += ' ✓';
+      } catch (e) { if (e !== 'stop') console.error(e); }
+    }
+    function cleanup() {
+      demoTok++; restoreTools(); pencilAt(null);
+      if (!page) return;
+      const rm = new Set(page.strokes.slice(startIdx)); page.strokes.forEach(s => { if (s._task) rm.add(s); });
+      page.strokes = page.strokes.filter(s => !rm.has(s));
+      for (let i = undoStack.length - 1; i >= 0; i--) { const a = undoStack[i]; if (a.page === page && ((a.stroke && rm.has(a.stroke)) || (a.items && a.items.some(it => it.stroke && rm.has(it.stroke))))) undoStack.splice(i, 1); }
+      redoStack = [];
+      if (page === getCurrentPage()) { redrawStrokes(); updateStatus(); }
+    }
+    function ensure(tools) {
+      tools.forEach(n => { if (geoGuides[n] && !geoGuides[n].visible) toggleGeoGuide(n, GEO_GUIDE_BTN_ID[n]); });
+    }
+    const TOOLN = { ruler: ['rigla', 'the ruler'], setsquare: ['echerul', 'the set square'], protractor: ['raportorul', 'the protractor'], compass: ['compasul', 'the compass'] };
+    function next() {
+      if (activeSurface !== 'board') { showToast(T('Folosește tabla (nu fișa PDF) pentru exercițiile cu instrumente.', 'Use the whiteboard (not the PDF sheet) for the tool exercises.')); return; }
+      cleanup(); CM = 50 / boardZoom;
+      let k; do { k = pick(ORDER); } while (k === lastKind && ORDER.length > 1); lastKind = k;
+      task = KINDS[k](); page = getCurrentPage(); tries = 0;
+      task.setup(); startIdx = page.strokes.length;
+      textEl.textContent = task.text;
+      $('gt-tools').textContent = T('Instrumente: ', 'Tools: ') + task.tools.map(n => TOOLN[n][EN() ? 1 : 0]).join(', ');
+      if (task.ans) { ansRow.style.display = 'flex'; ansIn.value = ''; ansUnit.textContent = task.ans.unit; } else ansRow.style.display = 'none';
+      msgEl.textContent = ''; $('gt-next').textContent = T('Altă sarcină ›', 'Another task ›');
+      task.kind = k; $('gt-demo').style.display = 'none'; $('gt-cap').textContent = '';
+      redrawStrokes(); updateStatus(); stats();
+    }
+    function stats() { statsEl.textContent = T(`Corecte: ${okc}/${done}`, `Correct: ${okc}/${done}`); }
+    function verify() {
+      if (!task) return;
+      CM = 50 / boardZoom;
+      clearDemo();
+      let r;
+      if (task.ans) {
+        const v = parseFloat(String(ansIn.value).replace(',', '.'));
+        if (isNaN(v)) { msgEl.innerHTML = `<span style="color:#ffcc00">${T('Scrie valoarea măsurată.', 'Enter the measured value.')}</span>`; return; }
+        r = Math.abs(v - task.ans.v) <= task.ans.tol ? { ok: true } : { ok: false, msg: T('Nu este corect. Mai măsoară o dată cu atenție.', 'Not correct. Measure once more, carefully.') };
+        if (!r.ok && tries >= 1) r.msg += ' ' + T(`(Răspuns: ${fmt(task.ans.v)} ${task.ans.unit})`, `(Answer: ${fmt(task.ans.v)} ${task.ans.unit})`);
+      } else r = task.check();
+      tries++;
+      if (r.ok) { $('gt-demo').style.display = 'none'; done++; okc += (tries === 1 ? 1 : 0); msgEl.innerHTML = `<b style="color:#7be3a3">${T('✓ Corect! Bravo!', '✓ Correct! Well done!')}</b>`; stats(); task = null; }
+      else msgEl.innerHTML = `<b style="color:#ff8a80">✗</b> ${r.msg}`;
+      if (!r.ok) { const b = $('gt-demo'); b.style.display = ''; b.textContent = T('▶ Arată cum', '▶ Show how'); if (tries >= 2) playDemo(); }
+    }
+    function open() { if (activeSurface !== 'board') { showToast(T('Folosește tabla (nu fișa PDF) pentru exercițiile cu instrumente.', 'Use the whiteboard (not the PDF sheet) for the tool exercises.')); return; } panel.style.display = 'flex'; $('gt-title').textContent = T('Exerciții cu instrumente', 'Tool exercises'); $('gt-verify').textContent = T('Verifică', 'Check'); $('gt-close').title = T('Închide', 'Close'); done = 0; okc = 0; next(); }
+    function close() { cleanup(); task = null; panel.style.display = 'none'; page = null; }
+    $('btn-geo-tasks').onclick = open;
+    $('gt-close').onclick = close;
+    $('gt-next').onclick = () => { if (task) done++; stats(); next(); };
+    $('gt-verify').onclick = verify;
+    $('gt-demo').onclick = playDemo;
+    ansIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') verify(); });
+    (function () { // panou mutabil: tragi de titlu
+      const h = $('gt-title'); h.style.cursor = 'move'; h.style.touchAction = 'none'; let d = null;
+      h.addEventListener('pointerdown', (e) => { const r = panel.getBoundingClientRect(); d = { dx: e.clientX - r.left, dy: e.clientY - r.top }; h.setPointerCapture(e.pointerId); e.preventDefault(); });
+      h.addEventListener('pointermove', (e) => { if (!d) return; const w = panel.offsetWidth, hh = panel.offsetHeight; panel.style.left = Math.max(0, Math.min(innerWidth - w, e.clientX - d.dx)) + 'px'; panel.style.top = Math.max(0, Math.min(innerHeight - 40, e.clientY - d.dy)) + 'px'; });
+      const up = () => { d = null; }; h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+    })();
+    $('gt-fold').onclick = () => { const b = $('gt-body'); b.style.display = b.style.display === 'none' ? 'flex' : 'none'; $('gt-fold').textContent = b.style.display === 'none' ? '▸' : '▾'; };
+  })();
+
+  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-miliardar', 'btn-balance', 'btn-area-grid', 'btn-geo-tasks'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
 })();
 
 document.getElementById('btn-circle').onclick = () => setTool('circle');
@@ -12255,6 +12902,12 @@ function toggleSnapToPoint() {
     : 'Lipire de punct dezactivată'));
 }
 document.getElementById('btn-snap-point').onclick = toggleSnapToPoint;
+document.getElementById('btn-snap-tools').onclick = () => {
+  toolSnapEnabled = !toolSnapEnabled;
+  document.getElementById('btn-snap-tools').classList.toggle('active', toolSnapEnabled);
+  showToast(trMsg(toolSnapEnabled ? '✓ Lipire între instrumente activă — rigla și echerul se lipesc una de alta când muchiile se apropie' : 'Lipire între instrumente dezactivată'));
+};
+document.getElementById('btn-snap-tools').classList.add('active');
 document.getElementById('ruling-dictando').onclick = () => setBoardRuling('dictando', 'ruling-dictando');
 document.getElementById('ruling-music').onclick = () => setBoardRuling('music', 'ruling-music');
 document.getElementById('ruling-tip1').onclick = () => setBoardRuling('tip1', 'ruling-tip1');
@@ -15383,6 +16036,8 @@ function renderGeoCompass() {
   radiusLabel.textContent = 'r = ' + (st.radius / 50).toFixed(2) + ' cm';
 }
 
+
+
 // starea desenării curente cu compasul
 let compassDraw = null;
 
@@ -15611,6 +16266,47 @@ geoGroups.protractor.arcRadiusHandle.addEventListener('pointerdown', e => {
   });
 })();
 
+
+// ---- Lipire între instrumente (riglă ↔ echer) ----
+let toolSnapEnabled = true;
+function geoToolEdges(name) {
+  const st = geoGuides[name], out = [];
+  const rotv = (v) => ({ x: v.x * Math.cos(st.angle) - v.y * Math.sin(st.angle), y: v.x * Math.sin(st.angle) + v.y * Math.cos(st.angle) });
+  const add = (a, b, n) => { const nl = Math.hypot(n.x, n.y); out.push({ p1: geoLocalToWorld(st, a.x, a.y), p2: geoLocalToWorld(st, b.x, b.y), n: rotv({ x: n.x / nl, y: n.y / nl }) }); };
+  if (name === 'ruler') { add({ x: 0, y: 0 }, { x: st.length, y: 0 }, { x: 0, y: -1 }); add({ x: 0, y: st.thickness }, { x: st.length, y: st.thickness }, { x: 0, y: 1 }); }
+  else if (name === 'setsquare') { const W = st.width, H = st.height; add({ x: 0, y: 0 }, { x: W, y: 0 }, { x: 0, y: 1 }); add({ x: 0, y: 0 }, { x: 0, y: -H }, { x: -1, y: 0 }); add({ x: W, y: 0 }, { x: 0, y: -H }, { x: H, y: -W }); }
+  return out;
+}
+// Dacă o muchie a instrumentului mutat e aproape paralelă și lipită de o muchie a celuilalt (corpurile pe părți opuse),
+// o rotește exact paralel și o lipește (flush). Întoarce true dacă a lipit.
+function snapToolToOther(name, translate) {
+  if (!toolSnapEnabled) return false;
+  const other = name === 'ruler' ? 'setsquare' : name === 'setsquare' ? 'ruler' : null;
+  if (!other || !geoGuides.ruler.visible || !geoGuides.setsquare.visible) return false;
+  const st = geoGuides[name], mine = geoToolEdges(name), theirs = geoToolEdges(other);
+  const MAXD = 16, MAXA = 5 * Math.PI / 180;
+  let best = null;
+  mine.forEach(me => theirs.forEach(oe => {
+    const nx = -oe.n.x, ny = -oe.n.y;
+    const ang = Math.atan2(me.n.x * ny - me.n.y * nx, me.n.x * nx + me.n.y * ny);
+    if (Math.abs(ang) > MAXA) return;
+    const mid = { x: (me.p1.x + me.p2.x) / 2, y: (me.p1.y + me.p2.y) / 2 };
+    const d = (mid.x - oe.p1.x) * oe.n.x + (mid.y - oe.p1.y) * oe.n.y;
+    if (Math.abs(d) > MAXD) return;
+    const ux = -oe.n.y, uy = oe.n.x, pr = (p) => (p.x - oe.p1.x) * ux + (p.y - oe.p1.y) * uy;
+    const a0 = Math.min(pr(me.p1), pr(me.p2)), a1 = Math.max(pr(me.p1), pr(me.p2)), b0 = Math.min(pr(oe.p1), pr(oe.p2)), b1 = Math.max(pr(oe.p1), pr(oe.p2));
+    if (Math.min(a1, b1) - Math.max(a0, b0) < 10) return;
+    const score = Math.abs(d) + Math.abs(ang) * 180 / Math.PI * 3;
+    if (!best || score < best.score) best = { score, ang, d, mid, oe };
+  }));
+  if (!best) return false;
+  // rotire în jurul mijlocului muchiei (muchia rămâne pe loc), apoi translație perpendiculară până la contact
+  const c = Math.cos(best.ang), sn = Math.sin(best.ang), dx = st.x - best.mid.x, dy = st.y - best.mid.y;
+  st.angle += best.ang; st.x = best.mid.x + dx * c - dy * sn; st.y = best.mid.y + dx * sn + dy * c;
+  if (translate) { st.x -= best.d * best.oe.n.x; st.y -= best.d * best.oe.n.y; }
+  return true;
+}
+
 function geoDragMove(e) {
   if (!geoActiveDrag) return;
   e.preventDefault();
@@ -15644,10 +16340,11 @@ function geoDragMove(e) {
   if (geoActiveDrag.mode === 'move') {
     st.x = p.x - geoActiveDrag.offX;
     st.y = p.y - geoActiveDrag.offY;
-    snapGuideMoveToStrokePoint(geoActiveDrag.name);
+    if (!snapToolToOther(geoActiveDrag.name, true)) snapGuideMoveToStrokePoint(geoActiveDrag.name);
     updateGeoTransform(geoActiveDrag.name);
   } else if (geoActiveDrag.mode === 'rotate') {
     st.angle = Math.atan2(p.y - st.y, p.x - st.x) - geoActiveDrag.localOffset;
+    snapToolToOther(geoActiveDrag.name, false);
     updateGeoTransform(geoActiveDrag.name);
   } else if (geoActiveDrag.mode === 'rotateSnap') {
     const rawAngle = Math.atan2(p.y - st.y, p.x - st.x) - geoActiveDrag.localOffset;
@@ -15698,6 +16395,7 @@ function geoDragMove(e) {
     const proj = (p.x - st.x) * cos + (p.y - st.y) * sin;
     st.radius = Math.max(30, Math.min(1000, proj));
     renderGeoCompass();
+    showMathInfo((LANG === 'en' ? 'Compass radius: ' : 'Raza compasului: ') + (st.radius / 50).toFixed(2).replace('.', LANG === 'en' ? '.' : ',') + ' cm');
   } else if (geoActiveDrag.mode === 'compassResizeSnap') {
     const cos = Math.cos(st.angle), sin = Math.sin(st.angle);
     const proj = (p.x - st.x) * cos + (p.y - st.y) * sin;
@@ -15705,6 +16403,7 @@ function geoDragMove(e) {
     st.radius = Math.round(proj / snapPx) * snapPx;
     st.radius = Math.max(30, Math.min(1000, st.radius));
     renderGeoCompass();
+    showMathInfo((LANG === 'en' ? 'Compass radius: ' : 'Raza compasului: ') + (st.radius / 50).toFixed(2).replace('.', LANG === 'en' ? '.' : ',') + ' cm');
   } else if (geoActiveDrag.mode === 'compassRotateTip') {
     const newAngle = Math.atan2(p.y - st.y, p.x - st.x);
     if (compassDraw) {
@@ -16528,7 +17227,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v375</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v392</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -16560,9 +17259,13 @@ const HELP_CONTENT_HTML = `
   <li><b>Math</b> — grupează instrumentele matematice interactive și jocurile de mai jos; un singur click deschide un mic meniu din care alegi.</li>
   <li><b>Paralelogram interactiv</b> — trage cele două vârfuri portocalii ca să explorezi legătura dintre paralelogram, dreptunghi, romb și pătrat; numele formei se actualizează live, iar butoanele de transformare animă direct către fiecare caz special.</li>
   <li><b>Tipuri de unghiuri</b> — trage punctul portocaliu pentru a schimba unghiul; tipul (nul, ascuțit, drept, obtuz, alungit) se identifică live, cu butoane pentru a sări direct la fiecare caz.</li>
-  <li><b>Tabla înmulțirii (joc)</b> — pe ecran apar multe rezultate; elevul atinge rezultatul corect al înmulțirii afișate (10 întrebări pe rundă, cu tabla aleasă sau amestecat). Exercițiile greșite se repetă în runda următoare.</li>
+  <li><b>Tabla înmulțirii și calcul (joc)</b> — pe ecran apar patru rezultate; elevul atinge rezultatul corect (10 întrebări pe rundă). Alegi operația: înmulțire, împărțire, adunare, scădere, toate amestecate sau exerciții cu mai multe operații (ordinea efectuării operațiilor, paranteze). Pentru × și ÷ alegi tabla, pentru + și − limita numerelor (20, 100, 1000), iar pentru variantele mixte nivelul. Butonul apăsat arată o față zâmbitoare 😊 dacă răspunsul e corect și una tristă 😢 dacă e greșit. Exercițiile greșite se repetă în runda următoare.</li>
   <li><b>Tipuri de unghiuri – fila Joc (ghicește unghiul)</b> — se generează un unghi aleatoriu (nul, ascuțit, drept, obtuz sau alungit), iar elevul alege numele lui; după răspuns apar măsura și explicația. Se deschide și din fereastra „Tipuri de unghiuri”.</li>
   <li><b>Turnurile din Hanoi (joc)</b> — mută toate discurile de pe tija A pe tija C, câte unul odată, fără a pune un disc mare peste unul mic. Alegi între 3 și 6 discuri; vezi numărul de mutări față de minimul 2ⁿ − 1.</li>
+  <li><b>Balanța (ecuații)</b> — o balanță în echilibru cu pungi „x” și greutăți de 1: elevul scoate din ambele talere (unități, pungi x) sau împarte în grupe egale, până când x rămâne singur și se afișează valoarea lui. Cu „Doar stânga/dreapta” vede ce se întâmplă dacă face o operație doar pe un taler: balanța se înclină și pasul se anulează. Trei niveluri: x + a = b, 2x + a = b, 3x + a = x + b.</li>
+  <li><b>Lipire între instrumente (🧲)</b> — butonul de lângă „Lipire de punct”, activ implicit: când muți sau rotești rigla ori echerul și o muchie a unuia se apropie de o muchie a celuilalt, se aliniază exact paralel și se lipesc (corpurile pe părți opuse). Apoi poți glisa echerul de-a lungul riglei fără să se desprindă — exact ca la construcția paralelei printr-un punct exterior unei drepte.</li>
+  <li><b>Arii și perimetre pe caroiaj</b> — o figură colorată pe caroiaj (un pătrățel = 1 cm²): elevul calculează aria, perimetrul sau ambele; dacă greșește, pătrățelele sau laturile conturului se numerotează ca să le numere. Varianta „Desenează figura”: se cer o arie și un perimetru, iar elevul colorează pătrățele (poate trage degetul) până se potrivesc; sub grilă vede aria și perimetrul figurii lui. Trei niveluri: dreptunghiuri, figuri din 6–10 pătrățele, figuri din 10–16.</li>
+  <li><b>Exerciții cu instrumente</b> — deschide tu instrumentele de care ai nevoie (sunt listate în panou); dacă greșești, apare „▶ Arată cum”, o animație pas cu pas a rezolvării corecte (pornește singură la a doua greșeală). Sarcini pe tablă cu rigla, echerul, raportorul și compasul: măsori un segment sau un unghi și scrii răspunsul, apoi desenezi segmente, unghiuri, perpendiculare, paralele, cercuri, mediatoare și bisectoare. Butonul „Verifică” controlează desenul tău (toleranță mică, de ordinul unui milimetru sau al câtorva grade); „Altă sarcină” trece mai departe și șterge desenele sarcinii.</li>
   <li><b>Tangram (joc)</b> — reconstruiești o siluetă din cele 7 piese (2 triunghiuri mari, 1 mediu, 2 mici, un pătrat și un paralelogram). Tragi piesele, atingi o piesă ca s-o rotești cu 45° și poți întoarce paralelogramul. Butonul „Indiciu” arată conturul pieselor.</li>
   <li><b>Vrei să fii miliardar? (joc)</b> — seturi de câte 10 întrebări cu 4 variante de răspuns, în ordine crescătoare a dificultății: matematică (primar, gimnaziu, liceu), limba și literatura română, biologie, fizică, geografie și sport; fiecare domeniu are 10 seturi. Ai trei ajutoare: 50:50, publicul și prietenul. După întrebarea 5 ai o sumă sigură (1.000), iar „Mă retrag” te lasă să pleci cu suma câștigată.</li>
   <li><b>Hangman (joc)</b> — elevul ghicește litere pentru a descoperi un cuvânt; categorii: Matematică (cuvinte în română, nivel la alegere, cu definiție la final), Animale, Flori și Obiecte; cuvintele sunt în limba interfeței (română sau engleză), iar la final apare traducerea în cealaltă limbă; are 6 vieți, poate cere un indiciu (costă o viață) și poate scrie literele și de la tastatură. La final apare definiția cuvântului.</li>
@@ -16667,7 +17370,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v375</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v392</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -16699,9 +17402,13 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Math</b> — groups the interactive math tools and games below; one click opens a small menu to choose from.</li>
   <li><b>Interactive parallelogram</b> — drag the two orange vertices to explore the relationship between parallelogram, rectangle, rhombus and square; the shape name updates live, and the transform buttons animate directly into each special case.</li>
   <li><b>Angle types</b> — drag the orange point to change the angle; the type (zero, acute, right, obtuse, straight) is identified live, with buttons to jump directly to each case.</li>
-  <li><b>Times tables (game)</b> — many results appear on screen; the student taps the correct result of the multiplication shown (10 questions per round, one table or mixed). Missed facts come back in the next round.</li>
+  <li><b>Times tables and quick math (game)</b> — four results appear; the student taps the correct one (10 questions per round). Choose the operation: multiplication, division, addition, subtraction, all mixed, or exercises with several operations (order of operations, parentheses). For × and ÷ pick the table, for + and − the number limit (20, 100, 1000), for the mixed variants the level. The tapped button shows a smiling face 😊 for a correct answer and a sad one 😢 for a wrong one. Missed exercises come back in the next round.</li>
   <li><b>Types of angles – Game tab (guess the angle)</b> — a random angle (zero, acute, right, obtuse or straight) is generated and the student picks its name; the measure and an explanation appear after each answer. It also opens from the “Angle types” window.</li>
   <li><b>Tower of Hanoi (game)</b> — move all discs from peg A to peg C, one at a time, never placing a larger disc on a smaller one. Choose 3 to 6 discs; the move count is compared with the minimum 2ⁿ − 1.</li>
+  <li><b>The balance (equations)</b> — a balanced scale with “x” bags and 1-unit weights: the student removes from both pans (units, x bags) or splits into equal groups until x is alone and its value shows. With “Left only/Right only” they see what happens when only one pan is changed: the scale tips and the step is undone. Three levels: x + a = b, 2x + a = b, 3x + a = x + b.</li>
+  <li><b>Snap between tools (🧲)</b> — the button next to “Snap to point”, on by default: when you move or rotate the ruler or the set square and an edge of one gets close to an edge of the other, they align exactly parallel and stick together (bodies on opposite sides). You can then slide the set square along the ruler without it coming loose — just like when constructing a parallel through a point outside a line.</li>
+  <li><b>Areas and perimeters on a grid</b> — a coloured figure on a grid (one square = 1 cm²): the student works out the area, the perimeter or both; after a mistake the squares or outline sides get numbered so they can be counted. The “Draw the figure” variant gives an area and a perimeter, and the student colours squares (dragging works) until they match; below the grid the area and perimeter of their figure are shown. Three levels: rectangles, figures of 6–10 squares, figures of 10–16.</li>
+  <li><b>Tool exercises</b> — open the tools you need yourself (they are listed in the panel); if you get it wrong, “▶ Show how” appears, a step-by-step animation of the correct method (it starts by itself after the second mistake). Tasks on the whiteboard using the ruler, set square, protractor and compass: measure a segment or an angle and type the answer, then draw segments, angles, perpendiculars, parallels, circles, perpendicular bisectors and angle bisectors. “Check” verifies your drawing (small tolerance, about a millimeter or a few degrees); “Another task” moves on and clears the task drawings.</li>
   <li><b>Tangram (game)</b> — rebuild a silhouette from the 7 pieces (2 large triangles, 1 medium, 2 small, a square and a parallelogram). Drag the pieces, tap a piece to rotate it by 45°, and flip the parallelogram. The “Hint” button shows the outline of the pieces.</li>
   <li><b>Who wants to be a billionaire? (game)</b> — 10 questions with 4 answers, in increasing difficulty: math (primary, middle school, high school), Romanian language and literature, biology, physics, geography and sports; each subject has 10 sets. You have three lifelines: 50:50, audience and friend. After question 5 you reach a safe amount (1,000), and “Walk away” lets you leave with what you have won.</li>
   <li><b>Hangman (game)</b> — the student guesses letters to uncover a word; categories: Math (with definitions), Animals, Flowers, Objects; words follow the interface language (Romanian or English), and the translation into the other language is shown at the end; 6 lives, an optional hint (costs a life), and letters can also be typed on the keyboard. The definition of the word is shown at the end. (The word list is in Romanian.)</li>
@@ -16925,7 +17632,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v375';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v392';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
