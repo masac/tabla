@@ -230,6 +230,17 @@ button{cursor:pointer}
 .dlg-h h2{font-family:var(--serif);font-size:19px;margin:0}
 .dlg-h .sub{font-size:12.5px;color:var(--ink-2)}
 .dlg-b{padding:16px 20px;overflow-y:auto;display:grid;gap:18px}
+.btn[hidden]{display:none}
+.lst-box{display:grid;gap:10px;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}
+.lst-chip{font:inherit;font-size:12.5px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;background:var(--sheet);color:var(--ink);cursor:pointer}.lst-chip.on{background:var(--pen);border-color:var(--pen);color:#fff}
+#loFilters[hidden]{display:none}
+.lst-fld{display:grid;gap:4px;font-size:13px;color:var(--ink-2)}.lst-fld input,.lst-fld select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--sheet);color:var(--ink);min-width:0}
+.lst-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--sheet)}
+.lst-row .lst-t{flex:1;min-width:0}.lst-row .lst-t b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lst-row .lst-s{font-size:12.5px;color:var(--ink-2)}
+.lst-row .lst-s .miss{color:#c0392b;font-weight:600}
+.lst-ent{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--sheet);display:grid;gap:8px}.lst-ent input{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--sheet);color:var(--ink);min-width:0}
+.lst-exs{display:grid;gap:6px;padding-top:4px;border-top:1px dashed var(--line)}.lst-ex{display:flex;align-items:center;gap:8px;font-size:13px}.lst-xn{flex:none;color:var(--ink-2);min-width:70px}.lst-xq{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lst-empty{padding:18px;text-align:center;color:var(--ink-2);border:1px dashed var(--line);border-radius:8px}
 .dlg-f{display:flex;gap:10px;align-items:center;padding:12px 20px;border-top:1px solid var(--line);flex-wrap:wrap}
 .dlg-f .hint{font-size:12px;color:var(--ink-2);margin-right:auto}
 .field{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -515,6 +526,8 @@ input.num{width:64px;margin-left:6px;border:1px solid var(--line);border-radius:
     <div class="selbar">
       <button class="btn primary" id="pvBtn" disabled>Previzualizează selecția (0)</button>
       <button class="clear" id="selClear" hidden>Golește</button>
+      <button class="btn" id="listSaveBtn" title="Construiește un plan: adaugi selecții pentru zile și clase diferite și le salvezi într-un fișier">Plan de exerciții</button>
+      <button class="btn" id="listOpenBtn" title="Deschide un plan salvat (dintr-un folder sau din fișiere): alegi ziua și clasa">Deschide plan</button>
     </div>
     <div class="menu-wrap">
       <button class="btn" id="menuBtn" aria-haspopup="true" aria-expanded="false">
@@ -525,6 +538,7 @@ input.num{width:64px;margin-left:6px;border:1px solid var(--line);border-radius:
         <button data-act="export">Exportă toate exercițiile (JSON)</button>
         <button data-act="import">Importă exerciții din JSON</button>
         <hr>
+        <button data-act="newex">Adaugă un exercițiu în secțiunea curentă</button>
         <button data-act="bulk">Adaugă mai multe exerciții din text</button>
         <button data-act="restore">Readaugă exercițiile de bază lipsă</button>
         <button data-act="theme">Schimbă tema (luminoasă / întunecată)</button>
@@ -650,6 +664,65 @@ Nr: Subiectul I, ex. 2"></textarea>
   </div>
 </div>
 
+<div class="overlay" id="listAsk" role="dialog" aria-modal="true" aria-labelledby="laTitle">
+  <div class="dialog" style="width:min(460px,100%)">
+    <div class="dlg-h"><h2 id="laTitle">Adaugă la listă</h2><span style="flex:1"></span><button class="btn ghost" data-laclose aria-label="Închide">✕</button></div>
+    <div class="dlg-b">
+      <div class="help" id="laInfo"></div>
+      <label class="lst-fld">Ziua <input type="date" id="laDay"></label>
+      <label class="lst-fld">Clasa <input type="text" id="laClass" list="lsClassList" placeholder="de ex. VII B" autocomplete="off"></label>
+      <div id="laChips" class="row" style="gap:6px"></div>
+      <div class="row"><button class="btn primary" id="laOk">Adaugă</button><button class="btn" data-laclose>Renunță</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="listSave" role="dialog" aria-modal="true" aria-labelledby="lsTitle">
+  <div class="dialog" style="width:min(640px,100%)">
+    <div class="dlg-h"><div><h2 id="lsTitle">Plan de exerciții</h2><div class="sub">Adaugi pe rând selecții pentru zile și clase diferite, apoi salvezi tot planul într-un singur fișier.</div></div><span style="flex:1"></span><button class="btn ghost" data-lsclose aria-label="Închide">✕</button></div>
+    <div class="dlg-b">
+      <div class="lst-box">
+        <b>1. Adaugă selecția curentă</b>
+        <div class="help" id="lsInfo"></div>
+        <div class="row">
+          <label class="lst-fld">Ziua <input type="date" id="lsDay"></label>
+          <label class="lst-fld">Clasa <input type="text" id="lsClass" list="lsClassList" placeholder="de ex. VII B" style="width:130px"><datalist id="lsClassList"></datalist></label>
+          <label class="lst-fld" style="flex:1;min-width:150px">Numele (opțional) <input type="text" id="lsName" placeholder="de ex. Ecuații"></label>
+        </div>
+        <div class="row"><button class="btn primary" id="lsAdd">Adaugă în plan</button><label class="toggle" style="font-size:13px"><input type="checkbox" id="lsClear" checked> Golește selecția după adăugare</label></div>
+      </div>
+      <div class="lst-box">
+        <b>2. Planul <span id="lsCount" style="font-weight:400;color:var(--ink-2)"></span></b>
+        <div id="lsEntries" style="display:grid;gap:6px"></div>
+        <label class="lst-fld">Numele planului <input type="text" id="lsPlanName" placeholder="de ex. Săptămâna 3–7 noiembrie"></label>
+        <div class="help" id="lsFile"></div>
+        <div class="row"><button class="btn primary" id="lsDownload">Descarcă planul</button><button class="btn" id="lsToFolder" hidden>Salvează în folder…</button><span style="flex:1"></span><button class="btn" id="lsReset">Golește planul</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="listOpen" role="dialog" aria-modal="true" aria-labelledby="loTitle">
+  <div class="dialog" style="width:min(720px,100%)">
+    <div class="dlg-h"><div><h2 id="loTitle">Deschide plan</h2><div class="sub">Alege folderul cu planurile (de exemplu de pe stick), apoi ziua din calendar și clasa.</div></div><span style="flex:1"></span><button class="btn ghost" data-loclose aria-label="Închide">✕</button></div>
+    <div class="dlg-b">
+      <div class="row"><button class="btn primary" id="loFolder" hidden>Alege folderul…</button><button class="btn" id="loLast" hidden>Folderul de data trecută</button><button class="btn" id="loFiles">Alege fișiere…</button><input type="file" id="loInput" accept=".json,application/json" multiple hidden></div>
+      <div id="loFilters" hidden style="display:grid;gap:10px">
+        <div class="row">
+          <label class="lst-fld">Ziua <input type="date" id="loDay"></label>
+          <button class="btn" id="loToday">Azi</button><button class="btn" id="loAllDays">Toate zilele</button>
+          <label class="lst-fld">Clasa <select id="loClass"></select></label>
+        </div>
+        <div class="row" id="loChips" style="gap:6px"></div>
+      </div>
+      <div id="loStatus" class="help" hidden></div>
+      <div id="loPlans" class="row" style="gap:6px"></div>
+      <div class="row" id="loAllRow" hidden><button class="btn primary" id="loAll">Deschide toate cele afișate</button><span class="help" id="loAllInfo" style="flex:1"></span></div>
+      <div id="loList" style="display:grid;gap:8px"></div>
+    </div>
+  </div>
+</div>
+
 <div class="pv" id="pv" role="dialog" aria-modal="true" aria-labelledby="pvTitle">
   <div class="pv-h">
     <div><h2 id="pvTitle">Previzualizare fișă</h2><div class="info" id="pvInfo"></div></div>
@@ -687,6 +760,7 @@ Nr: Subiectul I, ex. 2"></textarea>
       </select>
     </label>
     <label class="opt">Număr de fișe <input type="number" id="pvCount" min="1" max="40" value="1" class="num"></label>
+    <label class="opt" id="pvMarksWrap" title="Bifele (✓) cu rezolvările apar pe tablă lângă fiecare exercițiu. Debifează pentru a trimite doar enunțurile."><input type="checkbox" id="pvMarks" checked> Bife pentru răspunsuri pe tablă</label>
     <label class="opt" id="pvShuffleWrap"><input type="checkbox" id="pvShuffle"> Ordine aleatorie pe fiecare fișă</label>
     <button class="btn sm" id="pvReroll" title="Generează alte variante aleatorii">Alt amestec</button>
   </div>
@@ -8168,6 +8242,8 @@ function updateSelUI() {
   b.textContent = n ? `Previzualizează selecția (${n})` : r ? 'Previzualizează fișa aleatorie' : 'Previzualizează selecția (0)';
   b.disabled = n === 0 && r === 0;
   $('#selClear').hidden = n === 0;
+  const pb = document.querySelector('[data-act="plan"]'); if (pb) pb.textContent = n ? `Adaugă la listă (${n})` : 'Adaugă la listă';
+  if (typeof updatePlanBtn === 'function') updatePlanBtn();
 }
 
 /* ============ RENDER: MAIN ============ */
@@ -8243,7 +8319,8 @@ function renderMain() {
       <div class="head-actions">
         ${list.length ? `<button class="btn" data-act="rand" title="Adaugă secțiunea la fișa aleatorie: 3 de bază, 2 consolidate, 1 avansat (le ajustezi în previzualizare)">Aleatoriu</button>` : ''}
         <button class="btn" data-act="bulk">Adaugă din text</button>
-        <button class="btn primary" data-act="new">+ Adaugă exercițiu</button></div></div>`;
+        <label class="toggle" style="font-size:12.5px" title="Când adaugi la listă, ți se cere data și clasa (altfel se pune data de azi și ultima clasă folosită)"><input type="checkbox" id="planAsk"${lsGet('tabla-plan-ask', false) ? ' checked' : ''}> Întreabă data și clasa</label>
+        <button class="btn primary" data-act="plan" title="Adaugă exercițiile selectate în planul de exerciții, cu data de azi și ultima clasă folosită (le editezi apoi în „Plan de exerciții”)">Adaugă la listă${state.sel[mode].size ? ` (${state.sel[mode].size})` : ''}</button></div></div>`;
   html += `<div class="filt-row"><span class="sel-l">Afișează:</span>${diffFilterHtml(list.filter(e => matchSrc(e, state.srcF)))}
     <label class="sel-l" for="srcF">Proveniență</label><select id="srcF" class="sel sm">${srcOptions(state.srcF)}</select></div>`;
   html += synthHtml(mode, t);
@@ -8577,6 +8654,249 @@ function openBulk() {
   setTimeout(() => $('#bkText').focus(), 30);
 }
 function closeBulk() { $('#bulk').classList.remove('open'); document.body.style.overflow = ''; }
+
+/* ============ plan de exerciții: mai multe zile, clase și selecții, într-un fișier ============ */
+const LIST_FMT = 'tabla-lista';
+const listState = { items: [], plans: [], ignored: 0, day: '', cls: '' };
+let planDraft = (function () { try { const d = JSON.parse(localStorage.getItem('tabla-plan')); if (d && Array.isArray(d.entries)) return { name: String(d.name || ''), entries: d.entries }; } catch (e) {} return { name: '', entries: [] }; })();
+function planSave() { try { localStorage.setItem('tabla-plan', JSON.stringify(planDraft)); } catch (e) {} }
+function lsGet(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
+function lsPut(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function todayISO() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function fmtDay(d) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(d || ''); if (!m) return d || '—';
+  try { return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' }); } catch (e) { return d; }
+}
+function safeName(s) { return String(s || '').trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
+function planFileName() {
+  const days = planDraft.entries.map(e => e.day).filter(Boolean).sort();
+  const base = safeName(planDraft.name) || ('plan' + (days.length ? '_' + days[0] + (days[days.length - 1] !== days[0] ? '_' + days[days.length - 1] : '') : ''));
+  return base + '.tabla.json';
+}
+function entryMissing(e) {
+  const all = new Set(); if (MODE_KEYS.includes(e.mode)) topicsOf(e.mode).forEach(t => (state.data[e.mode][t.id] || []).forEach(x => all.add(x.id)));
+  return e.ids.filter(id => !all.has(id)).length;
+}
+const planOpen = new Set();
+function exIndex(mode) {
+  const m = new Map(); topicsOf(mode).forEach(t => (state.data[mode][t.id] || []).forEach((ex, k) => m.set(ex.id, { ex, t, k })));
+  return m;
+}
+function plainQ(q) { return String(q || '').replace(/\$+/g, '').replace(/\\[a-zA-Z]+/g, '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim(); }
+function planEntryHtml(e, i) {
+  const idx = exIndex(e.mode), open = planOpen.has(e);
+  const exs = open ? e.ids.map((id, j) => { const h = idx.get(id); return `<div class="lst-ex"><span class="lst-xn">${h ? esc(h.t.id) + ' · ' + (h.k + 1) + '.' : '?'}</span><span class="lst-xq">${h ? esc(plainQ(h.ex.q).slice(0, 110)) : '<i>exercițiu lipsă din această versiune</i>'}</span><button class="btn ghost" data-lsrmx="${i}:${j}" aria-label="Scoate exercițiul" title="Scoate din această intrare">✕</button></div>`; }).join('') : '';
+  return `<div class="lst-ent" data-i="${i}">
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <input type="date" data-f="day" value="${esc(/^\d{4}-\d\d-\d\d$/.test(e.day) ? e.day : '')}" aria-label="Ziua">
+      <input type="text" data-f="class" list="lsClassList" value="${esc(e.class)}" placeholder="Clasa" style="width:100px" aria-label="Clasa">
+      <button class="btn" data-lsx="${i}" aria-expanded="${open}">${e.ids.length} exerciții ${open ? '▴' : '▾'}</button>
+      <button class="btn ghost" data-lsrm="${i}" aria-label="Elimină intrarea" title="Elimină intrarea din plan">✕</button>
+    </div>
+    <input type="text" data-f="name" value="${esc(e.name)}" placeholder="Secțiunea / numele" style="width:100%;box-sizing:border-box" aria-label="Numele intrării">
+    ${open ? `<div class="lst-exs">${exs || '<div class="lst-empty">Nu mai are exerciții.</div>'}
+      <div class="row" style="gap:6px"><button class="btn" data-lsaddsel="${i}" title="Adaugă în această intrare exercițiile selectate acum în culegere">+ Adaugă selecția curentă</button><button class="btn" data-lsrepl="${i}" title="Înlocuiește exercițiile intrării cu cele selectate acum în culegere">Înlocuiește cu selecția curentă</button></div></div>` : ''}
+  </div>`;
+}
+function updatePlanBtn() { const b = $('#listSaveBtn'); if (b) b.textContent = planDraft.entries.length ? `Plan de exerciții (${planDraft.entries.length})` : 'Plan de exerciții'; }
+function savedClasses() { return lsGet('tabla-list-classes', []); }
+function rememberClass(cls) { if (!cls) return; lsPut('tabla-list-class', cls); const cl = savedClasses().filter(c => c !== cls); cl.unshift(cls); lsPut('tabla-list-classes', cl.slice(0, 30)); }
+function refreshClassList() { const h = savedClasses().map(c => `<option value="${esc(c)}">`).join(''); const dl = $('#lsClassList'); if (dl) dl.innerHTML = h; }
+function renderAskChips() {
+  const cl = savedClasses(), cur = $('#laClass').value.trim();
+  $('#laChips').innerHTML = cl.length ? '<span style="font-size:12.5px;color:var(--ink-2)">Clase folosite:</span>' + cl.map(c => `<span class="lst-chip${c === cur ? ' on' : ''}" style="display:inline-flex;align-items:center;gap:4px"><span data-pick="${esc(c)}" style="cursor:pointer">${esc(c)}</span><span data-forget="${esc(c)}" title="Scoate din listă" style="cursor:pointer;opacity:.6">×</span></span>`).join('') : '<span style="font-size:12.5px;color:var(--ink-2)">Clasele pe care le scrii apar aici, ca să le alegi mai repede data viitoare.</span>';
+}
+function addSelectionToPlan() {
+  const items = selectedItems();
+  if (!items.length) { toast('Bifează întâi exercițiile dorite (pătrățelul din dreptul fiecăruia).'); return; }
+  const askEl = $('#planAsk');
+  if (askEl && askEl.checked) {
+    $('#laInfo').textContent = `${items.length} ${items.length === 1 ? 'exercițiu selectat' : 'exerciții selectate'} (${SHORT[state.mode]}).`;
+    $('#laDay').value = lsGet('tabla-ask-day', '') || tomorrowISO(); $('#laClass').value = selectedClasses(items) || lsGet('tabla-list-class', '');
+    refreshClassList(); renderAskChips();
+    $('#listAsk').classList.add('open'); document.body.style.overflow = 'hidden';
+    setTimeout(() => { $('#laClass').focus(); $('#laClass').select(); }, 30);
+    return;
+  }
+  performAddToPlan(todayISO(), lsGet('tabla-list-class', ''));
+}
+function tomorrowISO() { const d = new Date(); d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function selectedClasses(items) {
+  const ch = MODES[state.mode].chapters || {}, seen = [];
+  items.forEach(({ t }) => { const m = /CLASA A (\S+?)-A/i.exec(ch[t.ch] || ''); if (m && !seen.includes(m[1])) seen.push(m[1]); });
+  return seen.join(', ');
+}
+function closeListAsk() { $('#listAsk').classList.remove('open'); document.body.style.overflow = ''; }
+function confirmAsk() {
+  const day = $('#laDay').value || todayISO(), cls = $('#laClass').value.trim();
+  closeListAsk(); lsPut('tabla-ask-day', day); rememberClass(cls); performAddToPlan(day, cls);
+}
+function performAddToPlan(day, cls) {
+  const items = selectedItems(); if (!items.length) return;
+  const mode = state.mode, by = new Map();
+  items.forEach(({ ex, t }) => { if (!by.has(t.id)) by.set(t.id, { t, ids: [] }); by.get(t.id).ids.push(ex.id); });
+  by.forEach(({ t, ids }) => {
+    const name = `${t.id} ${t.title}`, ex = planDraft.entries.find(e => e.day === day && e.class === cls && e.mode === mode && e.name === name);
+    if (ex) { ids.forEach(id => { if (!ex.ids.includes(id)) ex.ids.push(id); }); } else planDraft.entries.push({ name, day, class: cls, mode, ids });
+  });
+  planSave(); state.sel[mode] = new Set(); savePrefs(); renderAll(); updatePlanBtn();
+  toast(`Adăugat în plan (${fmtDay(day)}${cls ? ' · ' + cls : ''}): ${items.length} exerciții din ${by.size} ${by.size === 1 ? 'secțiune' : 'secțiuni'}. Le editezi în „Plan de exerciții”.`);
+}
+function renderPlanDraft() {
+  const n = state.sel[state.mode].size;
+  $('#lsInfo').textContent = n ? `${n} ${n === 1 ? 'exercițiu selectat' : 'exerciții selectate'} (${SHORT[state.mode]}).` : 'Nu ai exerciții selectate. Selectează-le în culegere, apoi revino aici.';
+  $('#lsAdd').disabled = !n;
+  const es = planDraft.entries.map((e, i) => ({ e, i })).sort((a, b) => (a.e.day || '').localeCompare(b.e.day || '') || (a.e.class || '').localeCompare(b.e.class || ''));
+  $('#lsCount').textContent = es.length ? `(${es.length} ${es.length === 1 ? 'intrare' : 'intrări'})` : '';
+  $('#lsEntries').innerHTML = es.length ? es.map(({ e, i }) => planEntryHtml(e, i)).join('') : '<div class="lst-empty">Planul este gol. Selectează exerciții și apasă „Adaugă la listă”, sau adaugă manual mai sus.</div>';
+  $('#lsPlanName').value = planDraft.name;
+  $('#lsFile').textContent = 'Fișier: ' + planFileName(); updatePlanBtn();
+  $('#lsDownload').disabled = !planDraft.entries.length; $('#lsToFolder').disabled = !planDraft.entries.length; $('#lsReset').disabled = !planDraft.entries.length;
+}
+function openListSave() {
+  $('#lsDay').value = lsGet('tabla-list-day', '') || todayISO();
+  $('#lsClass').value = lsGet('tabla-list-class', ''); $('#lsName').value = '';
+  $('#lsClassList').innerHTML = lsGet('tabla-list-classes', []).map(c => `<option value="${esc(c)}">`).join('');
+  $('#lsToFolder').hidden = !window.showDirectoryPicker;
+  renderPlanDraft();
+  $('#listSave').classList.add('open'); document.body.style.overflow = 'hidden';
+}
+function closeListSave() { $('#listSave').classList.remove('open'); document.body.style.overflow = ''; }
+function addToPlan() {
+  const ids = selectedItems().map(h => h.ex.id); if (!ids.length) return;
+  const day = $('#lsDay').value || todayISO(), cls = $('#lsClass').value.trim(), name = $('#lsName').value.trim();
+  planDraft.entries.push({ name, day, class: cls, mode: state.mode, ids }); planSave();
+  lsPut('tabla-list-day', day); lsPut('tabla-list-class', cls);
+  const cl = lsGet('tabla-list-classes', []).filter(c => c !== cls); if (cls) cl.unshift(cls); lsPut('tabla-list-classes', cl.slice(0, 30));
+  if ($('#lsClear').checked) { state.sel[state.mode] = new Set(); savePrefs(); renderAll(); }
+  $('#lsName').value = ''; renderPlanDraft();
+  toast(`Adăugat în plan: ${fmtDay(day)} · ${cls || '—'} · ${ids.length} exerciții.`);
+}
+function planObject() { return { format: LIST_FMT, version: 2, name: planDraft.name, entries: planDraft.entries, created: new Date().toISOString() }; }
+function downloadPlan() {
+  if (!planDraft.entries.length) return;
+  const blob = new Blob([JSON.stringify(planObject(), null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = planFileName();
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast(`Planul „${planFileName()}” a fost descărcat (${planDraft.entries.length} intrări).`);
+}
+async function savePlanToFolder() {
+  if (!planDraft.entries.length) return;
+  try {
+    let dir = await kvGet('listDir');
+    if (dir && dir.requestPermission) { try { if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') dir = null; } catch (e) { dir = null; } } else dir = null;
+    if (!dir) { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); kvSet('listDir', dir); }
+    const fh = await dir.getFileHandle(planFileName(), { create: true });
+    const w = await fh.createWritable(); await w.write(JSON.stringify(planObject(), null, 1)); await w.close();
+    toast(`Planul a fost salvat în folderul „${dir.name}” (${planDraft.entries.length} intrări).`);
+  } catch (e) { if (e && e.name === 'AbortError') return; toast('Nu am putut salva în folder. Folosește „Descarcă planul”.'); }
+}
+/* ---- citire ---- */
+function parsePlanText(name, text) {
+  try {
+    const d = JSON.parse(text);
+    if (!d || d.format !== LIST_FMT) return null;
+    const raw = Array.isArray(d.entries) ? d.entries : (Array.isArray(d.ids) ? [d] : null); if (!raw) return null;
+    const entries = raw.filter(e => e && Array.isArray(e.ids)).map(e => ({ name: String(e.name || ''), day: String(e.day || ''), class: String(e.class || ''), mode: MODE_KEYS.includes(e.mode) ? e.mode : state.mode, ids: e.ids.map(String) }));
+    return entries.length ? { file: name, name: String(d.name || ''), entries } : null;
+  } catch (e) { return null; }
+}
+async function readListFiles(files) {
+  const plans = []; let ignored = 0;
+  for (const f of files) {
+    if (!/\.json$/i.test(f.name)) continue;
+    let t = ''; try { t = await f.text(); } catch (e) { ignored++; continue; }
+    const P = parsePlanText(f.name, t); if (P) plans.push(P); else ignored++;
+  }
+  listState.plans = plans; listState.ignored = ignored;
+  listState.items = plans.flatMap((P, pi) => P.entries.map(e => ({ ...e, plan: P.name || P.file, pi })));
+  listState.day = ''; listState.cls = '';
+  const t = todayISO(); if (listState.items.some(x => x.day === t)) listState.day = t;
+  renderListOpen(true);
+}
+async function readListDir(dir) {
+  const files = [];
+  try { for await (const [name, h] of dir.entries()) if (h.kind === 'file' && /\.json$/i.test(name)) files.push(await h.getFile()); }
+  catch (e) { toast('Nu am putut citi folderul.'); return; }
+  await readListFiles(files);
+}
+function renderListOpen(loaded) {
+  const items = listState.items;
+  $('#loFilters').hidden = !items.length;
+  const days = [...new Set(items.map(l => l.day))].sort(), classes = [...new Set(items.map(l => l.class))].sort();
+  $('#loDay').value = /^\d{4}-\d\d-\d\d$/.test(listState.day) ? listState.day : '';
+  $('#loClass').innerHTML = '<option value="">Toate clasele</option>' + classes.map(v => `<option value="${esc(v)}">${esc(v || '(fără clasă)')}</option>`).join(''); $('#loClass').value = classes.includes(listState.cls) ? listState.cls : '';
+  $('#loChips').innerHTML = days.length ? '<span style="font-size:12.5px;color:var(--ink-2)">Zile cu liste:</span>' + days.map(d => `<button class="lst-chip${d === listState.day ? ' on' : ''}" data-chip="${esc(d)}">${esc(fmtDay(d))}</button>`).join('') : '';
+  const fd = listState.day, fc = listState.cls;
+  const shown = items.map((l, i) => ({ l, i })).filter(({ l }) => (!fd || l.day === fd) && (!fc || l.class === fc)).sort((a, b) => (a.l.day || '').localeCompare(b.l.day || '') || (a.l.class || '').localeCompare(b.l.class || ''));
+  const st = $('#loStatus');
+  if (loaded) { st.hidden = false; st.textContent = `${listState.plans.length} ${listState.plans.length === 1 ? 'plan găsit' : 'planuri găsite'} · ${items.length} ${items.length === 1 ? 'intrare' : 'intrări'}` + (listState.ignored ? ` · ${listState.ignored} fișiere ignorate (nu sunt planuri)` : ''); }
+  $('#loPlans').innerHTML = listState.plans.length ? '<span style="font-size:12.5px;color:var(--ink-2)">Completează un plan existent:</span>' + listState.plans.map((P, pi) => `<button class="btn" data-editplan="${pi}" style="padding:3px 9px;font-size:12.5px">${esc(P.name || P.file)}</button>`).join('') : '';
+  const sameMode = shown.length && shown.every(({ l }) => l.mode === shown[0].l.mode);
+  $('#loAllRow').hidden = shown.length < 2; $('#loAllRow').style.display = shown.length < 2 ? 'none' : '';
+  $('#loAllInfo').textContent = shown.length >= 2 ? `${shown.length} intrări · ${new Set(shown.flatMap(({ l }) => l.ids)).size} exerciții în total${sameMode ? '' : ' (doar cele din primul nivel)'}` : '';
+  $('#loList').innerHTML = !items.length ? (loaded ? '<div class="lst-empty">Nu am găsit niciun plan în locul ales.</div>' : '') : !shown.length ? `<div class="lst-empty">Nimic planificat${fd ? ' pentru ' + esc(fmtDay(fd)) : ''}${fc ? ', clasa ' + esc(fc) : ''}. Alege altă zi sau apasă „Toate zilele”.</div>` :
+    shown.map(({ l, i }) => { const miss = entryMissing(l); return `<div class="lst-row"><div class="lst-t"><b>${esc(fmtDay(l.day))} · ${esc(l.class || '—')}${l.name ? ' · ' + esc(l.name) : ''}</b><div class="lst-s">${esc(SHORT[l.mode])} · ${l.ids.length} exerciții${l.plan ? ' · ' + esc(l.plan) : ''}${miss ? ` · <span class="miss">${miss} lipsesc din această versiune</span>` : ''}</div></div><button class="btn primary" data-lopen="${i}">Deschide</button><button class="btn" data-ladd="${i}" title="Adaugă exercițiile la selecția curentă">Adaugă</button></div>`; }).join('');
+}
+function applyEntry(L, add) {
+  const mode = L.mode, all = new Set(); topicsOf(mode).forEach(t => (state.data[mode][t.id] || []).forEach(e => all.add(e.id)));
+  const ok = L.ids.filter(id => all.has(id)), miss = L.ids.length - ok.length;
+  if (!ok.length) { toast('Niciun exercițiu din listă nu există în această versiune a culegerii.'); return; }
+  if (mode !== state.mode) setMode(mode);
+  const s = add ? new Set(state.sel[mode]) : new Set(); ok.forEach(id => s.add(id)); state.sel[mode] = s;
+  state.pv = { ...(state.pv || {}), source: 'sel' }; savePrefs(); renderAll(); closeListOpen();
+  toast(`${fmtDay(L.day)} · ${L.class || '—'}: ${ok.length} exerciții selectate` + (miss ? `, ${miss} lipsesc din această versiune.` : '.'));
+  openPreview();
+}
+async function openListOpen() {
+  listState.items = []; listState.plans = []; listState.ignored = 0; listState.day = ''; listState.cls = ''; $('#loStatus').hidden = true; renderListOpen(false);
+  $('#loFolder').hidden = !window.showDirectoryPicker; $('#loLast').hidden = true;
+  if (window.showDirectoryPicker) { try { const h = await kvGet('listDir'); if (h && h.name) { $('#loLast').hidden = false; $('#loLast').textContent = `Folderul „${h.name}” (de data trecută)`; } } catch (e) {} }
+  $('#listOpen').classList.add('open'); document.body.style.overflow = 'hidden';
+}
+function closeListOpen() { $('#listOpen').classList.remove('open'); document.body.style.overflow = ''; }
+function initLists() {
+  $('#listSaveBtn').addEventListener('click', openListSave); $('#listOpenBtn').addEventListener('click', openListOpen);
+  $$('#listSave [data-lsclose]').forEach(b => b.addEventListener('click', closeListSave)); $$('#listOpen [data-loclose]').forEach(b => b.addEventListener('click', closeListOpen));
+  document.addEventListener('change', e => { if (e.target.id === 'planAsk') lsPut('tabla-plan-ask', e.target.checked); });
+  $$('#listAsk [data-laclose]').forEach(b => b.addEventListener('click', closeListAsk)); $('#laOk').addEventListener('click', confirmAsk);
+  $('#laClass').addEventListener('input', renderAskChips);
+  $('#listAsk').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); confirmAsk(); } });
+  $('#laChips').addEventListener('click', e => {
+    const f = e.target.closest('[data-forget]'); if (f) { lsPut('tabla-list-classes', savedClasses().filter(c => c !== f.dataset.forget)); refreshClassList(); renderAskChips(); return; }
+    const pk = e.target.closest('[data-pick]'); if (pk) { $('#laClass').value = pk.dataset.pick; renderAskChips(); }
+  });
+  $('#lsAdd').addEventListener('click', addToPlan); $('#lsDownload').addEventListener('click', downloadPlan); $('#lsToFolder').addEventListener('click', savePlanToFolder);
+  $('#lsPlanName').addEventListener('input', e => { planDraft.name = e.target.value; planSave(); $('#lsFile').textContent = 'Fișier: ' + planFileName(); });
+  $('#lsReset').addEventListener('click', () => { if (!confirm('Golești tot planul?')) return; planDraft = { name: '', entries: [] }; planSave(); renderPlanDraft(); });
+  $('#lsEntries').addEventListener('click', e => {
+    const q = (a) => e.target.closest(a); let b;
+    if ((b = q('[data-lsrm]'))) { const en = planDraft.entries[+b.dataset.lsrm]; planOpen.delete(en); planDraft.entries.splice(+b.dataset.lsrm, 1); planSave(); renderPlanDraft(); return; }
+    if ((b = q('[data-lsx]'))) { const en = planDraft.entries[+b.dataset.lsx]; if (planOpen.has(en)) planOpen.delete(en); else planOpen.add(en); renderPlanDraft(); return; }
+    if ((b = q('[data-lsrmx]'))) { const [i, j] = b.dataset.lsrmx.split(':').map(Number); planDraft.entries[i].ids.splice(j, 1); planSave(); renderPlanDraft(); return; }
+    if ((b = q('[data-lsaddsel]')) || (b = q('[data-lsrepl]'))) {
+      const repl = b.hasAttribute('data-lsrepl'), i = +(b.dataset.lsaddsel ?? b.dataset.lsrepl), en = planDraft.entries[i];
+      const ids = selectedItems().map(h => h.ex.id); if (!ids.length) { toast('Nu ai exerciții selectate în culegere.'); return; }
+      if (en.mode !== state.mode) { toast('Selecția curentă este din alt nivel (Primar/Gimnaziu/Liceu) decât intrarea.'); return; }
+      en.ids = repl ? ids : [...en.ids, ...ids.filter(id => !en.ids.includes(id))]; planSave(); renderPlanDraft(); return;
+    }
+  });
+  $('#lsEntries').addEventListener('input', e => { const f = e.target.dataset.f; if (!f) return; const i = +e.target.closest('.lst-ent').dataset.i; planDraft.entries[i][f] = e.target.value.trim ? e.target.value.trim() : e.target.value; planSave(); $('#lsFile').textContent = 'Fișier: ' + planFileName(); if (f === 'class' && e.target.value.trim()) lsPut('tabla-list-class', e.target.value.trim()); });
+  $('#lsEntries').addEventListener('change', e => { if (e.target.dataset.f === 'day') renderPlanDraft(); });
+  updatePlanBtn();
+  $('#loFiles').addEventListener('click', () => $('#loInput').click());
+  $('#loInput').addEventListener('change', async e => { await readListFiles([...e.target.files]); e.target.value = ''; });
+  $('#loFolder').addEventListener('click', async () => { try { const dir = await window.showDirectoryPicker(); kvSet('listDir', dir); await readListDir(dir); } catch (e) { if (!e || e.name !== 'AbortError') toast('Nu am putut deschide folderul.'); } });
+  $('#loLast').addEventListener('click', async () => { try { const dir = await kvGet('listDir'); if ((await dir.requestPermission({ mode: 'read' })) === 'granted') await readListDir(dir); else toast('Fără permisiune nu pot citi folderul.'); } catch (e) { toast('Nu am putut deschide folderul. Alege-l din nou.'); } });
+  $('#loDay').addEventListener('change', e => { listState.day = e.target.value; renderListOpen(false); });
+  $('#loToday').addEventListener('click', () => { listState.day = todayISO(); renderListOpen(false); });
+  $('#loAllDays').addEventListener('click', () => { listState.day = ''; renderListOpen(false); });
+  $('#loClass').addEventListener('change', e => { listState.cls = e.target.value; renderListOpen(false); });
+  $('#loAll').addEventListener('click', () => { const fd = listState.day, fc = listState.cls; const sh = listState.items.filter(l => (!fd || l.day === fd) && (!fc || l.class === fc)); if (!sh.length) return; const mode = sh[0].mode, ids = []; sh.filter(l => l.mode === mode).forEach(l => l.ids.forEach(id => { if (!ids.includes(id)) ids.push(id); })); applyEntry({ mode, ids, day: fd || sh[0].day, class: fc || sh[0].class, name: '' }, false); });
+  $('#loChips').addEventListener('click', e => { const b = e.target.closest('[data-chip]'); if (!b) return; listState.day = listState.day === b.dataset.chip ? '' : b.dataset.chip; renderListOpen(false); });
+  $('#loPlans').addEventListener('click', e => { const b = e.target.closest('[data-editplan]'); if (!b) return; const P = listState.plans[+b.dataset.editplan]; planDraft = { name: P.name, entries: P.entries.map(x => ({ ...x })) }; planSave(); closeListOpen(); openListSave(); toast('Planul a fost încărcat. Poți adăuga sau elimina intrări.'); });
+  $('#loList').addEventListener('click', e => { const b = e.target.closest('[data-lopen],[data-ladd]'); if (!b) return; const add = b.hasAttribute('data-ladd'); applyEntry(listState.items[+(b.dataset.lopen ?? b.dataset.ladd)], add); });
+}
 let bkT;
 function bulkPreview() {
   clearTimeout(bkT);
@@ -8752,7 +9072,7 @@ function addRule(tid) {
   const cap = (d, n) => Math.min(n, rulePool(tid, d).length);
   const ex = r.find(x => x.tid === tid);
   if (ex) { toast('Secțiunea este deja în fișa aleatorie. Modifică numerele în previzualizare.'); return; }
-  r.push({ tid, u: cap('usor', 3), m: cap('mediu', 2), g: cap('greu', 1) });
+  r.push({ tid, u: cap('usor', 3), m: cap('mediu', 2), g: cap('greu', 1), o: 0 });
   setRecipe(r);
   state.pv = { ...(state.pv || {}), source: 'rand' }; savePrefs();
   const x = r[r.length - 1];
@@ -8769,8 +9089,8 @@ function renderRules() {
     ${r.length ? '' : '<p class="rl-empty">Adaugă cel puțin o secțiune. Poți folosi și butonul „Aleatoriu” din antetul oricărei secțiuni.</p>'}
     ${r.map((x, i) => `<div class="rl-row" data-i="${i}">
       <select class="sel sm" data-k="tid">${topics.map(t => `<option value="${esc(t.id)}" ${t.id === x.tid ? 'selected' : ''}>${esc(t.id)} ${esc(t.title)}</option>`).join('')}</select>
-      ${[['u', 'usor', 'de bază'], ['m', 'mediu', 'consolidate'], ['g', 'greu', 'avansate']].map(([k, d, l]) =>
-        `<label class="rl-n"><span class="dot d-${d}"></span><input type="number" min="0" max="${cnt(x.tid, d)}" value="${Math.min(x[k], cnt(x.tid, d))}" data-k="${k}"> ${l} <small>/ ${cnt(x.tid, d)}</small></label>`).join('')}
+      ${[['u', 'usor', 'de bază'], ['m', 'mediu', 'consolidate'], ['g', 'greu', 'avansate'], ['o', 'olimp', 'de olimpiadă']].map(([k, d, l]) =>
+        `<label class="rl-n"><span class="dot d-${d}"></span><input type="number" min="0" max="${cnt(x.tid, d)}" value="${Math.min(x[k] || 0, cnt(x.tid, d))}" data-k="${k}"> ${l} <small>/ ${cnt(x.tid, d)}</small></label>`).join('')}
       <button class="icon-btn danger" data-rm="${i}" aria-label="Elimină secțiunea">✕</button>
     </div>`).join('')}
     <div class="rl-add">
@@ -8783,7 +9103,7 @@ function renderRules() {
       </select>
       ${state.sel[mode].size ? '<button class="btn sm" id="rlFromSel" title="Adaugă câte o regulă pentru fiecare secțiune din care ai exerciții selectate">Adaugă secțiunile din selecție</button>' : ''}
     </div>`;
-  const tot = r.reduce((n, x) => n + (+x.u || 0) + (+x.m || 0) + (+x.g || 0), 0);
+  const tot = r.reduce((n, x) => n + (+x.u || 0) + (+x.m || 0) + (+x.g || 0) + (+x.o || 0), 0);
   $('#rlSum').textContent = r.length ? `${tot} exerciții pe fiecare fișă` : '';
 }
 function readRules() {
@@ -8791,7 +9111,7 @@ function readRules() {
     const g = k => $(`[data-k="${k}"]`, row);
     const tid = g('tid').value;
     const lim = (k, d) => Math.max(0, Math.min(parseInt(g(k).value, 10) || 0, rulePool(tid, d).length));
-    return { tid, u: lim('u', 'usor'), m: lim('m', 'mediu'), g: lim('g', 'greu') };
+    return { tid, u: lim('u', 'usor'), m: lim('m', 'mediu'), g: lim('g', 'greu'), o: lim('o', 'olimp') };
   });
   setRecipe(r);
 }
@@ -8806,12 +9126,13 @@ function pvOpts() {
     space: parseFloat($('#pvSpace').value) || 0,
     source: $('#pvSource').value,
     count: Math.max(1, Math.min(40, parseInt($('#pvCount').value, 10) || 1)),
-    shuffle: $('#pvShuffle').checked
+    shuffle: $('#pvShuffle').checked,
+    marks: $('#pvMarks').checked
   };
 }
 function storePv() {
   const o = pvOpts();
-  state.pv = { ...(state.pv || {}), ans: o.ans, nameLine: o.nameLine, labels: o.labels, srcs: o.srcs, space: o.space, source: o.source, count: o.count, shuffle: o.shuffle };
+  state.pv = { ...(state.pv || {}), ans: o.ans, nameLine: o.nameLine, labels: o.labels, srcs: o.srcs, space: o.space, source: o.source, count: o.count, shuffle: o.shuffle, marks: o.marks };
   savePrefs();
 }
 function renderSelRand() {
@@ -8820,16 +9141,16 @@ function renderSelRand() {
   box.innerHTML = `<div class="rl-h"><b>Alegere aleatorie din cele ${n} exerciții selectate</b><span class="rl-sum" id="srSum"></span></div>
     <div class="rl-row">
       <span class="sel-l">Pe fiecare fișă:</span>
-      ${[['u', 'usor', 'de bază'], ['m', 'mediu', 'consolidate'], ['g', 'greu', 'avansate']].map(([k, d, l]) =>
+      ${[['u', 'usor', 'de bază'], ['m', 'mediu', 'consolidate'], ['g', 'greu', 'avansate'], ['o', 'olimp', 'de olimpiadă']].map(([k, d, l]) =>
         `<label class="rl-n"><span class="dot d-${d}"></span><input type="number" min="0" max="${cnt(d)}" value="${Math.min(c[k], cnt(d))}" data-sr="${k}"> ${l} <small>din ${cnt(d)}</small></label>`).join('')}
     </div>
     <p class="rl-empty">Fiecare fișă primește alte exerciții, alese la întâmplare din selecția ta. „Alt amestec” generează altă variantă.</p>`;
-  const tot = ['u', 'm', 'g'].reduce((a, k) => a + Math.min(c[k], cnt({ u: 'usor', m: 'mediu', g: 'greu' }[k])), 0);
+  const tot = ['u', 'm', 'g', 'o'].reduce((a, k) => a + Math.min(c[k], cnt({ u: 'usor', m: 'mediu', g: 'greu', o: 'olimp' }[k])), 0);
   $('#srSum').textContent = `${tot} exerciții pe fiecare fișă`;
 }
 function readSelRand() {
   const g = k => Math.max(0, parseInt($(`#pvSelRand [data-sr="${k}"]`).value, 10) || 0);
-  state.pv = { ...(state.pv || {}), selr: { u: g('u'), m: g('m'), g: g('g') } }; savePrefs();
+  state.pv = { ...(state.pv || {}), selr: { u: g('u'), m: g('m'), g: g('g'), o: g('o') } }; savePrefs();
 }
 function syncPvSourceUI() {
   const src = $('#pvSource').value, rand = src === 'rand';
@@ -8855,6 +9176,7 @@ function openPreview() {
   $('#pvSource').value = !nSel ? 'rand' : (p.source === 'selrand' ? 'selrand' : (p.source === 'rand' && nRec ? 'rand' : 'sel'));
   $('#pvCount').value = String(p.count || 1);
   $('#pvShuffle').checked = !!p.shuffle;
+  $('#pvMarks').checked = p.marks !== false;
   state.pvSeed = (Math.random() * 2 ** 31) | 0;
   syncPvSourceUI();
   $('#pv').classList.add('open');
@@ -8877,7 +9199,7 @@ async function waitImages(root) {
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
 
 // conținutul fiecărei fișe
-function selRand() { const p = (state.pv && state.pv.selr) || {}; return { u: p.u ?? 3, m: p.m ?? 2, g: p.g ?? 1 }; }
+function selRand() { const p = (state.pv && state.pv.selr) || {}; return { u: p.u ?? 3, m: p.m ?? 2, g: p.g ?? 1, o: p.o ?? 0 }; }
 function selPool(diff) { return selectedItems().filter(({ ex }) => (ex.diff || 'usor') === diff); }
 function buildSheets(o) {
   const sheets = [];
@@ -8886,7 +9208,7 @@ function buildSheets(o) {
     for (let k = 0; k < o.count; k++) {
       const rand = rng(state.pvSeed + k * 7919);
       let items = [];
-      [['usor', c.u], ['mediu', c.m], ['greu', c.g]].forEach(([d, n]) => { items.push(...shuffled(selPool(d), rand).slice(0, n)); });
+      [['usor', c.u], ['mediu', c.m], ['greu', c.g], ['olimp', c.o]].forEach(([d, n]) => { items.push(...shuffled(selPool(d), rand).slice(0, n)); });
       if (o.shuffle) items = shuffled(items, rand);
       sheets.push(items);
     }
@@ -8897,7 +9219,7 @@ function buildSheets(o) {
       let items = [];
       r.forEach(x => {
         const t = topicById(state.mode, x.tid); if (!t) return;
-        [['usor', x.u], ['mediu', x.m], ['greu', x.g]].forEach(([d, n]) => {
+        [['usor', x.u], ['mediu', x.m], ['greu', x.g], ['olimp', x.o || 0]].forEach(([d, n]) => {
           shuffled(rulePool(x.tid, d), rand).slice(0, n).forEach(ex => items.push({ ex, t }));
         });
       });
@@ -8964,7 +9286,7 @@ async function buildPreviewInner(id) {
   pvSol.clear();
   const total = sheets.reduce((n, s) => n + s.length, 0);
   if (!total) {
-    body.innerHTML = `<p class="pv-empty">${o.source === 'rand' ? 'Fișa aleatorie nu are încă exerciții: adaugă o secțiune și alege câte exerciții de fiecare nivel.' : o.source === 'selrand' ? 'Alege câte exerciții de bază, consolidate și avansate să fie extrase din selecție (cel puțin unul).' : 'Nu ai selectat niciun exercițiu.'}</p>`;
+    body.innerHTML = `<p class="pv-empty">${o.source === 'rand' ? 'Fișa aleatorie nu are încă exerciții: adaugă o secțiune și alege câte exerciții de fiecare nivel.' : o.source === 'selrand' ? 'Alege câte exerciții de bază, consolidate, avansate și de olimpiadă să fie extrase din selecție (cel puțin unul).' : 'Nu ai selectat niciun exercițiu.'}</p>`;
     $('#pvInfo').textContent = SHORT[mode]; $('#pvPdf').disabled = true; return;
   }
   body.innerHTML = '<p class="pv-empty">Se pregătește previzualizarea…</p>';
@@ -9064,6 +9386,7 @@ async function makePdf(btn) {
       const clone = pages[i].cloneNode(true);
       clone.style.transform = 'none';
       host.innerHTML = ''; host.appendChild(clone);
+      rasterizeFormulas(clone);
       await withTimeout(waitImages(clone), 3000);
       const canvas = await html2canvas(clone, {
         scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true,
@@ -9225,6 +9548,7 @@ function bind() {
     if (b.dataset.diff) { state.diff = b.dataset.diff; state.page = 0; renderMain(); return; }
     if (b.dataset.goto) { if (state.srcF === 'sort') state.srcF = 'exam'; return goTopic(b.dataset.goto); }
     if (b.dataset.act === 'new') return openEditor(state.active[state.mode]);
+    if (b.dataset.act === 'plan') return addSelectionToPlan();
     if (b.dataset.act === 'bulk') return openBulk();
     if (b.dataset.act === 'rand') return addRule(state.active[state.mode]);
     if (b.dataset.dsel) return onDiffSel(b);
@@ -9256,7 +9580,7 @@ function bind() {
     if (e.target.id === 'pvRsrc') { state.pv = { ...(state.pv || {}), rsrc: e.target.value }; savePrefs(); readRules(); renderRules(); buildPreview(); return; }
     readRules(); if (e.target.dataset.k === 'tid') renderRules(); buildPreview();
   });
-  pvR.addEventListener('input', e => { if (e.target.type !== 'number') return; clearTimeout(rT2); rT2 = setTimeout(() => { readRules(); const r = recipe(); $('#rlSum').textContent = `${r.reduce((n, x) => n + x.u + x.m + x.g, 0)} exerciții pe fiecare fișă`; buildPreview(); }, 350); });
+  pvR.addEventListener('input', e => { if (e.target.type !== 'number') return; clearTimeout(rT2); rT2 = setTimeout(() => { readRules(); const r = recipe(); $('#rlSum').textContent = `${r.reduce((n, x) => n + x.u + x.m + x.g + (x.o || 0), 0)} exerciții pe fiecare fișă`; buildPreview(); }, 350); });
   pvR.addEventListener('click', e => {
     const rm = e.target.closest('[data-rm]');
     if (rm) { const r = recipe().slice(); r.splice(+rm.dataset.rm, 1); setRecipe(r); renderRules(); buildPreview(); return; }
@@ -9264,12 +9588,12 @@ function bind() {
       const used = new Set(recipe().map(x => x.tid)), add = [];
       selectedItems().forEach(({ t }) => { if (!used.has(t.id)) { used.add(t.id); add.push(t.id); } });
       if (!add.length) { toast('Toate secțiunile din selecție sunt deja adăugate.'); return; }
-      const rules = add.map(tid => { const cap = (d, n) => Math.min(n, rulePool(tid, d).length); return { tid, u: cap('usor', 1), m: cap('mediu', 1), g: cap('greu', 0) }; });
+      const rules = add.map(tid => { const cap = (d, n) => Math.min(n, rulePool(tid, d).length); return { tid, u: cap('usor', 1), m: cap('mediu', 1), g: cap('greu', 0), o: 0 }; });
       setRecipe([...recipe(), ...rules]); renderRules(); buildPreview();
       toast(`Am adăugat ${add.length} ${add.length === 1 ? 'secțiune' : 'secțiuni'}. Ajustează numerele pentru fiecare.`);
     }
   });
-  ['pvAns', 'pvNameLine', 'pvLabels', 'pvSrc', 'pvSpace'].forEach(id => $('#' + id).addEventListener('change', () => { storePv(); buildPreview(); }));
+  ['pvAns', 'pvNameLine', 'pvLabels', 'pvSrc', 'pvSpace', 'pvMarks'].forEach(id => $('#' + id).addEventListener('change', () => { storePv(); buildPreview(); }));
   let pvT; $('#pvName').addEventListener('input', () => { clearTimeout(pvT); pvT = setTimeout(() => { storePv(); buildPreview(); }, 350); });
   $('#pvPdf').addEventListener('click', downloadPdf);
   $('#pvBoard').addEventListener('click', sendToBoard);
@@ -9321,7 +9645,7 @@ function bind() {
     menu.classList.remove('open');
     ({
       'export': exportJSON, 'import': () => $('#importFile').click(),
-      'restore': restoreSeeds, 'bulk': openBulk, 'theme': toggleTheme
+      'restore': restoreSeeds, 'bulk': openBulk, 'theme': toggleTheme, 'newex': () => openEditor(state.active[state.mode])
     })[b.dataset.act]();
   });
   $('#importFile').addEventListener('change', e => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ''; });
@@ -9335,6 +9659,7 @@ function bind() {
   ['bkText', 'bkDiff', 'bkProf'].forEach(id => $('#' + id).addEventListener('input', bulkPreview));
   $('#bkSave').addEventListener('click', saveBulk);
   $$('#bulk [data-bclose]').forEach(b => b.addEventListener('click', closeBulk));
+  initLists();
   $('#imgFile').addEventListener('change', e => { addFiles(ed.focus, e.target.files); e.target.value = ''; });
   $('#editor').addEventListener('click', e => {
     const rm = e.target.closest('[data-rm]'); if (!rm) return;
@@ -9349,6 +9674,9 @@ function bind() {
     if (e.key === 'Escape') {
       if ($('#lightbox').classList.contains('open')) return $('#lightbox').classList.remove('open');
       if ($('#editor').classList.contains('open')) return closeEditor();
+      if ($('#listAsk').classList.contains('open')) return closeListAsk();
+      if ($('#listSave').classList.contains('open')) return closeListSave();
+      if ($('#listOpen').classList.contains('open')) return closeListOpen();
       if ($('#bulk').classList.contains('open')) return closeBulk();
       if ($('#pv').classList.contains('open')) return closePreview();
       closeNav();
@@ -9374,6 +9702,23 @@ function bind() {
   if (window.MathJax && MathJax.startup && MathJax.startup.promise && MathJax.tex2svg) window.__mjReady();
 })();
 
+/* Formulele MathJax sunt <svg> în pagină. html2canvas le procesează foarte lent (~50 ms fiecare); transformate
+   în <img> cu data URL, aceeași formulă se randează de ~10 ori mai repede. Se aplică doar pe copiile de randare. */
+function rasterizeFormulas(root) {
+  $$('span.m svg', root).forEach(svg => {
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const cs = getComputedStyle(svg), x = svg.cloneNode(true);
+    x.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    x.setAttribute('width', r.width.toFixed(2) + 'px'); x.setAttribute('height', r.height.toFixed(2) + 'px');
+    x.setAttribute('style', 'color:' + cs.color);   // formulele folosesc currentColor
+    const im = new Image();
+    im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(x));
+    im.alt = '';
+    im.style.cssText = `width:${r.width.toFixed(2)}px;height:${r.height.toFixed(2)}px;vertical-align:${cs.verticalAlign};display:${cs.display};margin:${cs.margin}`;
+    svg.replaceWith(im);
+  });
+}
 /* ---------- integrare directă cu tabla interactivă (strat încorporat) ---------- */
 // Randăm paginile fișei ca imagini (fără PDF) și le trimitem tablei părinte; opțional, trimitem un PDF.
 async function makeImages(btn, scale) {
@@ -9390,6 +9735,7 @@ async function makeImages(btn, scale) {
       const clone = pages[i].cloneNode(true);
       clone.style.transform = 'none';
       host.innerHTML = ''; host.appendChild(clone);
+      rasterizeFormulas(clone);
       await withTimeout(waitImages(clone), 3000);
       const canvas = await html2canvas(clone, {
         scale: scale || 2, backgroundColor: '#ffffff', logging: false, useCORS: true,
@@ -9408,7 +9754,7 @@ async function makeImages(btn, scale) {
 // Când fișa se trimite pe tablă FĂRĂ răspunsuri, trimitem separat rezolvările: pentru fiecare exercițiu, poziția
 // numărului pe pagină (fracții din pagină) și o imagine cu rezolvarea. Tabla pune în fața numărului o bifă care o arată.
 async function collectMarks(btn) {
-  if (pvOpts().ans !== 'none' || !window.html2canvas) return [];
+  if (pvOpts().ans !== 'none' || !pvOpts().marks || !window.html2canvas) return [];
   const pages = $$('#pvBody .pg'), host = $('#pdfHost'), found = [];
   pages.forEach((pg, p) => {
     const pr = pg.getBoundingClientRect(); if (!pr.width) return;
@@ -9425,23 +9771,56 @@ async function collectMarks(btn) {
   const label = btn.textContent;
   const keep = el => el === host || host.contains(el) || el.contains(host) || el.tagName === 'HEAD' || !!(el.closest && el.closest('head'));
   const cache = new Map(), out = [];
+  // Rezolvările unice (același exercițiu apare o singură dată); randarea lor ca imagini e partea cea mai lentă,
+  // pentru că html2canvas copiază tot documentul la fiecare apel. De aceea le randăm în loturi: mai multe
+  // rezolvări puse una sub alta într-un singur apel, apoi decupate în imagini separate.
+  const todo = [], seenK = new Set();
+  found.forEach(f => { const key = f.ex.id + ':' + f.n; if (!seenK.has(key)) { seenK.add(key); todo.push({ key, ex: f.ex }); } });
+  const mkWrap = ex => {
+    const wrap = document.createElement('div'); wrap.className = 'pg sol-pg';
+    wrap.style.cssText = 'height:auto;width:620px;padding:14px 20px 16px;border:2px solid #2F7A4E;border-radius:10px;overflow:visible';
+    wrap.innerHTML = `<div class="pb-a" style="margin:0"><div class="r" style="font-size:16px">${rich(ex.a)}</div>${imgsHtml(ex.aImgs)}</div>`;
+    return wrap;
+  };
+  const H2C = { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true, windowWidth: PG_W, imageTimeout: 0, ignoreElements: el => !keep(el) };
+  const renderOne = async t => {              // varianta de rezervă: o rezolvare pe apel
+    const wrap = mkWrap(t.ex);
+    host.innerHTML = ''; host.appendChild(wrap);
+    typeset(wrap); rasterizeFormulas(wrap);
+    await withTimeout(waitImages(wrap), 3000);
+    const canvas = await html2canvas(wrap, H2C);
+    cache.set(t.key, canvas.toDataURL('image/jpeg', 0.92));
+  };
+  const MAXH = 5000;   // înălțime maximă (px CSS) a unui lot — rămâne sub limita canvasului
   try {
-    for (let i = 0; i < found.length; i++) {
-      const f = found[i];
-      btn.textContent = `Rezolvări ${i + 1} din ${found.length}…`;
-      let img = cache.get(f.ex.id + ':' + f.n);
-      if (!img) {
-        const wrap = document.createElement('div'); wrap.className = 'pg sol-pg';
-        wrap.style.cssText = 'height:auto;width:620px;padding:14px 20px 16px;border:2px solid #2F7A4E;border-radius:10px;overflow:visible';
-        wrap.innerHTML = `<div class="pb-a" style="margin:0"><div class="r" style="font-size:16px">${rich(f.ex.a)}</div>${imgsHtml(f.ex.aImgs)}</div>`;
-        host.innerHTML = ''; host.appendChild(wrap);
-        typeset(wrap);
-        await withTimeout(waitImages(wrap), 3000);
-        const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true, windowWidth: PG_W, imageTimeout: 0, ignoreElements: el => !keep(el) });
-        img = canvas.toDataURL('image/jpeg', 0.92); cache.set(f.ex.id + ':' + f.n, img);
+    let i = 0;
+    while (i < todo.length) {
+      btn.textContent = `Rezolvări ${i + 1} din ${todo.length}…`;
+      const box = document.createElement('div'); box.style.cssText = 'width:660px;background:#fff';
+      host.innerHTML = ''; host.appendChild(box);
+      const batch = [];
+      while (i < todo.length && (!batch.length || box.offsetHeight < MAXH)) {
+        const t = todo[i++], wrap = mkWrap(t.ex);
+        wrap.style.margin = '0 0 12px 0';
+        box.appendChild(wrap); typeset(wrap); batch.push({ t, wrap });
       }
-      out.push({ page: f.page, n: f.n, x: f.x, y: f.y, w: f.w, h: f.h, img });
+      try {
+        rasterizeFormulas(box);
+        await withTimeout(waitImages(box), 3000);
+        const canvas = await html2canvas(box, H2C), br = box.getBoundingClientRect(), k = canvas.width / (br.width || 1);
+        batch.forEach(({ t, wrap }) => {
+          const r = wrap.getBoundingClientRect(), c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(r.width * k)); c.height = Math.max(1, Math.round(r.height * k));
+          const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+          cx.drawImage(canvas, Math.round((r.left - br.left) * k), Math.round((r.top - br.top) * k), c.width, c.height, 0, 0, c.width, c.height);
+          cache.set(t.key, c.toDataURL('image/jpeg', 0.92));
+        });
+      } catch (e) {
+        console.warn('lot de rezolvări', e);
+        for (const { t } of batch) { if (!cache.has(t.key)) await renderOne(t); }
+      }
     }
+    found.forEach(f => out.push({ page: f.page, n: f.n, x: f.x, y: f.y, w: f.w, h: f.h, img: cache.get(f.ex.id + ':' + f.n) }));
   } catch (e) { console.warn(e); }
   finally { host.innerHTML = ''; btn.textContent = label; }
   return out;

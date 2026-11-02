@@ -1,6 +1,14 @@
 // ====================================================================
 // I18N — sistem de traducere Română (implicit) / Engleză
 // ====================================================================
+// setPointerCapture aruncă o excepție dacă pointerul a fost anulat/pierdut între timp
+// (ex. gest tactil întrerupt) — o înlocuim global cu o variantă care o ignoră.
+(function () {
+  const orig = Element.prototype.setPointerCapture;
+  if (!orig) return;
+  Element.prototype.setPointerCapture = function (id) { try { return orig.call(this, id); } catch (err) { /* pointer inactiv */ } };
+})();
+
 let LANG = (function () {
   try {
     const saved = localStorage.getItem('wb-lang');
@@ -219,6 +227,7 @@ const UI_TEXT = {
   'Șterge doar ce ai scris pe fișa PDF': 'Clear only what you wrote on the PDF sheet',
   'Exportă fișa PDF cu adnotațiile tale, ca fișier nou': 'Export the PDF sheet with your annotations, as a new file',
   'Închide': 'Close',
+  'Cronometru cu alarmă': 'Timer with alarm',
   'ex: x^2 - 3x + 2': 'e.g. x^2 - 3x + 2',
   'Scrie text...': 'Type text...',
   'Limbă / Language': 'Language / Limbă'
@@ -382,6 +391,7 @@ function applyStaticUI() {
   setBtnText('btn-help', 'Ajutor', 'Help');
   setBtnText('btn-license', 'Licență', 'License');
   setElText('calc-header-title', '🧮 Calculator', '🧮 Calculator');
+  if (window.refreshTimerLabels) window.refreshTimerLabels();
   setElText('text-header-title', '✎ Text', '✎ Text');
   setElText('sessions-header-title', '💾 Sesiuni salvate', '💾 Saved sessions');
   setBtnText('sessions-save-btn', '+ Salvează', '+ Save');
@@ -624,10 +634,19 @@ function zoomBoardAtPoint(factor, clientX, clientY) {
   boardPanY = localY - worldY * z1;
 }
 
+// Mutările de pointer vin mai des decât cadrele afișate: grupăm reîmprospătarea
+// (redesenare completă a tablei) într-una singură per cadru.
+let boardRefreshPending = false;
+function refreshBoardViewSoon() {
+  if (boardRefreshPending) return;
+  boardRefreshPending = true;
+  requestAnimationFrame(() => { boardRefreshPending = false; refreshBoardView(); });
+}
+
 function panBoardBy(dx, dy) {
   boardPanX += dx;
   boardPanY += dy;
-  refreshBoardView();
+  refreshBoardViewSoon();
 }
 
 // Instrumentele geometrice (riglă/echer/raportor/compas) sunt desenate în
@@ -684,6 +703,27 @@ let trackedAxesStroke = null;
 let trackedAxesPage = null;
 let trackedAxesSurface = null;
 
+// Bifa „123" stă implicit în colțul din stânga-jos al sistemului de axe
+// selectat (în interiorul chenarului de selecție); poate fi mutată prin
+// tragere, iar deplasarea se păstrează relativ la axe.
+const axesToggleOffset = { x: 0, y: 0 };
+const axesToggleAnchor = { x: 0, y: 0 };
+let axesToggleLastStroke = null;
+function positionAxesToggle() {
+  const toggle = document.getElementById('axes-numbers-toggle');
+  if (!toggle || toggle.style.display === 'none' || !trackedAxesStroke) return;
+  if (axesToggleLastStroke !== trackedAxesStroke) { axesToggleLastStroke = trackedAxesStroke; axesToggleOffset.x = 0; axesToggleOffset.y = 0; }
+  const bb = getStrokeBoundingBox(trackedAxesStroke);
+  const p = geoContentToScreen({ x: bb.x, y: bb.y + bb.h }, trackedAxesSurface);
+  const ws = document.getElementById('workspace').getBoundingClientRect();
+  const h = toggle.offsetHeight || 28;
+  axesToggleAnchor.x = ws.left + p.x + 16;
+  axesToggleAnchor.y = ws.top + p.y - h - 12;
+  const maxX = window.innerWidth - toggle.offsetWidth - 4, maxY = window.innerHeight - h - 4;
+  toggle.style.left = Math.max(4, Math.min(maxX, axesToggleAnchor.x + axesToggleOffset.x)) + 'px';
+  toggle.style.top = Math.max(4, Math.min(maxY, axesToggleAnchor.y + axesToggleOffset.y)) + 'px';
+}
+
 function updateAxesTogglePosition() {
   const toggle = document.getElementById('axes-numbers-toggle');
   const check = document.getElementById('axes-numbers-check');
@@ -715,6 +755,7 @@ function updateAxesTogglePosition() {
   check.checked = hasNumbers;
   axesShowNumbers = hasNumbers;
   toggle.style.display = 'flex';
+  positionAxesToggle();
 }
 
 // Fereastra bifei se poate muta liber, prin tragere — la fel ca fereastra
@@ -736,6 +777,10 @@ function updateAxesTogglePosition() {
     if (!dragging) return;
     toggle.style.left = (startLeft + (e.clientX - startX)) + 'px';
     toggle.style.top = (startTop + (e.clientY - startY)) + 'px';
+    // Reținem deplasarea față de colțul sistemului de axe, ca bifa să rămână
+    // acolo unde ai mutat-o, relativ la axe, chiar dacă le muți sau le zoomezi.
+    axesToggleOffset.x = (startLeft + (e.clientX - startX)) - axesToggleAnchor.x;
+    axesToggleOffset.y = (startTop + (e.clientY - startY)) - axesToggleAnchor.y;
   });
   toggle.addEventListener('pointerup', () => { dragging = false; });
 })();
@@ -4030,6 +4075,7 @@ function drawSelectionHighlights() {
   
   selCtx.setLineDash([]);
   selCtx.restore();
+  positionAxesToggle();
 
   // Mâner de scalare și de ștergere — vizibile la ORICE selecție (unul sau
   // mai multe stroke-uri), calculate pe bbox-ul COMBINAT al tuturor
@@ -5714,7 +5760,7 @@ boardDrawC.addEventListener('pointermove', function(e) {
         zoomBoardAtPoint(factor, mid.x, mid.y);
         boardPanX += (mid.x - boardPinchLastMid.x);
         boardPanY += (mid.y - boardPinchLastMid.y);
-        refreshBoardView();
+        refreshBoardViewSoon();
       }
       boardPinchLastDist = dist; boardPinchLastMid = mid;
       e.preventDefault();
@@ -12101,21 +12147,34 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       const r = svg.getBoundingClientRect(), k = 1 / Math.min(r.width / W, r.height / H);
       drag = { pc, sx: ev.clientX, sy: ev.clientY, ox: pc.x, oy: pc.y, k, moved: false, rect: r };
       drawAll();
-      const top = svg.lastChild; top.setPointerCapture && top.setPointerCapture(ev.pointerId);
+      let top = svg.lastChild; const pid = ev.pointerId;
+      try { top.setPointerCapture && top.setPointerCapture(pid); } catch (_) {}
       const mv = (e) => {
+        if (e.pointerId !== pid) return;
+        if (e.cancelable) e.preventDefault();
         const dx = (e.clientX - drag.sx) * drag.k, dy = (e.clientY - drag.sy) * drag.k;
         if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.moved = true;
-        pc.x = drag.ox + dx; pc.y = drag.oy + dy;
-        pc.x = Math.max(15, Math.min(W - 15, pc.x)); pc.y = Math.max(15, Math.min(H - 15, pc.y));
+        tx = Math.max(15, Math.min(W - 15, drag.ox + dx)); ty = Math.max(15, Math.min(H - 15, drag.oy + dy));
+        if (!raf) raf = requestAnimationFrame(step);
+      };
+      // tablele interactive trimit puține evenimente: piesa alunecă fluid spre poziția degetului
+      let tx = pc.x, ty = pc.y, raf = 0;
+      const step = () => {
+        raf = 0;
+        const ddx = tx - pc.x, ddy = ty - pc.y;
+        if (Math.abs(ddx) + Math.abs(ddy) < .4) { pc.x = tx; pc.y = ty; } else { pc.x += ddx * .45; pc.y += ddy * .45; raf = requestAnimationFrame(step); }
         top.setAttribute('points', poly(pc).map(p => p[0] + ',' + p[1]).join(' '));
       };
-      const up = () => {
-        top.removeEventListener('pointermove', mv); top.removeEventListener('pointerup', up); top.removeEventListener('pointercancel', up);
+      const up = (e) => {
+        if (e && e.pointerId !== pid) return;
+        window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+        if (raf) cancelAnimationFrame(raf); pc.x = tx; pc.y = ty;
         if (!drag.moved) { pc.rot = (pc.rot + 1) % 8; autoPlace(pc); }          // atingere = rotire cu 45°
         else if (!autoPlace(pc)) snap(pc);
         drag = null; drawAll(); check();
       };
-      top.addEventListener('pointermove', mv); top.addEventListener('pointerup', up); top.addEventListener('pointercancel', up);
+      // ascultăm pe window: mișcarea continuă chiar dacă degetul iese din piesă sau elementul s-a refăcut
+      window.addEventListener('pointermove', mv, { passive: false }); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
     }
     // plasare automată: piesa are forma/orientarea unui loc liber din siluetă și este aproape de el
     function autoPlace(pc) {
@@ -12579,6 +12638,10 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         g.text(P(3.5, 3.5), 'c²', 26, '#fff', 'middle', 1 - es(t, .05, .2));
         g.text(P(1.5, 1.5), 'a² = 9', 20, '#fff', 'middle', es(t, .8, .95)); g.text(P(5, 5), 'b² = 16', 22, '#fff', 'middle', es(t, .8, .95));
         g.text(P(1.5, -.4), 'a', 18, COL.a); g.text(P(5, -.4), 'b', 18, COL.b);
+        { const f = 1 - es(t, .2, .3);
+          g.text(P(7.4, 1.5), 'a', 18, COL.a, 'middle', f); g.text(P(7.4, 5), 'b', 18, COL.b, 'middle', f);
+          g.text(P(-.4, 2), 'b', 18, COL.b, 'middle', f); g.text(P(-.4, 5.5), 'a', 18, COL.a, 'middle', f);
+          g.text(P(2, 7.4), 'b', 18, COL.b, 'middle', f); g.text(P(5.5, 7.4), 'a', 18, COL.a, 'middle', f); }
         g.text(P(5.55, 1.2), 'c', 18, COL.c, 'middle', 1 - es(t, .2, .3));
         g.px(300, 392, '9 + 16 = 25', 20, '#fff', 'middle', es(t, .85, 1));
       }
@@ -12685,7 +12748,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         dim(sA, COL.a, t > .3 ? .35 : .85); dim(sB, COL.t, t > .52 ? .35 : .85); dim(sC, COL.b, .85);
         if (t >= .3) dim(rigid(sA, A, C, Math.PI, m1), COL.a, .9);
         if (t >= .52) dim(rigid(sB, B, C, Math.PI, m2), COL.t, .9);
-        const lab = (V, f, w, s, col, rr, th, m, to) => { const mid = P(V.x + rr * Math.cos(f + w / 2), V.y + rr * Math.sin(f + w / 2)), q = rigid([mid], V, to || V, th || 0, m || 0)[0]; g.text(q, s, 17, '#111'); };
+        const lab = (V, f, w, s, col, rr, th, m, to) => { rr = rr == null ? r * .62 : rr; const mid = P(V.x + rr * Math.cos(f + w / 2), V.y + rr * Math.sin(f + w / 2)), q = rigid([mid], V, to || V, th || 0, m || 0)[0]; g.text(q, s, 17, '#111'); };
         lab(A, fA, wA, 'α'); lab(B, fB, wB, 'β'); lab(C, fC, wC, 'γ', null, r * .62);
         if (t >= .3) lab(A, fA, wA, 'α', null, r * .62, Math.PI, m1, C);
         if (t >= .52) lab(B, fB, wB, 'β', null, r * .62, Math.PI, m2, C);
@@ -12718,7 +12781,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         g.circle(O, r, '#4da6ff', '#fff', .08);
         const e1 = es(t, .13, .25), e2 = es(t, .28, .38), e3 = es(t, .43, .55), e4 = es(t, .58, .68), e5 = es(t, .73, .85);
         g.poly([A, O, Pp], COL.a, { o: .2 * e2 * (1 - e4 * .6) }); g.poly([B, O, Pp], COL.t, { o: .2 * e4 });
-        g.line(Pp, Q, '#aaa', 2, '6 4'); if (e1 < 1) g.line(Pp, Q, '#111', 0); 
+        g.line(Pp, Q, '#fff', 2.5, '6 4'); 
         g.line(Pp, A, '#fff', 2.5); g.line(Pp, B, '#fff', 2.5); g.line(O, A, '#fff', 2); g.line(O, B, '#fff', 2);
         if (e1 > 0) [[O, A], [O, Pp], [O, B]].forEach(([u, v]) => { const mid = P((u.x + v.x) / 2, (u.y + v.y) / 2), dx = v.x - u.x, dy = v.y - u.y, l = Math.hypot(dx, dy), nx = -dy / l * .15, ny = dx / l * .15; g.line(P(mid.x - nx, mid.y - ny), P(mid.x + nx, mid.y + ny), '#fff', 3); });
         if (e2 > 0) { g.poly(sec2(Pp, ang(Pp, O), ang(Pp, A), .7), COL.a, { o: .9 * e2, stroke: '#fff', w: 1 }); g.poly(sec2(A, ang(A, O), ang(A, Pp), .7), COL.a, { o: .9 * e2, stroke: '#fff', w: 1 }); lbl(Pp, ang(Pp, O), ang(Pp, A), .5, 'α', e2); lbl(A, ang(A, O), ang(A, Pp), .5, 'α', e2); }
@@ -12742,7 +12805,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       draw(g, t) {
         g.view(55, 100, 300); const b = 5, d = 2, h = 3, m = es(t, .45, .7);
         g.poly([P(d, 0), P(b + d, 0), P(b + d, h), P(d, h)].concat([]), COL.c, { o: m * .2 });
-        g.poly([P(0, 0), P(b, 0), P(b + d, h), P(d, h)], COL.c, { o: .55, stroke: '#fff', w: 2 });
+        g.poly([P(d, 0), P(b, 0), P(b + d, h), P(d, h)], COL.c, { o: .55, stroke: '#fff', w: 2 });
         const tri = [P(0, 0), P(d, 0), P(d, h)]; g.poly(tri.map(p => P(p.x + b * m, p.y)), COL.t, { o: .85, stroke: '#fff', w: 2 });
         if (t > .2) g.line(P(d, 0), P(d, h), '#fff', 2, '6 4');
         g.line(P(d, 0), P(d, h), COL.r, 2.5, '5 4'); g.text(P(d - .3, h / 2), 'h', 20, COL.r); g.text(P(b / 2 + d / 2 + .8, -.4), 'b', 20, '#fff');
@@ -12896,6 +12959,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         g.poly(T.map(p => rotp(p, M, Math.PI * m)), COL.t, { o: .75, stroke: '#fff', w: 2 });
         g.poly(T, COL.c, { o: .75, stroke: '#fff', w: 2 });
         g.line(P(1, 3), P(1, 0), COL.r, 2.5, '5 4'); g.text(P(.6, 1.5), 'h', 19, COL.r); g.text(P(2.5, 3.4), 'a', 19, '#fff'); g.text(P(3, -.45), 'b', 19, '#fff');
+        if (m > 0) { g.text(rotp(P(3, -.45), M, Math.PI * m), 'b', 19, '#fff', 'middle', Math.min(1, m * 3)); g.text(rotp(P(2.5, 3.4), M, Math.PI * m), 'a', 19, '#fff', 'middle', Math.min(1, m * 3)); }
         const e = es(t, .6, .8); if (e > 0) { g.line(P(0, -.9), P(9, -.9), '#fff', 2, '', ); g.text(P(4.5, -1.35), 'a + b', 19, '#fff', 'middle', e); g.poly([P(0, 0), P(9, 0), P(10, 3), P(1, 3)], 'none', { stroke: '#fff', w: 2, dash: '7 5' }); }
         g.px(300, 392, 'A = (a + b) · h / 2 = (3 + 6) · 3 / 2 = ' + (EN() ? '13.5' : '13,5'), 21, '#fff', 'middle', es(t, .8, .95));
       }
@@ -12941,13 +13005,18 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         } else if (ph === 1) {
           const Ha = (() => { const dx = C.x - B.x, dy = C.y - B.y, k = ((A.x - B.x) * dx + (A.y - B.y) * dy) / (dx * dx + dy * dy); return P(B.x + dx * k, B.y + dy * k); })(), Hb = (() => { const dx = C.x - A.x, dy = C.y - A.y, k = ((B.x - A.x) * dx + (B.y - A.y) * dy) / (dx * dx + dy * dy); return P(A.x + dx * k, A.y + dy * k); })(), Hc = P(C.x, 0);
           const H = P(C.x, C.x * (7 - C.x) / C.y);
-          seg(A, Ha, COL.t); seg(B, Hb, COL.t); seg(C, Hc, COL.t); if (gp > .95) { g.poly(arcPts(H, .12, 0, 6.3, 10), COL.r, {}); lab(H, 'H', .3, .3); }
+          seg(A, Ha, COL.t); seg(B, Hb, COL.t); seg(C, Hc, COL.t); if (gp > .95) {
+            const rA = (F, from, side, sz) => { const ux = side.x - F.x, uy = side.y - F.y, ul = Math.hypot(ux, uy), vx = from.x - F.x, vy = from.y - F.y, vl = Math.hypot(vx, vy), e1 = P(ux / ul * sz, uy / ul * sz), e2 = P(vx / vl * sz, vy / vl * sz); g.poly([F, P(F.x + e1.x, F.y + e1.y), P(F.x + e1.x + e2.x, F.y + e1.y + e2.y), P(F.x + e2.x, F.y + e2.y)], '#fff', { o: .25, stroke: '#fff', w: 1.8 }); };
+            rA(Ha, A, B, .32); rA(Hb, B, C, .32); rA(Hc, C, B, .32); g.poly(arcPts(H, .12, 0, 6.3, 10), COL.r, {}); lab(H, 'H', .3, .3); }
           g.px(300, 392, EN() ? 'the orthocentre H' : 'ortocentrul H', 20, '#fff', 'middle', gp);
         } else {
           const a = dist2(B, C), b = dist2(A, C), c = dist2(A, B), s = a + b + c, I = P((a * A.x + b * B.x + c * C.x) / s, (a * A.y + b * B.y + c * C.y) / s);
           const Da = P((b * B.x + c * C.x) / (b + c), (b * B.y + c * C.y) / (b + c)), Db = P((a * A.x + c * C.x) / (a + c), (a * A.y + c * C.y) / (a + c)), Dc = P((a * A.x + b * B.x) / (a + b), (a * A.y + b * B.y) / (a + b));
           seg(A, Da, COL.b); seg(B, Db, COL.b); seg(C, Dc, COL.b);
-          if (gp > .95) { g.poly(arcPts(I, .12, 0, 6.3, 10), COL.r, {}); lab(I, 'I', .3, .3); g.circle(I, I.y, 'none', '#fff', 0); g.poly(arcPts(I, I.y, 0, 6.3, 60), 'none', { stroke: '#fff', w: 2, dash: '' }); }
+          if (gp > .95) {
+            const aa = (V, X) => Math.atan2(X.y - V.y, X.x - V.x), dfn = (x) => { while (x > Math.PI) x -= 2 * Math.PI; while (x < -Math.PI) x += 2 * Math.PI; return x; };
+            const marks = (V, X1, Bi, X2, n) => [[X1, Bi], [Bi, X2]].forEach(([p, q]) => { const f0 = aa(V, p), w = dfn(aa(V, q) - f0); for (let j = 0; j < n; j++) { const pts = arcPts(V, .5 + .14 * j, f0, f0 + w, 16); for (let i = 0; i < pts.length - 1; i++) g.line(pts[i], pts[i + 1], '#fff', 2); } });
+            marks(A, B, Da, C, 1); marks(B, C, Db, A, 2); marks(C, A, Dc, B, 3); g.poly(arcPts(I, .12, 0, 6.3, 10), COL.r, {}); lab(I, 'I', .3, .3); g.circle(I, I.y, 'none', '#fff', 0); g.poly(arcPts(I, I.y, 0, 6.3, 60), 'none', { stroke: '#fff', w: 2, dash: '' }); }
           g.px(300, 392, EN() ? 'the incentre I (inscribed circle)' : 'centrul cercului înscris I', 20, '#fff', 'middle', gp);
         }
       }
@@ -13278,6 +13347,505 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         g.px(300, 388, st, 22, '#fff');
       }
     });
+
+    // unghiul exterior al triunghiului (paralelă prin B la AC)
+    {
+      const iw = DEMOS.findIndex(x => x.ro.indexOf('Unghiul înscris') === 0);
+      DEMOS.splice(iw < 0 ? DEMOS.length : iw, 0, {
+      ro: 'Unghiul exterior al unui triunghi (paralelă prin vârf)', en: 'Exterior angle of a triangle (parallel through a vertex)', dur: 26000,
+      steps: [
+        { at: 0, ro: 'În triunghiul ABC prelungim latura AB dincolo de B, până în D. Unghiul CBD este unghiul exterior din B; îl notăm ε. Vrem să arătăm că ε = α + γ (suma celor două unghiuri interioare neînvecinate).', en: 'In triangle ABC we extend side AB beyond B to D. Angle CBD is the exterior angle at B; call it ε. We want to show ε = α + γ (the sum of the two non-adjacent interior angles).' },
+        { at: .14, ro: 'Construim prin B dreapta BE paralelă cu latura AC.', en: 'Through B we draw the line BE parallel to side AC.' },
+        { at: .28, ro: 'Dreptele paralele AC și BE sunt tăiate de secanta AD. Unghiurile α (în A) și ∠EBD sunt corespondente, deci congruente: mutăm α din A în B, prin translație.', en: 'The parallels AC and BE are cut by the transversal AD. Angles α (at A) and ∠EBD are corresponding, hence congruent: we slide α from A to B.' },
+        { at: .52, ro: 'Aceleași paralele AC și BE sunt tăiate acum de secanta BC. Unghiurile γ (în C) și ∠CBE sunt alterne interne, deci congruente: rotim γ cu 180° în jurul mijlocului lui BC.', en: 'The same parallels AC and BE are now cut by the transversal BC. Angles γ (at C) and ∠CBE are alternate interior, hence congruent: we rotate γ by 180° about the midpoint of BC.' },
+        { at: .78, ro: 'Cele două unghiuri, α și γ, umplu exact unghiul exterior: ε = α + γ.', en: 'The two angles α and γ exactly fill the exterior angle: ε = α + γ.' }],
+      draw(g, t) {
+        g.view(50, 55, 290);
+        const A = P(0, 0), B = P(6, 0), C = P(2.6, 3.4), D = P(9.2, 0), k = 1.28, E = P(B.x + k * C.x, B.y + k * C.y), r = 1;
+        const ang = (u, v) => Math.atan2(v.y - u.y, v.x - u.x), nrm = (x) => { while (x < 0) x += 2 * Math.PI; while (x >= 2 * Math.PI) x -= 2 * Math.PI; return x; };
+        const wA = ang(A, C), fC = ang(C, A), wC = nrm(ang(C, B) - ang(C, A)), eB = nrm(ang(B, C));
+        const dA = Math.round(wA / D2R), dC = Math.round(wC / D2R), dE = dA + dC;
+        const p = es(t, .14, .28), m1 = es(t, .28, .46), m2 = es(t, .52, .72);
+        g.poly([A, B, C], '#4da6ff', { o: .15, stroke: '#fff', w: 2.5 });
+        g.line(B, D, '#fff', 2.5);
+        g.poly(sector(B, r * 1.15, 0, eB, 24), COL.t, { o: t < .78 ? .3 : .55, stroke: '#fff', w: 1.2 });
+        if (p > 0) { g.line(P(B.x - .6 * p * C.x / 4, B.y - .6 * p * C.y / 4), P(B.x + k * C.x * p, B.y + k * C.y * p), COL.r, 2.5, '6 4'); }
+        const dim = (pts, c, o) => g.poly(pts, c, { o, stroke: '#fff', w: 1.2 });
+        const sA = sector(A, r, 0, wA, 18), sC = sector(C, r, fC, fC + wC, 18);
+        dim(sA, COL.a, t >= .28 ? .3 : .85); dim(sC, COL.b, t >= .52 ? .3 : .85);
+        if (t >= .28) dim(rigid(sA, A, B, 0, m1), COL.a, .9);
+        if (t >= .52) dim(rigid(sC, C, B, Math.PI, m2), COL.b, .9);
+        const lab = (pts0, s, col, th, m, from, to) => { let q = pts0; if (th != null) q = rigid([pts0], from, to, th, m)[0]; g.text(q, s, 17, '#111'); };
+        const cA = P(.62 * Math.cos(wA / 2), .62 * Math.sin(wA / 2)), cC = P(C.x + .62 * Math.cos(fC + wC / 2), C.y + .62 * Math.sin(fC + wC / 2));
+        lab(cA, 'α'); lab(cC, 'γ');
+        if (t >= .28) lab(cA, 'α', COL.a, 0, m1, A, B);
+        if (t >= .52) lab(cC, 'γ', COL.b, Math.PI, m2, C, B);
+        g.text(P(B.x + 1.45 * Math.cos(eB / 2 + .0) * 1.0, B.y + 1.45 * Math.sin(eB / 2)), 'ε', 18, COL.t, 'middle', t < .78 ? 1 : 0);
+        g.text(P(A.x - .3, A.y - .3), 'A', 18); g.text(P(B.x, B.y - .4), 'B', 18); g.text(P(C.x - .1, C.y + .4), 'C', 18); g.text(P(D.x + .1, D.y - .4), 'D', 18);
+        if (p > 0) g.text(P(E.x + .1, E.y + .4), 'E', 18, COL.r, 'middle', p);
+        const lbl = EN() ? { c: 'corresponding', a: 'alternate interior' } : { c: 'corespondente', a: 'alterne interne' };
+        if (t >= .28 && t < .52) g.px(300, 385, 'α = ∠EBD = ' + dA + '° (' + lbl.c + ')', 20, COL.a);
+        if (t >= .52 && t < .78) g.px(300, 385, 'γ = ∠CBE = ' + dC + '° (' + lbl.a + ')', 20, COL.b);
+        if (t >= .78) g.px(300, 385, 'ε = α + γ = ' + dA + '° + ' + dC + '° = ' + dE + '°', 22, '#fff', 'middle', es(t, .78, .92));
+      }
+      });
+    }
+
+    // ===== demonstrații noi (geometrie, algebră, combinatorică, probabilități) =====
+    {
+      const ang2 = (u, v) => Math.atan2(v.y - u.y, v.x - u.x);
+      const dfn = (x) => { while (x > Math.PI) x -= 2 * Math.PI; while (x < -Math.PI) x += 2 * Math.PI; return x; };
+      const arcL = (g, c, r, a0, w, col, lw) => { const pts = arcPts(c, r, a0, a0 + w, Math.max(6, Math.round(Math.abs(w) / .12))); for (let i = 0; i < pts.length - 1; i++) g.line(pts[i], pts[i + 1], col, lw || 2); };
+      const rgba = (hex, o) => { const n = parseInt(hex.slice(1), 16); return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + o + ')'; };
+      const sq90 = (g, V, p, q, sz, col) => { const u = ang2(V, p), v = ang2(V, q), e1 = P(Math.cos(u) * sz, Math.sin(u) * sz), e2 = P(Math.cos(v) * sz, Math.sin(v) * sz); g.poly([V, P(V.x + e1.x, V.y + e1.y), P(V.x + e1.x + e2.x, V.y + e1.y + e2.y), P(V.x + e2.x, V.y + e2.y)], col || '#fff', { o: .2, stroke: col || '#fff', w: 1.8 }); };
+      const dot2 = (g, p, col, r) => g.poly(arcPts(p, r || .1, 0, 6.3, 12), col || COL.r, {});
+      const fmx = (x, d) => (Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d).replace('.', EN() ? '.' : ',');
+      const inter = (p1, d1, p2, d2) => { const det = -d1.x * d2.y + d1.y * d2.x, rx = p2.x - p1.x, ry = p2.y - p1.y, s = (rx * (-d2.y) + d2.x * ry) / det; return P(p1.x + s * d1.x, p1.y + s * d1.y); };
+      const kf = (t, a) => { if (t <= a[0][0]) return a[0][1]; for (let i = 1; i < a.length; i++) { if (t <= a[i][0]) { const k = ease((t - a[i - 1][0]) / (a[i][0] - a[i - 1][0])); return a[i - 1][1] + (a[i][1] - a[i - 1][1]) * k; } } return a[a.length - 1][1]; };
+      const poly = (pts, i) => pts[i % pts.length];
+
+      // --- aria triunghiului cu sinus ---
+      DEMOS.push({
+        ro: 'Aria triunghiului cu sinus: ½ · b · c · sin α', en: 'Triangle area with sine: ½ · b · c · sin α', dur: 24000,
+        steps: [
+          { at: 0, ro: 'Triunghiul ABC are laturile AB = c = 6 și AC = b = 4, iar între ele unghiul α. Cum aflăm aria dacă nu cunoaștem înălțimea?', en: 'Triangle ABC has sides AB = c = 6 and AC = b = 4, with the angle α between them. How do we find the area if we do not know the height?' },
+          { at: .17, ro: 'Ducem înălțimea CH pe AB. În triunghiul dreptunghic AHC: sin α = h / b, deci h = b · sin α.', en: 'Draw the altitude CH onto AB. In the right triangle AHC: sin α = h / b, so h = b · sin α.' },
+          { at: .37, ro: 'Aria este ½ · AB · h = ½ · c · b · sin α.', en: 'The area is ½ · AB · h = ½ · c · b · sin α.' },
+          { at: .52, ro: 'Rotim latura AC în jurul lui A: baza rămâne c, dar înălțimea se schimbă. Aria este cea mai mare pentru α = 90° (sin α = 1) și devine mică pentru unghiuri apropiate de 0° sau de 180°.', en: 'Rotate side AC about A: the base stays c, but the height changes. The area is largest for α = 90° (sin α = 1) and gets small for angles near 0° or 180°.' },
+          { at: .92, ro: 'Pentru orice triunghi: A = ½ · b · c · sin α.', en: 'For any triangle: A = ½ · b · c · sin α.' }],
+        draw(g, t) {
+          g.view(50, 185, 300);
+          const A = P(0, 0), B = P(6, 0), b = 4, al = (t < .52 ? 40 : kf(t, [[.52, 40], [.7, 90], [.9, 145]])) * D2R;
+          const C = P(b * Math.cos(al), b * Math.sin(al)), H = P(C.x, 0), h = b * Math.sin(al);
+          g.poly([A, B, C], '#4da6ff', { o: .16, stroke: '#fff', w: 2.5 });
+          const hp = es(t, .17, .3);
+          if (hp > 0) {
+            if (H.x < 0) g.line(A, lerp2(A, H, hp), '#fff', 2, '6 4');
+            g.line(C, lerp2(C, H, hp), COL.r, 2.5, '5 4');
+            if (hp >= 1 && Math.abs(H.x) > .05) sq90(g, H, C, H.x < 0 ? A : B, .3, '#fff');
+            else if (hp >= 1) sq90(g, H, C, B, .3, '#fff');
+          }
+          g.poly(sector(A, .8, 0, al, 20), COL.a, { o: .6, stroke: '#fff', w: 1 });
+          g.text(P(1.15 * Math.cos(al / 2), 1.15 * Math.sin(al / 2)), 'α', 18, COL.a);
+          g.text(P(A.x - .3, A.y - .3), 'A', 18); g.text(P(B.x + .3, B.y - .3), 'B', 18); g.text(P(C.x, C.y + .4), 'C', 18);
+          g.text(P(5, -.45), 'c = 6', 17, '#fff'); g.text(P(C.x / 2 + (al < Math.PI / 2 ? -.5 : .45), C.y / 2 + (al < Math.PI / 2 ? .15 : .3)), 'b = 4', 17, '#fff');
+          if (hp >= 1) { g.text(P(H.x, -.45), 'H', 17, '#fff'); g.text(P(C.x + .35, C.y / 2), 'h', 18, COL.r); }
+          const s = Math.sin(al);
+          if (t >= .17 && t < .37) g.px(300, 385, 'h = b · sin α = 4 · sin α', 22, '#fff');
+          else if (t >= .37 && t < .52) g.px(300, 385, 'A = ½ · c · h = ½ · c · b · sin α', 22, '#fff');
+          else if (t >= .52) g.px(300, 385, 'α = ' + Math.round(al / D2R) + '°   sin α = ' + fmx(s, 2) + '   A = ½ · 6 · 4 · ' + fmx(s, 2) + ' = ' + fmx(12 * s, 1), 20, '#fff');
+        }
+      });
+
+      // --- patrulater inscriptibil ---
+      DEMOS.push({
+        ro: 'Patrulaterul inscriptibil: unghiurile opuse sunt suplementare', en: 'Cyclic quadrilateral: opposite angles are supplementary', dur: 26000,
+        steps: [
+          { at: 0, ro: 'Patrulaterul ABCD are toate vârfurile pe cerc (este inscriptibil). Privim unghiurile opuse α (în A) și γ (în C).', en: 'Quadrilateral ABCD has all its vertices on a circle (it is cyclic). We look at the opposite angles α (at A) and γ (at C).' },
+          { at: .2, ro: 'α este unghi înscris și cuprinde arcul BCD (cel care nu conține A): α = ½ · arcul BCD.', en: 'α is an inscribed angle that intercepts arc BCD (the one not containing A): α = ½ · arc BCD.' },
+          { at: .4, ro: 'La fel, γ cuprinde arcul DAB: γ = ½ · arcul DAB.', en: 'Likewise γ intercepts arc DAB: γ = ½ · arc DAB.' },
+          { at: .6, ro: 'Cele două arce, puse împreună, formează tot cercul: arcul BCD + arcul DAB = 360°.', en: 'The two arcs together make the whole circle: arc BCD + arc DAB = 360°.' },
+          { at: .8, ro: 'Deci 2α + 2γ = 360°, adică α + γ = 180°. La fel și β + δ = 180°.', en: 'So 2α + 2γ = 360°, that is α + γ = 180°. The same holds for β + δ = 180°.' }],
+        draw(g, t) {
+          g.view(52, 300, 195); const O = P(0, 0), R = 2.2, pt = (d) => P(R * Math.cos(d * D2R), R * Math.sin(d * D2R));
+          const A = pt(205), B = pt(325), C = pt(50), D = pt(135);
+          g.circle(O, R, '#4da6ff', '#fff', .07);
+          g.poly([A, B, C, D], 'none', { stroke: '#fff', w: 2.5 });
+          const aA = dfn(ang2(A, D) - ang2(A, B)), aC = dfn(ang2(C, B) - ang2(C, D)), aB = dfn(ang2(B, C) - ang2(B, A)), aD = dfn(ang2(D, A) - ang2(D, C));
+          const mk = (V, p, w, col, s, rr) => { g.poly(sector(V, rr, ang2(V, p), ang2(V, p) + w, 18), col, { o: .6, stroke: '#fff', w: 1 }); const m = ang2(V, p) + w / 2; g.text(P(V.x + (rr + .35) * Math.cos(m), V.y + (rr + .35) * Math.sin(m)), s, 17, col); };
+          const dA = Math.round(Math.abs(aA) / D2R), dC = Math.round(Math.abs(aC) / D2R), dB = Math.round(Math.abs(aB) / D2R * 10) / 10, dD = Math.round(Math.abs(aD) / D2R * 10) / 10;
+          mk(A, B, aA, COL.a, 'α', .6); mk(C, D, aC, COL.b, 'γ', .6);
+          const e5 = es(t, .8, .92); if (e5 > 0) { mk(B, A, aB, COL.t, 'β', .5); mk(D, C, aD, COL.r, 'δ', .5); }
+          const arcOut = (a0, a1, col, o) => { const pts = arcPts(O, R + .13, a0 * D2R, a1 * D2R, 40); for (let i = 0; i < pts.length - 1; i++) g.line(pts[i], pts[i + 1], col, 5); };
+          const e2 = es(t, .2, .32), e3 = es(t, .4, .52), e4 = es(t, .6, .72);
+          if (t >= .2 && t < .6) { const k = e2; if (t < .4 || true) arcOut(325, 325 + 170 * k, COL.a); }
+          if (t >= .4 && t < .6) arcOut(135, 135 + 190 * e3, COL.b);
+          if (t >= .6) { arcOut(325, 495, COL.a); arcOut(135, 325, COL.b); }
+          [[A, 'A', -.4, -.3], [B, 'B', .4, -.3], [C, 'C', .4, .3], [D, 'D', -.4, .3]].forEach(([p, s, dx, dy]) => g.text(P(p.x + dx, p.y + dy), s, 19));
+          if (t >= .2 && t < .4) g.px(300, 388, 'α = ½ · 170° = ' + dA + '°', 22, COL.a);
+          else if (t >= .4 && t < .6) g.px(300, 388, 'γ = ½ · 190° = ' + dC + '°', 22, COL.b);
+          else if (t >= .6 && t < .8) g.px(300, 388, '170° + 190° = 360°', 22, '#fff');
+          else if (t >= .8) g.px(300, 388, 'α + γ = ' + dA + '° + ' + dC + '° = 180°      β + δ = 180°', 21, '#fff', 'middle', e5);
+        }
+      });
+
+      // --- tangenta ⟂ raza și tangentele dintr-un punct exterior ---
+      DEMOS.push({
+        ro: 'Tangenta este perpendiculară pe rază; tangentele dintr-un punct exterior sunt egale', en: 'A tangent is perpendicular to the radius; tangents from an outside point are equal', dur: 28000,
+        steps: [
+          { at: 0, ro: 'Tangenta într-un punct T al cercului atinge cercul numai în T; orice alt punct al ei este în exteriorul cercului. Deci OT este cea mai scurtă distanță de la O la tangentă, adică OT ⟂ tangenta.', en: 'A tangent at a point T touches the circle only at T; every other point of it lies outside the circle. So OT is the shortest distance from O to the tangent, i.e. OT ⟂ tangent.' },
+          { at: .3, ro: 'Dintr-un punct exterior P ducem tangentele PT₁ și PT₂ la cerc.', en: 'From an outside point P we draw the tangents PT₁ and PT₂ to the circle.' },
+          { at: .52, ro: 'Triunghiurile OT₁P și OT₂P sunt dreptunghice (în T₁ și T₂), au ipotenuza comună OP și catetele OT₁ = OT₂ = r.', en: 'Triangles OT₁P and OT₂P are right-angled (at T₁ and T₂), share the hypotenuse OP and have legs OT₁ = OT₂ = r.' },
+          { at: .78, ro: 'Deci sunt congruente (ipotenuză + catetă), iar PT₁ = PT₂. Cu Pitagora: PT = √(OP² − r²) = √(25 − 9) = 4.', en: 'So they are congruent (hypotenuse + leg), and PT₁ = PT₂. By Pythagoras: PT = √(OP² − r²) = √(25 − 9) = 4.' }],
+        draw(g, t) {
+          g.view(42, 190, 200); const O = P(0, 0), r = 3, Pp = P(5, 0), th0 = Math.acos(3 / 5);
+          const th = (130 - (130 - th0 / D2R) * es(t, .03, .27)) * D2R;
+          const pt = (a) => P(r * Math.cos(a), r * Math.sin(a));
+          g.circle(O, r, '#4da6ff', '#fff', .08); dot2(g, O, '#fff', .08); g.text(P(-.3, -.35), 'O', 17);
+          const T = pt(th), dir = P(-Math.sin(th), Math.cos(th));
+          const e1 = es(t, .3, .45), e2 = es(t, .52, .66);
+          if (e2 > 0) { g.poly([O, pt(th0), Pp], COL.a, { o: .3 * e2 }); g.poly([O, pt(-th0), Pp], COL.b, { o: .3 * e2 }); }
+          g.line(O, T, '#fff', 2.5); g.text(P(T.x * .5 - .25 * Math.sin(th), T.y * .5 + .25 * Math.cos(th)), 'r', 17, COL.r);
+          g.line(P(T.x - dir.x * 2.4, T.y - dir.y * 2.4), P(T.x + dir.x * 2.4, T.y + dir.y * 2.4), COL.t, 2.5);
+          sq90(g, T, O, P(T.x + dir.x, T.y + dir.y), .35, '#fff'); dot2(g, T, COL.r, .09);
+          if (t < .3) g.text(P(T.x * 1.12, T.y * 1.12 + .3), 'T', 18);
+          if (e1 > 0) {
+            const T2 = pt(-th0); dot2(g, Pp, COL.r, .1); g.text(P(5.35, .3), 'P', 18);
+            g.line(O, Pp, '#aaa', 1.8, '6 4');
+            g.line(pt(th0), lerp2(pt(th0), Pp, e1), '#fff', 2.5); g.line(T2, lerp2(T2, Pp, e1), COL.t, 2.5);
+            if (e1 >= 1) { g.line(O, T2, '#fff', 2.5); sq90(g, T2, O, Pp, .35, '#fff'); dot2(g, T2, COL.r, .09); g.text(P(T2.x * 1.1, T2.y * 1.1 - .3), 'T₂', 17); g.text(P(pt(th0).x * 1.1, pt(th0).y * 1.1 + .3), 'T₁', 17); g.text(P(T2.x * .5 + .25 * Math.sin(th0), T2.y * .5 - .25 * Math.cos(th0)), 'r', 17, COL.r); }
+          }
+          if (e2 > 0) { g.text(P(2.5, .35), 'OP = 5', 16, '#ddd', 'middle', e2); g.text(P(3.9, 2.25), '4', 18, '#fff', 'middle', es(t, .78, .9)); g.text(P(3.9, -2.25), '4', 18, '#fff', 'middle', es(t, .78, .9)); }
+          if (t < .3) g.px(300, 388, (EN() ? 'tangent ⟂ radius at the contact point' : 'tangenta ⟂ raza în punctul de contact'), 21, '#fff');
+          else if (t < .78) g.px(300, 388, 'OT₁ = OT₂ = r,   ' + (EN() ? 'common hypotenuse OP' : 'ipotenuză comună OP'), 20, '#fff', 'middle', e1);
+          else g.px(300, 388, 'PT₁ = PT₂ = √(OP² − r²) = 4', 22, '#fff', 'middle', es(t, .78, .9));
+        }
+      });
+
+      // --- teorema bisectoarei ---
+      DEMOS.push({
+        ro: 'Teorema bisectoarei: BD / DC = AB / AC', en: 'Angle bisector theorem: BD / DC = AB / AC', dur: 30000,
+        steps: [
+          { at: 0, ro: 'În triunghiul ABC, AD este bisectoarea unghiului A: ∠BAD = ∠DAC = α. Vrem să arătăm că BD / DC = AB / AC.', en: 'In triangle ABC, AD is the bisector of angle A: ∠BAD = ∠DAC = α. We want to show that BD / DC = AB / AC.' },
+          { at: .2, ro: 'Prin C ducem paralela la AD; ea taie prelungirea dreptei BA în E.', en: 'Through C we draw the parallel to AD; it meets the extension of line BA at E.' },
+          { at: .4, ro: 'Unghiurile ∠AEC și ∠BAD sunt corespondente (AD ∥ CE), deci ∠AEC = α. Unghiurile ∠ACE și ∠DAC sunt alterne interne, deci ∠ACE = α.', en: '∠AEC and ∠BAD are corresponding angles (AD ∥ CE), so ∠AEC = α. ∠ACE and ∠DAC are alternate interior angles, so ∠ACE = α.' },
+          { at: .62, ro: 'Triunghiul ACE are două unghiuri egale (în E și în C), deci este isoscel: AE = AC.', en: 'Triangle ACE has two equal angles (at E and C), so it is isosceles: AE = AC.' },
+          { at: .8, ro: 'În triunghiul BCE, AD ∥ CE. Cu teorema lui Thales: BD / DC = BA / AE = AB / AC.', en: 'In triangle BCE, AD ∥ CE. By Thales’ theorem: BD / DC = BA / AE = AB / AC.' }],
+        draw(g, t) {
+          g.view(45, 60, 335); const B = P(0, 0), C = P(6, 0), A = P(2.4, 2.4);
+          const AB = dist2(A, B), AC = dist2(A, C), D = P(6 * AB / (AB + AC), 0), E = inter(B, P(A.x - B.x, A.y - B.y), C, P(A.x - D.x, A.y - D.y));
+          const pD = es(t, .02, .14), pE = es(t, .2, .34);
+          g.poly([A, B, C], '#4da6ff', { o: .13, stroke: '#fff', w: 2.5 });
+          g.line(A, lerp2(A, D, pD), COL.a, 2.5);
+          const mkA = (V, p, q, col, n, rr) => { const f0 = ang2(V, p), w = dfn(ang2(V, q) - f0); for (let j = 0; j < n; j++) arcL(g, V, rr + .12 * j, f0, w, col, 2.2); };
+          if (pD > .6) { mkA(A, B, D, COL.a, 1, .55); mkA(A, D, C, COL.a, 1, .55); g.text(P(A.x - .15, A.y - .95), 'α', 16, COL.a, 'middle', pD); g.text(P(A.x + .5, A.y - .95), 'α', 16, COL.a, 'middle', pD); }
+          if (pE > 0) {
+            g.line(A, lerp2(A, E, pE), '#fff', 2.5); g.line(C, lerp2(C, E, pE), COL.r, 2.5, '6 4');
+            if (pE >= 1) g.text(P(E.x + .3, E.y + .3), 'E', 18, COL.r);
+          }
+          const e3 = es(t, .4, .52);
+          if (e3 > 0) { mkA(E, A, C, COL.t, 1, .7); mkA(C, A, E, COL.t, 1, .6); g.text(P(E.x - .5, E.y - .75), 'α', 16, COL.t, 'middle', e3); g.text(P(C.x - .85, C.y + .7), 'α', 16, COL.t, 'middle', e3); }
+          const e4 = es(t, .62, .74);
+          if (e4 > 0) {
+            const tk = (p, q) => { const m = mid2(p, q), d = ang2(p, q) + Math.PI / 2; g.line(P(m.x - Math.cos(d) * .13, m.y - Math.sin(d) * .13), P(m.x + Math.cos(d) * .13, m.y + Math.sin(d) * .13), COL.b, 3); };
+            tk(A, C); tk(A, E); g.line(A, C, rgba(COL.b, e4), 4); g.line(A, E, rgba(COL.b, e4), 4);
+          }
+          g.text(P(B.x - .3, B.y - .3), 'B', 18); g.text(P(C.x + .3, C.y - .3), 'C', 18); g.text(P(A.x - .25, A.y + .4), 'A', 18); if (pD >= 1) g.text(P(D.x, -.4), 'D', 18);
+          const e5 = es(t, .8, .92);
+          if (t >= .8) { g.line(B, D, rgba(COL.a, e5), 5); g.line(D, C, rgba(COL.t, e5), 5); }
+          if (t >= .8) g.px(300, 388, 'BD / DC = AB / AC = ' + fmx(AB, 2) + ' / ' + fmx(AC, 2) + ' ≈ ' + fmx(AB / AC, 2), 20, '#fff', 'middle', e5);
+          else if (t >= .62) g.px(300, 388, 'AE = AC', 22, COL.b);
+          else if (t >= .4) g.px(300, 388, '∠AEC = ∠ACE = α', 22, COL.t);
+        }
+      });
+
+      // --- dreapta lui Euler ---
+      DEMOS.push({
+        ro: 'Dreapta lui Euler: O, G, H sunt coliniare', en: 'The Euler line: O, G, H are collinear', dur: 34000,
+        steps: [
+          { at: 0, ro: 'Mediatoarele laturilor se întâlnesc în O, centrul cercului circumscris (egal depărtat de vârfuri).', en: 'The perpendicular bisectors of the sides meet at O, the circumcentre (equally far from the vertices).' },
+          { at: .22, ro: 'Medianele se întâlnesc în G, centrul de greutate.', en: 'The medians meet at G, the centroid.' },
+          { at: .42, ro: 'Înălțimile se întâlnesc în H, ortocentrul.', en: 'The altitudes meet at H, the orthocentre.' },
+          { at: .6, ro: 'Cele trei puncte O, G, H se află pe o aceeași dreaptă, dreapta lui Euler, iar G este mai aproape de O: HG = 2 · GO.', en: 'The three points O, G, H lie on one line, the Euler line, and G is closer to O: HG = 2 · GO.' },
+          { at: .74, ro: 'Mutăm vârful C: triunghiul se schimbă, dar punctele rămân coliniare și raportul 2 : 1 se păstrează.', en: 'We move vertex C: the triangle changes but the points stay collinear and the 2 : 1 ratio is kept.' }],
+        draw(g, t) {
+          g.view(44, 125, 235); const u = clamp((t - .74) / .24, 0, 1);
+          const A = P(0, 0), B = P(7, 0), C = P(1.7 + .8 * Math.sin(2 * Math.PI * u), 4.1 + .3 * Math.cos(2 * Math.PI * u));
+          const d = 2 * (A.x * (B.y - C.y) + B.x * (C.y - A.y) + C.x * (A.y - B.y)), sA = A.x * A.x + A.y * A.y, sB = B.x * B.x + B.y * B.y, sC = C.x * C.x + C.y * C.y;
+          const O = P((sA * (B.y - C.y) + sB * (C.y - A.y) + sC * (A.y - B.y)) / d, (sA * (C.x - B.x) + sB * (A.x - C.x) + sC * (B.x - A.x)) / d);
+          const G = P((A.x + B.x + C.x) / 3, (A.y + B.y + C.y) / 3), H = P(A.x + B.x + C.x - 2 * O.x, A.y + B.y + C.y - 2 * O.y), R = dist2(O, A);
+          const ph = t < .22 ? 0 : t < .42 ? 1 : t < .6 ? 2 : 3, fd = (k) => ph > k ? .35 : 1;
+          const gp0 = es(t, .02, .16), gp1 = es(t, .22, .36), gp2 = es(t, .42, .54), gp3 = es(t, .6, .7);
+          g.poly([A, B, C], '#4da6ff', { o: .12, stroke: '#fff', w: 2.5 });
+          g.circle(O, R, 'none', rgba('#ffffff', ph > 0 ? .2 : .5), 0);
+          const mids = [mid2(A, B), mid2(B, C), mid2(A, C)];
+          const cO = rgba(COL.a, fd(0));
+          [[mids[0], B], [mids[1], C], [mids[2], C]].forEach(([m, e], i) => { g.line(m, lerp2(m, O, gp0), cO, 2.2); if (gp0 >= 1) sq90(g, m, O, e, .2, cO); });
+          if (gp0 >= 1) { dot2(g, O, COL.a, .11); g.text(P(O.x - .3, O.y - .35), 'O', 18, COL.a); }
+          const cG = rgba(COL.t, fd(1));
+          if (ph >= 1) { [[A, mids[1]], [B, mids[2]], [C, mids[0]]].forEach(([v, m]) => g.line(v, lerp2(v, m, gp1), cG, 2.2)); }
+          if (ph >= 1 && gp1 >= 1) { dot2(g, G, COL.t, .11); g.text(P(G.x + .3, G.y - .35), 'G', 18, COL.t); }
+          const cH = rgba(COL.b, fd(2));
+          const foot = (p, q, v) => { const dx = q.x - p.x, dy = q.y - p.y, k = ((v.x - p.x) * dx + (v.y - p.y) * dy) / (dx * dx + dy * dy); return P(p.x + dx * k, p.y + dy * k); };
+          if (ph >= 2) { [[A, foot(B, C, A)], [B, foot(A, C, B)], [C, foot(A, B, C)]].forEach(([v, f]) => g.line(v, lerp2(v, f, gp2), cH, 2.2)); }
+          if (ph >= 2 && gp2 >= 1) { dot2(g, H, COL.b, .11); g.text(P(H.x - .35, H.y + .3), 'H', 18, COL.b); }
+          if (ph >= 3) { const dx = H.x - O.x, dy = H.y - O.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L; g.line(P(O.x - ux * 1.6 * gp3, O.y - uy * 1.6 * gp3), P(H.x + ux * 1.6 * gp3, H.y + uy * 1.6 * gp3), COL.r, 3); }
+          g.text(P(A.x - .3, A.y - .3), 'A', 18); g.text(P(B.x + .3, B.y - .3), 'B', 18); g.text(P(C.x, C.y + .4), 'C', 18);
+          if (ph >= 3) g.px(300, 388, 'HG = ' + fmx(dist2(H, G), 2) + '    GO = ' + fmx(dist2(G, O), 2) + '    HG = 2 · GO', 20, '#fff', 'middle', gp3);
+          else g.px(300, 388, ph === 0 ? (EN() ? 'O — circumcentre' : 'O — centrul cercului circumscris') : ph === 1 ? (EN() ? 'G — centroid' : 'G — centrul de greutate') : (EN() ? 'H — orthocentre' : 'H — ortocentrul'), 20, '#fff');
+        }
+      });
+
+      // --- triunghiuri congruente: LUL, ULU, LLL ---
+      {
+        const CASES = [
+          { T: [P(0, 0), P(4, 0), P(1.2, 2.6)], ed: [[0, 1, COL.a], [0, 2, COL.b]], an: [[0, COL.r]], ro: 'L.U.L. — două laturi și unghiul cuprins între ele', en: 'SAS — two sides and the included angle' },
+          { T: [P(0, 0), P(4.2, 0), P(2.7, 2.4)], ed: [[0, 1, COL.b]], an: [[0, COL.a], [1, COL.t]], ro: 'U.L.U. — o latură și cele două unghiuri alăturate ei', en: 'ASA — one side and the two angles next to it' },
+          { T: [P(0, 0), P(4.4, 0), P(1.5, 2.6)], ed: [[0, 1, COL.a], [1, 2, COL.b], [2, 0, COL.t]], an: [], ro: 'L.L.L. — cele trei laturi', en: 'SSS — the three sides' }];
+        DEMOS.push({
+          ro: 'Triunghiuri congruente: L.U.L., U.L.U., L.L.L.', en: 'Congruent triangles: SAS, ASA, SSS', dur: 36000,
+          steps: [
+            { at: 0, ro: 'Cazul L.U.L.: două triunghiuri au două laturi respectiv egale și unghiul cuprins între ele egal (elementele egale au aceeași culoare).', en: 'Case SAS: two triangles have two sides equal and the included angle equal (equal parts share a colour).' },
+            { at: .1, ro: 'Mutăm al doilea triunghi peste primul: laturile și unghiul se suprapun, deci și al treilea vârf coincide. Triunghiurile sunt congruente.', en: 'We move the second triangle onto the first: the sides and the angle match, so the third vertex coincides too. The triangles are congruent.' },
+            { at: .34, ro: 'Cazul U.L.U.: o latură egală și cele două unghiuri alăturate ei egale.', en: 'Case ASA: one side equal and the two angles next to it equal.' },
+            { at: .44, ro: 'Suprapunem latura egală; semidreptele unghiurilor se suprapun și se întâlnesc în același punct: triunghiurile coincid.', en: 'We match the equal side; the rays of the angles coincide and meet at the same point: the triangles coincide.' },
+            { at: .67, ro: 'Cazul L.L.L.: cele trei laturi respectiv egale.', en: 'Case SSS: the three sides equal.' },
+            { at: .77, ro: 'Suprapunem o latură; vârful al treilea este la aceleași distanțe de capete, deci cade în același loc (de aceeași parte). Triunghiurile se suprapun.', en: 'We match one side; the third vertex is at the same distances from the ends, so it lands in the same spot (on the same side). The triangles coincide.' }],
+          draw(g, t) {
+            g.view(42, 40, 280); const k = t < .34 ? 0 : t < .67 ? 1 : 2, lp = (t - k * .335) / .335, cs = CASES[k];
+            const m = es(lp, .3, .72), th0 = .45, dx = 6.1;
+            const T1 = cs.T, cen = P((T1[0].x + T1[1].x + T1[2].x) / 3, (T1[0].y + T1[1].y + T1[2].y) / 3);
+            const T2 = T1.map(p => { const q = rotp(P(p.x + dx, p.y), P(cen.x + dx, cen.y), th0 * (1 - m)); return P(q.x - dx * m, q.y); });
+            g.poly(T1, COL.c, { o: .22, stroke: '#fff', w: 2 }); g.poly(T2, COL.t, { o: .35, stroke: '#fff', w: 2 });
+            [T1, T2].forEach((T, ti) => {
+              cs.ed.forEach(([i, j, c]) => g.line(T[i], T[j], c, 4.5));
+              cs.an.forEach(([i, c]) => { const V = T[i], p = T[(i + 1) % 3], q = T[(i + 2) % 3], f0 = ang2(V, p), w = dfn(ang2(V, q) - f0); g.poly(sector(V, .7, f0, f0 + w, 16), c, { o: .65, stroke: '#fff', w: 1 }); });
+            });
+            const nm = ['A', 'B', 'C'];
+            [T1, T2].forEach((T, ti) => T.forEach((p, i) => { const dxo = p.x - (ti ? cen.x + dx * (1 - m) : cen.x), dyo = p.y - cen.y, l = Math.hypot(dxo, dyo) || 1; if (ti === 0 || m < .98) g.text(P(p.x + dxo / l * .4, p.y + dyo / l * .4), nm[i] + (ti ? '′' : ''), 16, '#fff'); }));
+            g.px(300, 358, EN() ? cs.en : cs.ro, 19, '#fff');
+            if (lp > .8) g.px(300, 392, 'ΔABC ≡ ΔA′B′C′', 22, '#fff', 'middle', es(lp, .8, .92));
+          }
+        });
+      }
+
+      // --- asemănarea: omotetia ---
+      DEMOS.push({
+        ro: 'Asemănarea: omotetia de centru O și raport k', en: 'Similarity: homothety with centre O and ratio k', dur: 30000,
+        steps: [
+          { at: 0, ro: 'Triunghiul ABC și un punct O (centrul). Vom construi o „copie” a triunghiului, mărită sau micșorată, folosind semidreptele din O.', en: 'Triangle ABC and a point O (the centre). We build a scaled “copy” of the triangle, enlarged or reduced, using rays from O.' },
+          { at: .12, ro: 'Raportul k = 2: pe fiecare semidreaptă OA, OB, OC luăm punctul cu OA′ = 2 · OA, OB′ = 2 · OB, OC′ = 2 · OC.', en: 'Ratio k = 2: on each ray OA, OB, OC we take the point with OA′ = 2 · OA, OB′ = 2 · OB, OC′ = 2 · OC.' },
+          { at: .4, ro: 'Triunghiul A′B′C′ are laturile paralele cu cele ale lui ABC, unghiurile egale, iar fiecare latură este de k ori mai mare: A′B′ = k · AB. Aria se înmulțește cu k².', en: 'Triangle A′B′C′ has sides parallel to those of ABC, equal angles, and every side is k times longer: A′B′ = k · AB. The area is multiplied by k².' },
+          { at: .52, ro: 'Pentru k = 0,5 obținem o micșorare: același procedeu, aceeași formă.', en: 'For k = 0.5 we get a reduction: the same procedure, the same shape.' },
+          { at: .82, ro: 'Omotetia produce triunghiuri asemenea: A′B′C′ ∼ ABC, cu raportul de asemănare k.', en: 'A homothety produces similar triangles: A′B′C′ ∼ ABC, with similarity ratio k.' }],
+        draw(g, t) {
+          g.view(48, 55, 330); const O = P(0, 0), A = P(1.2, .6), B = P(3.4, .6), C = P(2, 2.4);
+          const k = kf(t, [[.12, 1], [.36, 2], [.52, 2], [.76, .5]]);
+          const im = (p) => P(p.x * k, p.y * k), A2 = im(A), B2 = im(B), C2 = im(C);
+          g.poly([A, B, C], COL.c, { o: .3, stroke: '#fff', w: 2.5 });
+          if (t >= .08) { [[A, A2], [B, B2], [C, C2]].forEach(([p, q]) => { const f = Math.max(1, k); g.line(O, P(p.x * Math.max(f, 1) * 1.05, p.y * Math.max(f, 1) * 1.05), '#999', 1.5, '6 4'); }); }
+          if (t >= .1) { g.poly([A2, B2, C2], COL.t, { o: .35 * es(t, .1, .2), stroke: COL.t, w: 2.5 }); dot2(g, A2, COL.t, .08); dot2(g, B2, COL.t, .08); dot2(g, C2, COL.t, .08); }
+          dot2(g, O, COL.r, .1); g.text(P(-.3, -.35), 'O', 18, COL.r);
+          g.text(P(A.x - .15, A.y - .4), 'A', 16); g.text(P(B.x + .3, B.y - .35), 'B', 16); g.text(P(C.x - .3, C.y + .3), 'C', 16);
+          if (t >= .1) { const e = es(t, .1, .2); g.text(P(A2.x - .2, A2.y + (k >= 1 ? -.45 : .35)), 'A′', 16, COL.t, 'middle', e); g.text(P(B2.x + .35, B2.y + (k >= 1 ? -.1 : .3)), 'B′', 16, COL.t, 'middle', e); g.text(P(C2.x - .3, C2.y + .4), 'C′', 16, COL.t, 'middle', e); }
+          if (t >= .1) { const AB = 2.2; g.px(300, 388, 'k = ' + fmx(k, 1) + '    A′B′ = k · AB = ' + fmx(k * AB, 1) + '    ' + (EN() ? 'area × ' : 'aria × ') + fmx(k * k, 2), 19, '#fff', 'middle', es(t, .1, .2)); }
+        }
+      });
+
+      // --- parabola ---
+      DEMOS.push({
+        ro: 'Parabola y = ax² + bx + c: rolul lui a, b, c', en: 'The parabola y = ax² + bx + c: the roles of a, b, c', dur: 40000,
+        steps: [
+          { at: 0, ro: 'Graficul funcției y = ax² + bx + c este o parabolă. Începem cu y = x² (a = 1, b = 0, c = 0): vârful este în origine.', en: 'The graph of y = ax² + bx + c is a parabola. We start with y = x² (a = 1, b = 0, c = 0): the vertex is at the origin.' },
+          { at: .06, ro: 'Coeficientul a: dacă a > 0 ramurile se duc în sus, dacă a < 0 în jos. Cu cât |a| este mai mare, cu atât parabola este mai îngustă.', en: 'Coefficient a: if a > 0 the branches go up, if a < 0 down. The larger |a| is, the narrower the parabola.' },
+          { at: .34, ro: 'Termenul liber c: este ordonata punctului în care graficul taie axa Oy, (0, c). Modificând c, parabola urcă sau coboară, fără să se deformeze.', en: 'The constant term c: it is the ordinate of the point where the graph crosses the Oy axis, (0, c). Changing c moves the parabola up or down without deforming it.' },
+          { at: .56, ro: 'Coeficientul b mută vârful: abscisa vârfului este x = −b / (2a), iar dreapta x = −b / (2a) este axa de simetrie.', en: 'Coefficient b moves the vertex: its abscissa is x = −b / (2a), and the line x = −b / (2a) is the axis of symmetry.' },
+          { at: .9, ro: 'Vârful are ordonata y = −Δ / (4a), unde Δ = b² − 4ac.', en: 'The vertex has ordinate y = −Δ / (4a), where Δ = b² − 4ac.' }],
+        draw(g, t) {
+          g.view(34, 300, 218);
+          const a = kf(t, [[.06, 1], [.12, 2], [.19, .5], [.27, -1], [.33, 1]]), c = kf(t, [[.34, 0], [.41, 3], [.48, -2], [.55, 0]]), b = kf(t, [[.56, 0], [.63, 2], [.74, -4], [.85, 2], [.9, -4]]);
+          const gx = '#3a3a3a';
+          for (let i = -8; i <= 8; i++) g.line(P(i, -4.9), P(i, 4.9), i === 0 ? '#bbb' : gx, i === 0 ? 2 : 1);
+          for (let j = -4; j <= 4; j++) g.line(P(-8.7, j), P(8.7, j), j === 0 ? '#bbb' : gx, j === 0 ? 2 : 1);
+          [-8, -6, -4, -2, 2, 4, 6, 8].forEach(i => g.text(P(i, -.45), String(i), 11, '#888'));
+          [-4, -2, 2, 4].forEach(j => g.text(P(-.45, j), String(j), 11, '#888'));
+          let prev = null; for (let i = 0; i <= 174; i++) { const x = -8.7 + i * .1, y = a * x * x + b * x + c, cur = Math.abs(y) <= 4.85 ? P(x, y) : null; if (prev && cur) g.line(prev, cur, COL.c, 3.2); prev = cur; }
+          const xv = -b / (2 * a), yv = c - b * b / (4 * a);
+          if (t >= .56) g.line(P(xv, -4.9), P(xv, 4.9), COL.r, 1.8, '6 4');
+          if (t >= .56 && Math.abs(yv) < 4.85) { dot2(g, P(xv, yv), COL.r, .16); }
+          else if (t < .56) dot2(g, P(xv, yv), COL.r, .16);
+          dot2(g, P(0, c), COL.t, .15);
+          g.px(120, 24, 'a = ' + fmx(a, 1), 21, COL.a); g.px(300, 24, 'b = ' + fmx(b, 1), 21, COL.b); g.px(480, 24, 'c = ' + fmx(c, 1), 21, COL.t);
+          g.px(300, 395, 'V(' + fmx(xv, 1) + ' ; ' + fmx(yv, 1) + ')    x = −b / 2a = ' + fmx(xv, 1), 18, '#fff');
+        }
+      });
+
+      // --- modulul ca distanță ---
+      DEMOS.push({
+        ro: 'Modulul ca distanță pe axă', en: 'Absolute value as a distance on the number line', dur: 30000,
+        steps: [
+          { at: 0, ro: '|x| este distanța de la punctul x până la 0, pe axa numerelor. De aceea |x| nu este niciodată negativ: |−4| = |4| = 4.', en: '|x| is the distance from the point x to 0 on the number line. That is why |x| is never negative: |−4| = |4| = 4.' },
+          { at: .26, ro: '|x − 2| este distanța dintre x și 2. În general, |x − a| este distanța dintre punctele x și a.', en: '|x − 2| is the distance between x and 2. In general, |x − a| is the distance between the points x and a.' },
+          { at: .52, ro: 'Ecuația |x − 2| = 3 înseamnă: care puncte se află la distanța 3 de punctul 2? Unul la stânga, x = −1, și unul la dreapta, x = 5.', en: 'The equation |x − 2| = 3 asks: which points are at distance 3 from the point 2? One to the left, x = −1, and one to the right, x = 5.' },
+          { at: .78, ro: 'Inecuația |x − 2| < 3 înseamnă „distanța până la 2 este mai mică decât 3”: punctele dintre −1 și 5, adică x ∈ (−1, 5).', en: 'The inequality |x − 2| < 3 means “the distance to 2 is less than 3”: the points between −1 and 5, that is x ∈ (−1, 5).' }],
+        draw(g, t) {
+          g.view(40, 300, 200);
+          g.line(P(-7.3, 0), P(7.3, 0), '#ccc', 2.5); g.line(P(7.3, 0), P(7, .2), '#ccc', 2.5); g.line(P(7.3, 0), P(7, -.2), '#ccc', 2.5);
+          for (let i = -7; i <= 7; i++) { g.line(P(i, -.15), P(i, .15), '#ccc', 2); g.text(P(i, -.55), String(i).replace('-', '−'), 14, '#bbb'); }
+          const open = (p, col) => g.poly(arcPts(p, .14, 0, 6.3, 14), '#111', { stroke: col, w: 2.5 });
+          const seg = (a, b, y, col, w) => g.line(P(a, y), P(b, y), col, w || 5);
+          if (t < .26) {
+            const x = -4 + 7 * es(t, .04, .22); seg(0, x, 1, COL.a); dot2(g, P(0, 0), '#fff', .12); dot2(g, P(x, 0), COL.a, .16); g.text(P(x, .6 + 0), 'x', 16, COL.a);
+            g.text(P(x / 2, 1.5), '|x|', 18, COL.a); g.px(300, 385, 'x = ' + fmx(x, 1) + '   →   |x| = ' + fmx(Math.abs(x), 1), 22, '#fff');
+          } else if (t < .52) {
+            const x = 5 - 8 * es(t, .3, .48); seg(Math.min(x, 2), Math.max(x, 2), 1, COL.a); dot2(g, P(2, 0), COL.t, .16); g.text(P(2, -1.1), 'a = 2', 15, COL.t); dot2(g, P(x, 0), COL.a, .16); g.text(P(x, .6), 'x', 16, COL.a);
+            g.text(P((x + 2) / 2, 1.5), '|x − 2|', 18, COL.a); g.px(300, 385, 'x = ' + fmx(x, 1) + '   →   |x − 2| = ' + fmx(Math.abs(x - 2), 1), 22, '#fff');
+          } else if (t < .78) {
+            const e = es(t, .55, .7); dot2(g, P(2, 0), COL.t, .16); g.text(P(2, -1.1), '2', 15, COL.t);
+            seg(2 - 3 * e, 2, 1, COL.a); seg(2, 2 + 3 * e, 1, COL.a); g.text(P(.5, 1.5), '3', 18, COL.a, 'middle', e); g.text(P(3.5, 1.5), '3', 18, COL.a, 'middle', e);
+            if (e >= 1) { dot2(g, P(-1, 0), COL.r, .17); dot2(g, P(5, 0), COL.r, .17); g.text(P(-1, 1.5 - 2.3), 'x = −1', 15, COL.r); g.text(P(5, -1.1), 'x = 5', 15, COL.r); }
+            g.px(300, 385, '|x − 2| = 3   ⇒   x = −1   ' + (EN() ? 'or' : 'sau') + '   x = 5', 22, '#fff');
+          } else {
+            const e = es(t, .8, .92); dot2(g, P(2, 0), COL.t, .14);
+            seg(-1, -1 + 6 * e, 0, COL.a, 7); open(P(-1, 0), COL.r); open(P(5, 0), COL.r);
+            g.text(P(-1, -1.1), '−1', 15, COL.r); g.text(P(5, -1.1), '5', 15, COL.r);
+            g.px(300, 385, '|x − 2| < 3   ⇔   x ∈ (−1, 5)', 23, '#fff', 'middle', e);
+          }
+        }
+      });
+
+      // --- inegalitatea triunghiului ---
+      DEMOS.push({
+        ro: 'Inegalitatea triunghiului: |b − c| < a < b + c', en: 'The triangle inequality: |b − c| < a < b + c', dur: 34000,
+        steps: [
+          { at: 0, ro: 'Într-un triunghi, drumul direct de la B la C este mai scurt decât drumul ocolit B → A → C: BC < AB + AC.', en: 'In a triangle the direct way from B to C is shorter than the detour B → A → C: BC < AB + AC.' },
+          { at: .12, ro: 'Apropiem vârful A de latura BC: ocolul se scurtează, dar rămâne mai lung decât BC.', en: 'We bring vertex A closer to side BC: the detour gets shorter but stays longer than BC.' },
+          { at: .44, ro: 'Doar când A ajunge pe segmentul BC avem AB + AC = BC, dar atunci triunghiul „s-a aplatizat” și nu mai există.', en: 'Only when A lands on segment BC do we get AB + AC = BC, but then the triangle has “flattened” and no longer exists.' },
+          { at: .56, ro: 'Și diferența laturilor este mai mică decât a treia latură: |AB − AC| < BC. Coborâm A spre dreapta BC, în afara segmentului.', en: 'The difference of two sides is also smaller than the third: |AB − AC| < BC. We lower A towards line BC, outside the segment.' },
+          { at: .93, ro: 'Egalitatea apare doar la triunghiul degenerat. Pentru orice triunghi: |b − c| < a < b + c.', en: 'Equality appears only for the degenerate triangle. For every triangle: |b − c| < a < b + c.' }],
+        draw(g, t) {
+          g.view(45, 40, 255); const B = P(0, 0), C = P(6, 0);
+          let A;
+          if (t < .5) A = P(2.2, 3 * (1 - es(t, .12, .44)));
+          else if (t < .6) { const k = es(t, .5, .6); A = P(2.2 + 6.3 * k, 2.6 * k); }
+          else A = P(8.5, 2.6 * (1 - es(t, .68, .92)));
+          const AB = dist2(A, B), AC = dist2(A, C), flat = A.y < .04;
+          g.poly([A, B, C], '#4da6ff', { o: .12 });
+          g.line(B, C, '#fff', 3); g.line(B, A, COL.a, 3.5); g.line(A, C, COL.t, 3.5);
+          g.text(P(B.x - .3, B.y - .3), 'B', 18); g.text(P(C.x + (t < .5 ? .3 : -.1), C.y - .35), 'C', 18); g.text(P(A.x, A.y + .45), 'A', 18);
+          g.text(P(3, -.45), 'a', 17, '#fff');
+          if (t < .5) g.px(300, 388, 'AB + AC = ' + fmx(AB, 2) + ' + ' + fmx(AC, 2) + ' = ' + fmx(AB + AC, 2) + (flat ? ' = ' : ' > ') + 'BC = 6', 20, '#fff');
+          else if (t >= .6) g.px(300, 388, '|AB − AC| = ' + fmx(Math.abs(AB - AC), 2) + (flat ? ' = ' : ' < ') + 'BC = 6', 20, '#fff');
+        }
+      });
+
+      // --- volumul piramidei ---
+      DEMOS.push({
+        ro: 'Volumul piramidei: o treime din volumul prismei', en: 'Volume of a pyramid: one third of the prism', dur: 32000,
+        steps: [
+          { at: 0, ro: 'Pornim de la un cub cu latura a. Volumul lui este a³ = a² · a (aria bazei · înălțimea).', en: 'We start with a cube of side a. Its volume is a³ = a² · a (base area · height).' },
+          { at: .2, ro: 'Alegem un vârf V al cubului. Cele trei fețe care nu conțin V sunt bazele a trei piramide cu vârful în V.', en: 'We pick a vertex V of the cube. The three faces that do not contain V are the bases of three pyramids with apex V.' },
+          { at: .46, ro: 'Despărțim cele trei piramide: sunt identice (pot fi suprapuse prin rotații) și umplu cubul fără goluri.', en: 'We pull the three pyramids apart: they are identical (they can be matched by rotations) and fill the cube without gaps.' },
+          { at: .74, ro: 'Deci a³ = 3 · V_piramidă, adică V = a³ / 3 = (a² · a) / 3 = ⅓ · B · h. Formula rămâne valabilă pentru orice piramidă cu aceeași bază și înălțime.', en: 'So a³ = 3 · V_pyramid, that is V = a³ / 3 = (a² · a) / 3 = ⅓ · B · h. The formula holds for any pyramid with the same base and height.' }],
+        draw(g, t) {
+          g.view(50, 170, 250); const S = 2.4, d = es(t, .46, .66);
+          const pr = (x, y, z) => P(S * (x + .45 * z), S * (y + .35 * z));
+          const V = [1, 1, 1];
+          const pyr = (axis, off, col) => {
+            const base = axis === 0 ? [[0, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1]] : axis === 1 ? [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] : [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]];
+            const mv = (p) => pr(p[0] + off[0], p[1] + off[1], p[2] + off[2]);
+            const apex = mv(V), bp = base.map(mv), st = { stroke: '#fff', w: 1.6 };
+            g.poly(bp, col, { o: .32, ...st });
+            for (let i = 0; i < 4; i++) g.poly([bp[i], bp[(i + 1) % 4], apex], col, { o: .32, ...st });
+            dot2(g, apex, '#fff', .07);
+          };
+          if (t < .2) {
+            const e = [[[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [1, 1, 0]], [[1, 1, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]], [[0, 0, 1], [1, 0, 1]], [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 1, 1]], [[0, 1, 1], [0, 0, 1]], [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]]];
+            e.forEach(([p, q], i) => { const hid = i === 4 || i === 7 || i === 8; g.line(pr(...p), pr(...q), '#fff', 2.5, hid ? '6 5' : ''); });
+            g.poly([pr(0, 0, 0), pr(1, 0, 0), pr(1, 1, 0), pr(0, 1, 0)], COL.c, { o: .2 });
+            g.text(P(S * .5, -.35), 'a', 18, '#fff'); g.text(P(S * 1.08 + .05, S * .5), 'a', 18, '#fff'); g.text(P(S * 1.3, S * .15), 'a', 18, '#fff');
+            g.px(300, 388, 'V = a³ = a² · a', 22, '#fff');
+          } else {
+            pyr(0, [-d, 0, 0], COL.a); pyr(1, [0, -d, 0], COL.t); pyr(2, [.5 * d, .3 * d, 0], COL.b);
+            if (t < .46) { const a = pr(1, 1, 1); g.text(P(a.x + .3, a.y + .25), 'V', 19, '#fff'); }
+            g.px(300, 388, t < .46 ? (EN() ? '3 faces without V → 3 pyramids' : '3 fețe fără V → 3 piramide') : t < .74 ? (EN() ? '3 identical pyramids' : '3 piramide identice') : 'a³ = 3 · V   ⇒   V = ⅓ · B · h', 21, '#fff');
+          }
+        }
+      });
+
+      // --- permutări și aranjamente: arbore ---
+      DEMOS.push({
+        ro: 'Permutări și aranjamente, cu arborele alegerilor', en: 'Permutations and arrangements, with a tree of choices', dur: 36000,
+        steps: [
+          { at: 0, ro: 'În câte moduri putem așeza în rând literele A, B, C? Construim arborele alegerilor.', en: 'In how many ways can we line up the letters A, B, C? We build the tree of choices.' },
+          { at: .12, ro: 'Pe primul loc putem pune oricare dintre cele 3 litere: 3 alegeri.', en: 'Any of the 3 letters can go first: 3 choices.' },
+          { at: .3, ro: 'Pentru fiecare alegere, pe locul al doilea mai rămân 2 litere: 2 alegeri.', en: 'For each choice, 2 letters remain for the second place: 2 choices.' },
+          { at: .5, ro: 'Pe ultimul loc rămâne o singură literă. În total 3 · 2 · 1 = 6 ordonări: sunt permutările P₃ = 3! = 6.', en: 'Only one letter is left for the last place. In total 3 · 2 · 1 = 6 orderings: these are the permutations P₃ = 3! = 6.' },
+          { at: .76, ro: 'Dacă ne oprim după două locuri (alegem și ordonăm doar 2 litere din 3), obținem aranjamentele: A₃² = 3 · 2 = 6.', en: 'If we stop after two places (choose and order only 2 letters out of 3) we get the arrangements: A₃² = 3 · 2 = 6.' }],
+        draw(g, t) {
+          g.view(1, 0, 400); const Y = (p) => 400 - p, LC = { A: COL.a, B: COL.b, C: COL.t };
+          const l1 = es(t, .12, .25), l2 = es(t, .3, .45), l3 = es(t, .5, .65), arr = es(t, .76, .9);
+          const node = (x, yp, s, o) => { if (o <= 0) return; g.poly(arcPts(P(x, Y(yp)), 14, 0, 6.3, 16), '#111', { o: Math.min(1, o * 1.5) }); g.poly(arcPts(P(x, Y(yp)), 14, 0, 6.3, 16), LC[s] || '#555', { o: .9 * o, stroke: '#fff', w: 1.5 }); g.text(P(x, Y(yp)), s, 16, '#111', 'middle', o); };
+          const edge = (x0, y0, x1, y1, o) => { if (o > 0) g.line(P(x0, Y(y0)), P(x0 + (x1 - x0) * o, Y(y0 + (y1 - y0) * o)), '#bbb', 2); };
+          g.poly(arcPts(P(300, Y(36)), 14, 0, 6.3, 16), '#444', { stroke: '#fff', w: 1.5 }); g.text(P(300, Y(36)), '', 14);
+          const L = ['A', 'B', 'C'], xs = [100, 300, 500]; let words = [];
+          L.forEach((s1, i) => {
+            edge(300, 36, xs[i], 108, l1); node(xs[i], 108, s1, l1);
+            const rest = L.filter(q => q !== s1);
+            rest.forEach((s2, j) => {
+              const x2 = xs[i] + (j ? 45 : -45), s3 = rest.find(q => q !== s2);
+              edge(xs[i], 108, x2, 190, l2); node(x2, 190, s2, l2);
+              edge(x2, 190, x2, 268, l3 * (1 - arr)); node(x2, 268, s3, l3 * (1 - arr));
+              if (l3 > 0) g.text(P(x2, Y(312)), s1 + s2 + s3, 16, '#fff', 'middle', l3 * (1 - arr));
+              if (arr > 0) g.text(P(x2, Y(236)), s1 + s2, 17, '#fff', 'middle', arr);
+            });
+          });
+          const st = t < .12 ? '' : t < .3 ? (EN() ? '3 choices' : '3 alegeri') : t < .5 ? '3 · 2' : t < .76 ? '3 · 2 · 1 = 3! = 6' : 'A₃² = 3 · 2 = 6';
+          g.px(300, 388, st, 24, '#fff');
+        }
+      });
+
+      // --- drumuri pe grilă: combinări ---
+      DEMOS.push({
+        ro: 'Numărarea drumurilor pe grilă: combinări', en: 'Counting paths on a grid: combinations', dur: 36000,
+        steps: [
+          { at: 0, ro: 'Mergem din colțul stânga-jos (0, 0) până în (4, 3), doar spre dreapta (D) sau în sus (S). Un drum posibil: D D S D S S D. Câte drumuri sunt în total?', en: 'We go from the bottom-left corner (0, 0) to (4, 3), only right (R) or up (U). One possible path: R R U R U U R. How many paths are there in total?' },
+          { at: .2, ro: 'Numărăm pas cu pas: într-un nod se poate ajunge doar din stânga sau de jos, deci numărul de drumuri este suma celor două numere vecine.', en: 'We count step by step: a node can only be reached from the left or from below, so its number of paths is the sum of those two neighbours.' },
+          { at: .72, ro: 'În colțul (4, 3) obținem 35 de drumuri.', en: 'At the corner (4, 3) we get 35 paths.' },
+          { at: .86, ro: 'Același rezultat din alt punct de vedere: fiecare drum are 7 pași, dintre care 3 în sus. Alegem pozițiile celor 3 pași „sus” din 7: C(7, 3) = 7! / (3! · 4!) = 35.', en: 'The same result from another point of view: each path has 7 steps, 3 of them up. We choose the positions of the 3 “up” steps out of 7: C(7, 3) = 7! / (3! · 4!) = 35.' }],
+        draw(g, t) {
+          g.view(85, 130, 330);
+          const binom = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return Math.round(r); };
+          for (let i = 0; i <= 4; i++) g.line(P(i, 0), P(i, 3), 'rgba(255,255,255,.22)', 1.5);
+          for (let j = 0; j <= 3; j++) g.line(P(0, j), P(4, j), 'rgba(255,255,255,.22)', 1.5);
+          const path = [P(0, 0), P(1, 0), P(2, 0), P(2, 1), P(3, 1), P(3, 2), P(3, 3), P(4, 3)], pp = es(t, .03, .18) * (1 - es(t, .2, .26));
+          if (pp > .001) { const n = pp * 7; for (let i = 0; i < 7; i++) { const f = clamp(n - i, 0, 1); if (f > 0) g.line(path[i], lerp2(path[i], path[i + 1], f), COL.t, 5); } }
+          for (let i = 0; i <= 4; i++) for (let j = 0; j <= 3; j++) {
+            const ta = i + j === 0 ? .03 : .22 + .48 * ((i + j) / 7), o = i + j === 0 ? 1 : es(t, ta, ta + .05); if (o <= 0) continue;
+            const last = i === 4 && j === 3;
+            g.poly(arcPts(P(i, j), .27, 0, 6.3, 18), last && t > .72 ? COL.r : '#1d2b3a', { o: .95 * o, stroke: rgba('#ffffff', o), w: 1.6 });
+            g.text(P(i, j), String(binom(i + j, i)), 15, '#fff', 'middle', o);
+          }
+          g.text(P(-.35, -.4), '(0, 0)', 13, '#ccc'); g.text(P(4.1, 3.45), '(4, 3)', 13, '#ccc');
+          if (t < .2) g.px(300, 30, EN() ? 'R R U R U U R' : 'D D S D S S D', 22, COL.t, 'middle', es(t, .1, .2));
+          if (t >= .86) g.px(300, 388, 'C(7, 3) = 7! / (3! · 4!) = 35', 23, '#fff', 'middle', es(t, .86, .96));
+          else if (t >= .72) g.px(300, 388, EN() ? '35 paths' : '35 de drumuri', 23, '#fff', 'middle', es(t, .72, .8));
+        }
+      });
+
+      // --- probabilitate geometrică ---
+      DEMOS.push({
+        ro: 'Probabilitatea geometrică: punct aruncat într-un pătrat', en: 'Geometric probability: a point thrown into a square', dur: 34000,
+        steps: [
+          { at: 0, ro: 'Aruncăm la întâmplare un punct în pătratul de latură 1. Care este probabilitatea ca el să cadă în sfertul de cerc de rază 1?', en: 'We throw a point at random into the square of side 1. What is the probability that it lands inside the quarter circle of radius 1?' },
+          { at: .15, ro: 'Aruncăm multe puncte: verzi cele din sfertul de cerc, roșii cele din afară. Raportul dintre punctele verzi și toate se stabilizează.', en: 'We throw many points: green ones inside the quarter circle, red ones outside. The ratio of green points to all points settles down.' },
+          { at: .8, ro: 'Probabilitatea geometrică = aria favorabilă / aria totală = (π · 1² / 4) / 1² = π / 4 ≈ 0,785.', en: 'Geometric probability = favourable area / total area = (π · 1² / 4) / 1² = π / 4 ≈ 0.785.' }],
+        draw(g, t) {
+          g.view(58, 60, 345); const S = 5;
+          g.poly([P(0, 0), ...arcPts(P(0, 0), S, 0, Math.PI / 2, 40)], COL.a, { o: .2, stroke: COL.a, w: 2 });
+          g.poly(rect(0, 0, S, S), 'none', { stroke: '#fff', w: 2.5 });
+          const n = Math.floor(420 * es(t, .15, .78)); let seed = 12345, k = 0;
+          for (let i = 0; i < n; i++) {
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; const x = seed / 4294967296 * S;
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; const y = seed / 4294967296 * S;
+            const inn = x * x + y * y <= S * S; if (inn) k++;
+            g.poly(arcPts(P(x, y), .055, 0, 6.3, 6), inn ? COL.a : COL.r, {});
+          }
+          g.text(P(2.5, -.4), '1', 16, '#fff'); g.text(P(-.35, 2.5), '1', 16, '#fff');
+          g.px(385, 120, 'n = ' + n, 24, '#fff', 'start'); g.px(385, 160, (EN() ? 'inside: ' : 'în sfert: ') + k, 24, COL.a, 'start');
+          if (n > 0) g.px(385, 215, 'k / n = ' + fmx(k / n, 3), 26, '#fff', 'start');
+          if (t >= .8) { g.px(385, 275, 'π / 4 ≈ 0,785'.replace(',', EN() ? '.' : ','), 24, COL.t, 'start', es(t, .8, .92)); g.px(300, 396, 'P = ' + (EN() ? 'area quarter / area square' : 'aria sfert / aria pătrat') + ' = π / 4', 17, '#fff', 'middle', es(t, .8, .92)); }
+        }
+      });
+    }
+
+    // ordinea finală: de la noțiuni elementare la avansate, în ordinea logică a demonstrării
+    {
+      const ORDER = ["Fracții echivalente", "Adunarea fracțiilor", "Suma numerelor impare", "Suma 1 + 2", "Numere negative", "Modulul ca distanță", "Simetria", "Suma unghiurilor unui triunghi", "Unghiul exterior", "Inegalitatea triunghiului", "Triunghiuri congruente", "Aria paralelogramului", "Aria triunghiului", "Aria trapezului", "Aria patrulaterului", "Linia mijlocie", "Teorema lui Thales", "Asemănarea", "Mediane, înălțimi", "Teorema bisectoarei", "Pătratul unei sume", "Pătratul unei diferențe", "Diferența de pătrate", "Teorema lui Pitagora", "Pitagora — a doua", "Teorema înălțimii", "Lungimea cercului", "Aria cercului", "Tangenta", "Unghiul înscris", "Patrulaterul inscriptibil", "Volumul piramidei", "Inegalitatea mediilor", "Cubul unei sume", "Completarea pătratului", "Parabola", "Suma unei progresii", "Funcțiile sin", "Aria triunghiului cu sinus", "Dreapta lui Euler", "Permutări", "Numărarea drumurilor", "Probabilitatea geometrică", "Panta tangentei", "Aria sub curbă"];
+      const rest = DEMOS.slice(), out = [];
+      ORDER.forEach(k => { const i = rest.findIndex(x => x.ro.indexOf(k) === 0); if (i >= 0) out.push(rest.splice(i, 1)[0]); });
+      DEMOS.length = 0; DEMOS.push(...out, ...rest);
+    }
 
     let cur = 0, tt = 0, playing = false, raf = null, last = 0;
     function stepIndex(d) { let k = 0; d.steps.forEach((s, i) => { if (tt >= s.at - 1e-9) k = i; }); return k; }
@@ -14407,6 +14975,88 @@ function ensureOverlayFullyVisible(overlay) {
   header.addEventListener('pointercancel', endDrag);
 })();
 document.getElementById('calc-close').onclick = closeCalculator;
+
+// ---------------------------------------------------------------------
+// Cronometru cu alarmă: numărătoare inversă, cu sunet la expirare.
+// Continuă să ruleze și dacă închizi fereastra; la expirare fereastra se
+// redeschide și sună (WebAudio, fără fișiere externe) până o oprești.
+// ---------------------------------------------------------------------
+(function initTimer() {
+  const ov = document.getElementById('timer-overlay');
+  const disp = document.getElementById('tm-display'), status = document.getElementById('tm-status');
+  const inMin = document.getElementById('tm-min'), inSec = document.getElementById('tm-sec');
+  const startBtn = document.getElementById('tm-start'), resetBtn = document.getElementById('tm-reset'), btn = document.getElementById('btn-timer');
+  const en = () => LANG === 'en';
+  let state = 'idle';           // idle | running | paused | ringing
+  let total = 300, remaining = 300, endAt = 0, tick = null, audio = null, ringTimer = null, ringStop = null;
+  const fmt = (s) => { s = Math.max(0, Math.ceil(s)); const m = Math.floor(s / 60), r = s % 60; return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0'); };
+  const readInputs = () => Math.max(1, Math.min(999 * 60 + 59, (parseInt(inMin.value, 10) || 0) * 60 + (parseInt(inSec.value, 10) || 0)));
+  function setInputs(sec) { inMin.value = Math.floor(sec / 60); inSec.value = sec % 60; }
+  function labels() {
+    document.getElementById('tm-title').textContent = en() ? '⏱ Timer' : '⏱ Cronometru';
+    document.getElementById('tm-min-l').textContent = 'min'; document.getElementById('tm-sec-l').textContent = en() ? 'sec' : 'sec';
+    resetBtn.textContent = en() ? 'Reset' : 'Resetare';
+    startBtn.textContent = state === 'running' ? (en() ? 'Pause' : 'Pauză') : state === 'ringing' ? (en() ? 'Stop sound' : 'Oprește sunetul') : state === 'paused' ? (en() ? 'Resume' : 'Continuă') : (en() ? 'Start' : 'Pornește');
+    status.textContent = state === 'ringing' ? (en() ? "Time's up!" : 'Timp expirat!') : state === 'running' ? (en() ? 'Running…' : 'Rulează…') : state === 'paused' ? (en() ? 'Paused' : 'În pauză') : (en() ? 'Set the time and press Start' : 'Setează timpul și apasă Pornește');
+    document.getElementById('tm-set').style.display = (state === 'idle') ? 'flex' : 'none';
+    document.getElementById('tm-presets').style.display = (state === 'idle') ? 'flex' : 'none';
+    ov.classList.toggle('tm-done', state === 'ringing');
+    btn.classList.toggle('tm-running', state === 'running' || state === 'paused');
+    btn.classList.toggle('tm-ringing', state === 'ringing');
+    btn.title = state === 'running' ? (en() ? 'Timer — ' : 'Cronometru — ') + fmt(remaining) : (en() ? 'Timer with alarm' : 'Cronometru cu alarmă');
+  }
+  window.refreshTimerLabels = labels;
+  function ensureAudio() {
+    try {
+      if (!audio) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audio = new AC(); }
+      if (audio && audio.state === 'suspended') audio.resume();
+    } catch (e) {}
+  }
+  function beep(at, freq, dur) {
+    if (!audio) return;
+    const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + at;
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.35, t0 + 0.02); g.gain.setValueAtTime(0.35, t0 + dur - 0.05); g.gain.linearRampToValueAtTime(0, t0 + dur);
+    o.connect(g); g.connect(audio.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  function ringOnce() { for (let i = 0; i < 3; i++) { beep(i * 0.32, 988, 0.2); } beep(1.1, 1319, 0.45); }
+  function startRinging() {
+    state = 'ringing'; remaining = 0; disp.textContent = '00:00';
+    ov.style.display = 'block'; ensureOverlayFullyVisible(ov);
+    ensureAudio(); ringOnce();
+    ringTimer = setInterval(ringOnce, 2200);
+    ringStop = setTimeout(stopRinging, 60000);   // oprire automată după 1 minut
+    labels();
+  }
+  function stopRinging() {
+    clearInterval(ringTimer); clearTimeout(ringStop); ringTimer = ringStop = null;
+    if (state === 'ringing') { state = 'idle'; remaining = total; disp.textContent = fmt(total); setInputs(total); labels(); }
+  }
+  function loop() {
+    remaining = (endAt - Date.now()) / 1000;
+    if (remaining <= 0) { clearInterval(tick); tick = null; startRinging(); return; }
+    disp.textContent = fmt(remaining); btn.title = (en() ? 'Timer — ' : 'Cronometru — ') + fmt(remaining);
+  }
+  startBtn.onclick = () => {
+    ensureAudio();   // gest al utilizatorului: deblochează sunetul în browser
+    if (state === 'ringing') { stopRinging(); return; }
+    if (state === 'running') { clearInterval(tick); tick = null; remaining = (endAt - Date.now()) / 1000; state = 'paused'; disp.textContent = fmt(remaining); labels(); return; }
+    if (state === 'idle') { total = readInputs(); remaining = total; }
+    endAt = Date.now() + remaining * 1000; state = 'running';
+    tick = setInterval(loop, 200); loop(); labels();
+  };
+  resetBtn.onclick = () => { clearInterval(tick); tick = null; stopRinging(); state = 'idle'; remaining = total = readInputs(); disp.textContent = fmt(total); labels(); };
+  [inMin, inSec].forEach(i => i.addEventListener('input', () => { if (state === 'idle') { total = remaining = readInputs(); disp.textContent = fmt(total); } }));
+  document.getElementById('tm-presets').addEventListener('click', (e) => { const b = e.target.closest('[data-sec]'); if (!b || state !== 'idle') return; total = remaining = +b.dataset.sec; setInputs(total); disp.textContent = fmt(total); });
+  btn.onclick = () => { if (ov.style.display === 'block') { ov.style.display = 'none'; return; } ov.style.left = ov.style.top = ov.style.transform = ''; ov.style.display = 'block'; labels(); ensureOverlayFullyVisible(ov); };
+  document.getElementById('tm-close').onclick = () => { ov.style.display = 'none'; };
+  // tragere după antet
+  const header = ov.querySelector('.tm-header'); let drag = false, sx = 0, sy = 0, ol = 0, ot = 0;
+  header.addEventListener('pointerdown', e => { if (e.target.closest('#tm-close')) return; drag = true; const r = ov.getBoundingClientRect(); ol = r.left; ot = r.top; sx = e.clientX; sy = e.clientY; ov.style.left = ol + 'px'; ov.style.top = ot + 'px'; ov.style.transform = 'none'; try { header.setPointerCapture(e.pointerId); } catch (err) {} e.preventDefault(); });
+  header.addEventListener('pointermove', e => { if (!drag) return; ov.style.left = Math.max(0, ol + e.clientX - sx) + 'px'; ov.style.top = Math.max(0, ot + e.clientY - sy) + 'px'; });
+  header.addEventListener('pointerup', () => { drag = false; }); header.addEventListener('pointercancel', () => { drag = false; });
+  disp.textContent = fmt(total); labels();
+})();
 
 // Punctul din centrul suprafeței vizibile curente (tablă sau fișă PDF), în
 // coordonate de conținut — reutilizează pos(), care știe deja să convertească
@@ -18094,7 +18744,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v401</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v424</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -18238,7 +18888,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v401</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v424</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -18501,7 +19151,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v401';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v424';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere

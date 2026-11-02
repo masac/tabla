@@ -447,6 +447,31 @@ input:focus-visible {
     #text-overlay .text-toolbar button.align-right { text-align: right; min-width: 28px; }
     #text-overlay .text-toolbar button.active-align { background: #d0e0f5; border-color: #0055cc; }
 
+    #timer-overlay {
+      position: absolute; display: none; z-index: 21; top: 70px; left: 50%; transform: translateX(-50%);
+      background: #ffffff; color: #222; border: 2px solid #0055cc; border-radius: 10px; padding: 10px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25); width: 250px; user-select: none;
+    }
+    #timer-overlay .tm-header { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #d0d0d8; cursor: move; touch-action: none; }
+    #timer-overlay .tm-header button, #timer-overlay .tm-btn { border: 1px solid #d0d0d8; background: #f7f7fa; color: #222; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    #timer-overlay .tm-header button { width: 24px; height: 24px; }
+    #timer-overlay .tm-btn { padding: 7px 10px; font-weight: 600; }
+    #timer-overlay .tm-btn:hover, #timer-overlay .tm-header button:hover { background: #ececf4; }
+    #timer-overlay .tm-display { font-size: 44px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 1px; padding: 4px 0 2px; }
+    #timer-overlay.tm-done { border-color: #d32f2f; }
+    #timer-overlay.tm-done .tm-display { color: #d32f2f; animation: tm-blink .6s steps(2, start) infinite; }
+    @keyframes tm-blink { to { visibility: hidden; } }
+    #timer-overlay .tm-status { text-align: center; font-size: 12px; color: #777; min-height: 16px; margin-bottom: 6px; }
+    #timer-overlay .tm-set { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 8px; font-size: 13px; }
+    #timer-overlay .tm-set input { width: 52px; text-align: center; font-size: 18px; padding: 4px; border: 1px solid #d0d0d8; border-radius: 6px; background: #fff; color: #222; }
+    #timer-overlay .tm-presets { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; flex-wrap: wrap; }
+    #timer-overlay .tm-presets .tm-btn { padding: 4px 8px; font-size: 12px; }
+    #timer-overlay .tm-actions { display: flex; gap: 6px; }
+    #timer-overlay .tm-actions .tm-btn { flex: 1; }
+    #timer-overlay #tm-start { background: #0055cc; color: #fff; border-color: #0055cc; }
+    #timer-overlay #tm-start:hover { background: #0044a6; }
+    #btn-timer.tm-running { color: #0055cc; border-color: #0055cc; }
+    #btn-timer.tm-ringing { color: #fff; background: #d32f2f; border-color: #d32f2f; }
     #calc-overlay {
       position: absolute;
       display: none;
@@ -952,6 +977,20 @@ input:focus-visible {
       <span style="white-space:nowrap;">123</span>
     </label>
 
+    <div id="timer-overlay">
+      <div class="tm-header"><span id="tm-title">⏱ Cronometru</span><button id="tm-close" title="Închide">✕</button></div>
+      <div class="tm-display" id="tm-display">05:00</div>
+      <div class="tm-status" id="tm-status"></div>
+      <div class="tm-set" id="tm-set">
+        <input type="number" id="tm-min" min="0" max="999" value="5" aria-label="Minute"> <span id="tm-min-l">min</span>
+        <input type="number" id="tm-sec" min="0" max="59" value="0" aria-label="Secunde"> <span id="tm-sec-l">sec</span>
+      </div>
+      <div class="tm-presets" id="tm-presets">
+        <button class="tm-btn" data-sec="60">1 min</button><button class="tm-btn" data-sec="180">3 min</button><button class="tm-btn" data-sec="300">5 min</button><button class="tm-btn" data-sec="600">10 min</button><button class="tm-btn" data-sec="900">15 min</button>
+      </div>
+      <div class="tm-actions"><button class="tm-btn" id="tm-start">Pornește</button><button class="tm-btn" id="tm-reset">Resetare</button></div>
+    </div>
+
     <div id="calc-overlay">
       <div class="calc-header">
         <span id="calc-header-title">🧮 Calculator</span>
@@ -1126,6 +1165,7 @@ input:focus-visible {
       <input type="file" id="file-input" accept="image/*" style="display:none">
       <button class="tool" id="btn-upload-multi" style="color:#006600; border-color:#006600;"><i class="ti ti-photos"></i> +</button>
       <button class="tool" id="btn-calculator" title="Calculator"><i class="ti ti-calculator"></i></button>
+      <button class="tool" id="btn-timer" title="Cronometru cu alarmă"><i class="ti ti-hourglass-high"></i></button>
       <input type="file" id="file-input-multi" accept="image/*" multiple style="display:none">
     </div>
     <div class="sep"></div>
