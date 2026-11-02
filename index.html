@@ -1113,6 +1113,7 @@ input:focus-visible {
           <button class="tool" id="btn-area-grid" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-grid-4x4"></i> Arii și perimetre pe caroiaj</button>
           <button class="tool" id="btn-visual-demos" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-player-play"></i> Demonstrații vizuale</button>
           <button class="tool" id="btn-geo-tasks" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-ruler-2"></i> Exerciții cu instrumente</button>
+          <button class="tool" id="btn-div-tally" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-divide"></i> Împărțire vizuală (bețișoare)</button>
           <button class="tool" id="btn-tangram" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-puzzle"></i> Tangram (joc)</button>
           <button class="tool" id="btn-miliardar" style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; justify-content:flex-start; padding:8px 10px;"><i class="ti ti-coin"></i> Vrei să fii miliardar? (joc)</button>
         </div>
@@ -1411,6 +1412,28 @@ input:focus-visible {
   </div>
 </div>
 
+<div id="dt-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(900px, 98vw); max-height:98vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span id="dt-title" style="font-size:17px; font-weight:700;">Împărțire vizuală</span>
+      <button id="dt-close" class="tool" style="color:#fff;">✕</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:14px;">
+      <input id="dt-a" type="number" inputmode="numeric" min="1" max="99999999" value="6402" style="width:110px; background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:5px 7px; font-size:16px;">
+      <b style="font-size:18px;">:</b>
+      <select id="dt-b" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:5px 7px; font-size:16px;"></select>
+      <button id="dt-go" class="tool" style="font-size:13px;">▶ Start</button>
+      <button id="dt-next" class="tool" style="font-size:13px;">Pasul următor</button>
+      <button id="dt-all" class="tool" style="font-size:13px;">Arată tot</button>
+      <button id="dt-rand" class="tool" style="font-size:13px;">🎲 Exemplu</button>
+    </div>
+    <div id="dt-eq" style="font-size:30px; font-family:'Segoe Print','Comic Sans MS',cursive; letter-spacing:2px; text-align:center; min-height:44px;"></div>
+    <svg id="dt-svg" viewBox="0 0 760 300" style="width:100%; height:auto; max-height:62vh; background:#111; border-radius:8px; touch-action:manipulation; user-select:none;"></svg>
+    <div id="dt-msg" style="text-align:center; min-height:44px; font-size:15px; color:#ddd;"></div>
+  </div>
+</div>
+<style>@keyframes dtpop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}.dt-g{animation:dtpop .35s both}</style>
+
 <div id="tg-backdrop" style="display:none; position:fixed; inset:0; z-index:410; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
   <div style="background:#1e1e22; border-radius:12px; padding:16px; width:min(1000px, 98vw); max-height:98vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px; color:#fff;">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -1521,6 +1544,7 @@ input:focus-visible {
       <span id="dv-title" style="font-size:17px; font-weight:700;">Demonstrații vizuale</span>
       <button id="dv-close" class="tool" style="color:#fff;">✕</button>
     </div>
+    <input id="dv-find" type="search" autocomplete="off" placeholder="Caută o demonstrație (scrie câteva litere)…" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:6px 8px; font-size:14px; width:100%; box-sizing:border-box;">
     <select id="dv-sel" style="background:#111; color:#fff; border:1px solid #444; border-radius:6px; padding:6px 8px; font-size:14px; max-width:100%;"></select>
     <svg id="dv-svg" viewBox="0 0 600 400" style="width:100%; height:auto; max-height:56vh; background:#111; border-radius:8px;"></svg>
     <div id="dv-cap" style="text-align:center; min-height:44px; font-size:15px; color:#e8e8ee; line-height:1.35;"></div>

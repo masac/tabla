@@ -12143,6 +12143,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       ev.preventDefault();
       selId = pc.id;
       const i = pieces.indexOf(pc); pieces.splice(i, 1); pieces.push(pc);   // în față
+      if (pc.slot != null) msg.textContent = '';      // piesa a fost scoasă din loc: mesajul vechi nu mai e valabil
       pc.slot = null;
       const r = svg.getBoundingClientRect(), k = 1 / Math.min(r.width / W, r.height / H);
       drag = { pc, sx: ev.clientX, sy: ev.clientY, ox: pc.x, oy: pc.y, k, moved: false, rect: r };
@@ -12235,6 +12236,92 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     $('tg-close').onclick = () => { backdrop.style.display = 'none'; };
     backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
     window.__tg = { get pieces() { return pieces; }, sol, ORG, S, poly, check, get won() { return won; } };
+  })();
+
+  /* ---------------- Împărțire vizuală (bețișoare) ---------------- */
+  (function () {
+    const backdrop = $('dt-backdrop'), svg = $('dt-svg'), eq = $('dt-eq'), msg = $('dt-msg'), inA = $('dt-a'), inB = $('dt-b');
+    const NS = 'http://www.w3.org/2000/svg';
+    const mk = (name, attrs, txt) => { const e = document.createElementNS(NS, name); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (txt != null) e.textContent = txt; return e; };
+    let A = 6402, B = 3, rows = [], shown = 0, qStr = '', rest = 0;
+    function compute() {
+      const ds = String(A).split('').map(Number); rows = [];
+      let pre = 1, cur = ds[0];
+      while (cur < B && pre < ds.length) { cur = cur * 10 + ds[pre]; pre++; }
+      let prevRem = null, i = pre;
+      for (;;) {
+        const g = Math.floor(cur / B), r = cur % B;
+        rows.push({ val: cur, carried: prevRem, digit: prevRem == null ? null : ds[i - 1], groups: g, rem: r, pos: i });
+        prevRem = r;
+        if (i >= ds.length) break;
+        cur = r * 10 + ds[i]; i++;
+      }
+      rest = prevRem; qStr = rows.map(r => r.groups).join('');
+    }
+    function render(animLast) {
+      svg.innerHTML = '';
+      const RH = 54, X0 = 20, XL = 150, XR = 740, TOP = 8, n = shown;
+      svg.setAttribute('viewBox', `0 0 760 ${Math.max(120, TOP * 2 + RH * Math.max(1, n))}`);
+      const h = TOP * 2 + RH * Math.max(1, n);
+      if (n) {
+        svg.appendChild(mk('rect', { x: X0, y: TOP, width: XR - X0, height: RH * n, fill: 'none', stroke: '#fff', 'stroke-width': 2 }));
+        svg.appendChild(mk('line', { x1: XL, y1: TOP, x2: XL, y2: TOP + RH * n, stroke: '#fff', 'stroke-width': 2 }));
+      }
+      const need = Math.max(...rows.map(r => r.groups * ((B - 1) * 7 + 18) + r.rem * 7)), KS = Math.min(1, (XR - XL - 22 - 95) / need);
+      for (let k = 0; k < n; k++) {
+        const r = rows[k], y = TOP + RH * k, cy = y + RH / 2, last = k === n - 1;
+        if (k) svg.appendChild(mk('line', { x1: X0, y1: y, x2: XR, y2: y, stroke: '#fff', 'stroke-width': 2 }));
+        // celula din stânga: restul adus (galben) + cifra coborâtă
+        const t = mk('text', { x: XL - 14, y: cy + 10, 'text-anchor': 'end', 'font-size': 30, 'font-family': "'Segoe Print','Comic Sans MS',cursive", fill: '#fff' });
+        if (r.carried != null && r.carried > 0) { t.appendChild(mk('tspan', { fill: '#ffd34d' }, String(r.carried))); t.appendChild(mk('tspan', { fill: '#7dd3fc' }, String(r.digit))); }
+        else t.textContent = String(r.val);
+        svg.appendChild(t);
+        // bețișoare: grupe de câte B (tăiate cu o linie) + restul (galben)
+        const SP = 7 * KS, GH = 30, gy = cy - GH / 2, GAP = 18 * KS;
+        let x = XL + 22;
+        for (let g = 0; g < r.groups; g++) {
+          const grp = mk('g', { class: animLast && last ? 'dt-g' : '', style: animLast && last ? `animation-delay:${g * 0.3}s` : '' });
+          for (let s = 0; s < B; s++) grp.appendChild(mk('line', { x1: x + s * SP, y1: gy, x2: x + s * SP, y2: gy + GH, stroke: '#fff', 'stroke-width': 3, 'stroke-linecap': 'round' }));
+          grp.appendChild(mk('line', { x1: x - 4, y1: gy + GH - 4, x2: x + (B - 1) * SP + 4, y2: gy + 4, stroke: '#fff', 'stroke-width': 3, 'stroke-linecap': 'round' }));
+          svg.appendChild(grp); x += (B - 1) * SP + GAP;
+        }
+        const rg = mk('g', { class: animLast && last ? 'dt-g' : '', style: animLast && last ? `animation-delay:${r.groups * 0.3}s` : '' });
+        for (let s = 0; s < r.rem; s++) rg.appendChild(mk('line', { x1: x + s * SP, y1: gy, x2: x + s * SP, y2: gy + GH, stroke: '#ffd34d', 'stroke-width': 3, 'stroke-linecap': 'round' }));
+        svg.appendChild(rg);
+        // cifra câtului
+        svg.appendChild(mk('text', { x: XR - 12, y: cy + 8, 'text-anchor': 'end', 'font-size': 22, fill: '#7be3a3', 'font-weight': 700 }, '→ ' + r.groups));
+      }
+      // ecuația de sus: câtul se completează pe măsură ce avansăm
+      const done = rows.slice(0, n).map(r => r.groups).join('');
+      eq.innerHTML = `${A} : ${B} = <span style="color:#7be3a3">${done}</span>${n < rows.length ? '<span style="opacity:.4">' + '?'.repeat(rows.length - n) + '</span>' : (rest ? ` <span style="color:#ffd34d; font-size:22px">${T('rest', 'rem.')} ${rest}</span>` : '')}`;
+      // explicație
+      if (!n) msg.textContent = T('Apasă „Pasul următor”: la fiecare rând facem grupe de câte ' + B + ' bețișoare din numărul scris în stânga.', 'Press “Next step”: in each row we make groups of ' + B + ' sticks from the number on the left.');
+      else {
+        const r = rows[n - 1];
+        const what = r.carried != null && r.carried > 0 ? T(`restul ${r.carried} și cifra coborâtă ${r.digit} formează ${r.val}`, `the remainder ${r.carried} and the brought-down digit ${r.digit} make ${r.val}`) : T(`avem ${r.val}`, `we have ${r.val}`);
+        let m = `${what}: ` + T(`${r.groups} ${r.groups === 1 ? 'grupă' : 'grupe'} de câte ${B} (${r.groups * B}) și rămân ${r.rem} bețișoare. Cifra câtului: ${r.groups}.`, `${r.groups} ${r.groups === 1 ? 'group' : 'groups'} of ${B} (${r.groups * B}) and ${r.rem} sticks are left. Quotient digit: ${r.groups}.`);
+        if (n === rows.length) m += ' ' + (rest ? T(`Rezultat: ${A} : ${B} = ${qStr}, rest ${rest}. Verificare: ${qStr}·${B}+${rest} = ${A}.`, `Result: ${A} : ${B} = ${qStr}, remainder ${rest}. Check: ${qStr}·${B}+${rest} = ${A}.`) : T(`Rezultat: ${A} : ${B} = ${qStr}. Verificare: ${qStr}·${B} = ${A}.`, `Result: ${A} : ${B} = ${qStr}. Check: ${qStr}·${B} = ${A}.`));
+        msg.textContent = m;
+      }
+      $('dt-next').disabled = n >= rows.length; $('dt-next').style.opacity = n >= rows.length ? .4 : 1;
+    }
+    function start() {
+      let a = Math.floor(Number(inA.value)); if (!(a >= 1)) a = 1; if (a > 99999999) a = 99999999;
+      A = a; B = +inB.value; inA.value = A; compute(); shown = 0; render(false);
+    }
+    function fill() {
+      inB.innerHTML = [2, 3, 4, 5, 6, 7, 8, 9].map(v => `<option value="${v}">${v}</option>`).join(''); inB.value = B; inA.value = A;
+      $('dt-title').textContent = T('Împărțire vizuală cu bețișoare', 'Visual division with sticks');
+      $('dt-next').textContent = T('Pasul următor', 'Next step'); $('dt-all').textContent = T('Arată tot', 'Show all'); $('dt-rand').textContent = T('🎲 Exemplu', '🎲 Example');
+    }
+    $('dt-go').onclick = start;
+    $('dt-next').onclick = () => { if (shown < rows.length) { shown++; render(true); } };
+    $('dt-all').onclick = () => { shown = rows.length; render(false); };
+    $('dt-rand').onclick = () => { B = 2 + Math.floor(Math.random() * 8); A = B * (100 + Math.floor(Math.random() * 9000)) + (Math.random() < .5 ? 0 : Math.floor(Math.random() * B)); inB.value = B; inA.value = A; start(); };
+    inA.addEventListener('keydown', e => { if (e.key === 'Enter') start(); }); inB.addEventListener('change', start);
+    $('btn-div-tally').onclick = () => { fill(); backdrop.style.display = 'flex'; start(); };
+    $('dt-close').onclick = () => { backdrop.style.display = 'none'; };
+    backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) backdrop.style.display = 'none'; });
   })();
 
   /* ---------------- Vrei să fii miliardar (joc) ---------------- */
@@ -12757,6 +12844,75 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         if (t >= .52 && t < .75) g.px(300, 385, 'β = ' + dB + '° (alterne interne)'.replace('alterne interne', EN() ? 'alternate interior' : 'alterne interne'), 20, COL.t);
         if (t >= .75) g.px(300, 385, 'α + γ + β = ' + dA + '° + ' + dC + '° + ' + dB + '° = 180°', 22, '#fff', 'middle', es(t, .75, .9));
         if (t >= .3 && t < .52) g.px(300, 385, (EN() ? 'α = ' : 'α = ') + dA + '° (' + (EN() ? 'alternate interior' : 'alterne interne') + ')', 20, COL.a);
+      }
+    });
+    // 4b. suma unghiurilor — foaie de hârtie pliată în dreptunghi
+    DEMOS.push({
+      ro: 'Suma unghiurilor — triunghi de hârtie pliat', en: 'Angle sum — folding a paper triangle', dur: 24000,
+      steps: [
+        { at: 0, ro: 'Decupăm un triunghi din hârtie și îl privim în spațiu, așezat pe masă. Colorăm unghiurile: α în A, β în B și γ în C. Pliurile (liniile punctate) sunt linia mijlocie și două perpendiculare pe bază.', en: 'We cut a triangle out of paper and look at it in space, lying on a table. We colour its angles: α at A, β at B, γ at C. The creases (dotted lines) are the midline and two perpendiculars to the base.' },
+        { at: .1, ro: 'Pliul 1: îndoim vârful C peste linia mijlocie, până ajunge exact pe baza AB (în piciorul înălțimii).', en: 'Fold 1: we fold vertex C down along the midline until it lands exactly on the base AB (at the foot of the altitude).' },
+        { at: .38, ro: 'Pliul 2: îndoim vârful A, pe un pliu perpendicular pe bază, până ajunge în același punct.', en: 'Fold 2: we fold vertex A along a crease perpendicular to the base until it reaches the same point.' },
+        { at: .58, ro: 'Pliul 3: la fel pentru vârful B. Triunghiul s-a transformat într-un dreptunghi.', en: 'Fold 3: the same for vertex B. The triangle has become a rectangle.' },
+        { at: .8, ro: 'Cele trei vârfuri se întâlnesc într-un singur punct de pe latura dreptunghiului, iar unghiurile α, γ, β stau unul lângă altul și formează un unghi alungit: α + β + γ = 180°.', en: 'The three vertices meet at one point on the side of the rectangle, and the angles α, γ, β sit side by side forming a straight angle: α + β + γ = 180°.' }],
+      draw(g, t) {
+        g.view(42, 120, 300);
+        const A = P(0, 0), B = P(8, 0), C = P(3.2, 4.4), H = P(C.x, 0), h = C.y, ym = h / 2;
+        const M = mid2(A, C), N = mid2(B, C), xa = M.x, xb = N.x;
+        const aA = Math.atan2(C.y, C.x - A.x), aB = Math.atan2(C.y, B.x - C.x);
+        const dA = Math.round(aA / D2R), dB = Math.round(aB / D2R), dC = 180 - dA - dB;
+        const cA = '#ffd34d', cB = '#4dd0ff', cC = '#ff6b6b';
+        const f1 = es(t, .1, .3) * Math.PI, f2 = es(t, .38, .54) * Math.PI, f3 = es(t, .58, .74) * Math.PI;
+        // cameră în perspectivă, fixă
+        // proiecție oblică (planul foii e un paralelogram, ca într-un desen în perspectivă), fixă
+        const DST = 28, CX = 4, CY = 1.8;
+        const pr = (x, y, z) => P(CX + (x - CX) + .5 * (y - CY), CY + .65 * (y - CY) + .045 * (x - CX) + z);
+        const flat = (q, z) => pr(q.x, q.y, z || 0);
+        const EPS = .012;
+        const mTop = (q, th) => { const d = q.y - ym; return pr(q.x, ym + d * Math.cos(th), d * Math.sin(th) + EPS * th / Math.PI); };
+        const mL = (q, th) => { const d = q.x - xa; return pr(xa + d * Math.cos(th), q.y, -d * Math.sin(th) + 2 * EPS * th / Math.PI); };
+        const mR = (q, th) => { const d = q.x - xb; return pr(xb + d * Math.cos(th), q.y, d * Math.sin(th) + 3 * EPS * th / Math.PI); };
+        const paper = (th) => th > Math.PI / 2 ? ['#9db8ff', .6] : ['#ffffff', .22];
+        const r = .85;
+        const secA = sector(A, r, 0, aA, 16), secB = sector(B, r, Math.PI - aB, Math.PI, 16);
+        const aCA = Math.atan2(A.y - C.y, A.x - C.x), aCB = Math.atan2(B.y - C.y, B.x - C.x), secC = sector(C, r, aCA, aCB, 16);
+        // masa (suprafața de sub foaie), ca să se vadă adâncimea
+        const tb = [[-1.2, -1.3], [9.2, -1.3], [9.2, 5.6], [-1.2, 5.6]].map(([x, y]) => flat(P(x, y), -.05));
+        g.poly(tb, '#2b3038', { o: .9, stroke: '#3a414c', w: 1.5 });
+        for (let gx = -1; gx <= 9; gx += 2) g.line(flat(P(gx, -1.3), -.05), flat(P(gx, 5.6), -.05), '#3a414c', 1);
+        for (let gy = -1; gy <= 5; gy += 1.5) g.line(flat(P(-1.2, gy), -.05), flat(P(9.2, gy), -.05), '#3a414c', 1);
+        // dreptunghiul rămâne pe loc
+        g.poly([P(xa, 0), P(xb, 0), P(xb, ym), P(xa, ym)].map(q => flat(q)), '#fff', { o: .22, stroke: 'none', w: 2 });
+        g.line(flat(P(xa, 0)), flat(P(xb, 0)), '#fff', 2);
+        const flap = (pts, map, th, sec, col, lab, labP) => {
+          const [fc, fo] = paper(th);
+          g.poly(pts.map(q => map(q, th)), fc, { o: fo, stroke: '#fff', w: 2 });
+          g.poly(sec.map(q => map(q, th)), col, { o: .92, stroke: '#fff', w: 1.2 });
+          g.text(map(labP, th), lab, 16, '#111');
+        };
+        const labAt = (V, a0, a1, rr) => P(V.x + rr * Math.cos((a0 + a1) / 2), V.y + rr * Math.sin((a0 + a1) / 2));
+        const sCmid = (aCA + aCB) / 2;
+        flap([A, P(xa, 0), M], mL, f2, secA, cA, 'α', labAt(A, 0, aA, r * .62));
+        flap([P(xb, 0), B, N], mR, f3, secB, cB, 'β', labAt(B, Math.PI - aB, Math.PI, r * .62));
+        flap([M, N, C], mTop, f1, secC, cC, 'γ', P(C.x + r * .62 * Math.cos(sCmid), C.y + r * .62 * Math.sin(sCmid)));
+        // pliurile (linii punctate) înainte de a fi făcute
+        if (t < .74) {
+          if (f1 < .01) g.line(flat(M, .01), flat(N, .01), '#fff', 2, '6 5');
+          if (f2 < .01) g.line(flat(P(xa, 0), .01), flat(M, .01), '#fff', 2, '6 5');
+          if (f3 < .01) g.line(flat(P(xb, 0), .01), flat(N, .01), '#fff', 2, '6 5');
+        }
+        g.text(flat(P(A.x - .3, A.y - .35)), 'A', 18); g.text(flat(P(B.x + .3, B.y - .35)), 'B', 18);
+        if (f1 < .05) g.text(flat(P(C.x, C.y + .4)), 'C', 18);
+        // rezultatul: unghiul alungit
+        const e = es(t, .8, .9);
+        if (e > 0) {
+          const z0 = 3 * EPS + .02;
+          g.poly(arcPts(H, 1.3, Math.PI, 0, 28).map(q => flat(q, z0)), 'none', { stroke: '#fff', w: 1.6, o: 1, dash: '5 4' });
+          g.text(flat(P(H.x, 1.75), z0), '180°', 20, '#fff', 'middle', e);
+          g.dot(flat(H, z0), 4, '#fff');
+        }
+        if (t < .1) g.px(300, 395, 'α = ' + dA + '°,  β = ' + dB + '°,  γ = ' + dC + '°', 18, '#ccc');
+        if (t >= .8) g.px(300, 395, 'α + β + γ = ' + dA + '° + ' + dB + '° + ' + dC + '° = 180°', 22, '#fff', 'middle', e);
       }
     });
     // 5. unghi înscris în cerc (cazul general, triunghiuri isoscele)
@@ -13841,7 +13997,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
 
     // ordinea finală: de la noțiuni elementare la avansate, în ordinea logică a demonstrării
     {
-      const ORDER = ["Fracții echivalente", "Adunarea fracțiilor", "Suma numerelor impare", "Suma 1 + 2", "Numere negative", "Modulul ca distanță", "Simetria", "Suma unghiurilor unui triunghi", "Unghiul exterior", "Inegalitatea triunghiului", "Triunghiuri congruente", "Aria paralelogramului", "Aria triunghiului", "Aria trapezului", "Aria patrulaterului", "Linia mijlocie", "Teorema lui Thales", "Asemănarea", "Mediane, înălțimi", "Teorema bisectoarei", "Pătratul unei sume", "Pătratul unei diferențe", "Diferența de pătrate", "Teorema lui Pitagora", "Pitagora — a doua", "Teorema înălțimii", "Lungimea cercului", "Aria cercului", "Tangenta", "Unghiul înscris", "Patrulaterul inscriptibil", "Volumul piramidei", "Inegalitatea mediilor", "Cubul unei sume", "Completarea pătratului", "Parabola", "Suma unei progresii", "Funcțiile sin", "Aria triunghiului cu sinus", "Dreapta lui Euler", "Permutări", "Numărarea drumurilor", "Probabilitatea geometrică", "Panta tangentei", "Aria sub curbă"];
+      const ORDER = ["Fracții echivalente", "Adunarea fracțiilor", "Suma numerelor impare", "Suma 1 + 2", "Numere negative", "Modulul ca distanță", "Simetria", "Suma unghiurilor unui triunghi", "Suma unghiurilor — triunghi de hârtie", "Unghiul exterior", "Inegalitatea triunghiului", "Triunghiuri congruente", "Aria paralelogramului", "Aria triunghiului", "Aria trapezului", "Aria patrulaterului", "Linia mijlocie", "Teorema lui Thales", "Asemănarea", "Mediane, înălțimi", "Teorema bisectoarei", "Pătratul unei sume", "Pătratul unei diferențe", "Diferența de pătrate", "Teorema lui Pitagora", "Pitagora — a doua", "Teorema înălțimii", "Lungimea cercului", "Aria cercului", "Tangenta", "Unghiul înscris", "Patrulaterul inscriptibil", "Volumul piramidei", "Inegalitatea mediilor", "Cubul unei sume", "Completarea pătratului", "Parabola", "Suma unei progresii", "Funcțiile sin", "Aria triunghiului cu sinus", "Dreapta lui Euler", "Permutări", "Numărarea drumurilor", "Probabilitatea geometrică", "Panta tangentei", "Aria sub curbă"];
       const rest = DEMOS.slice(), out = [];
       ORDER.forEach(k => { const i = rest.findIndex(x => x.ro.indexOf(k) === 0); if (i >= 0) out.push(rest.splice(i, 1)[0]); });
       DEMOS.length = 0; DEMOS.push(...out, ...rest);
@@ -13861,14 +14017,26 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     function play() { if (tt >= 1) tt = 0; playing = true; last = performance.now(); raf = requestAnimationFrame(tick); render(); }
     function pause() { playing = false; cancelAnimationFrame(raf); render(); }
     function load(i) { cur = i; tt = 0; pause(); render(); }
-    function fill() { const c = sel.value || '0'; sel.innerHTML = DEMOS.map((d, i) => `<option value="${i}">${i + 1}. ${EN() ? d.en : d.ro}</option>`).join(''); sel.value = c; $('dv-title').textContent = T('Demonstrații vizuale', 'Visual demonstrations'); }
+    const norm = (x) => String(x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const find = $('dv-find');
+    function fill() {
+      const c = sel.value || '0', q = norm(find.value).trim().split(/\s+/).filter(Boolean);
+      const hit = (d, i) => { const h = norm((i + 1) + ' ' + d.ro + ' ' + d.en); return q.every(w => h.includes(w)); };
+      const list = DEMOS.map((d, i) => [d, i]).filter(([d, i]) => hit(d, i));
+      sel.innerHTML = list.map(([d, i]) => `<option value="${i}">${i + 1}. ${EN() ? d.en : d.ro}</option>`).join('') || `<option value="" disabled>${T('Nicio demonstrație găsită', 'No demonstration found')}</option>`;
+      if (list.some(([d, i]) => String(i) === c)) sel.value = c; else if (list.length) sel.value = String(list[0][1]);
+      sel.size = q.length && list.length ? Math.min(list.length, 6) : 0;      // în timpul căutării lista se vede deschisă
+      find.placeholder = T('Caută o demonstrație (scrie câteva litere)…', 'Search a demonstration (type a few letters)…');
+      $('dv-title').textContent = T('Demonstrații vizuale', 'Visual demonstrations'); }
     playBtn.onclick = () => { playing ? pause() : play(); };
     $('dv-reset').onclick = () => { tt = 0; pause(); };
     $('dv-prev').onclick = () => { pause(); const d = DEMOS[cur], k = stepIndex(d); tt = (tt - d.steps[k].at > .02 || k === 0) ? d.steps[k].at : d.steps[k - 1].at; render(); };
     $('dv-next').onclick = () => { pause(); const d = DEMOS[cur], k = stepIndex(d); tt = k + 1 < d.steps.length ? d.steps[k + 1].at : 1; render(); };
     slider.oninput = () => { const v = slider.value / 1000; pause(); tt = v; render(); };
-    sel.onchange = () => { load(+sel.value); play(); };
-    $('btn-visual-demos').onclick = () => { fill(); backdrop.style.display = 'flex'; load(+sel.value || 0); };
+    sel.onchange = () => { if (sel.value === '') return; load(+sel.value); play(); };
+    find.addEventListener('input', fill);
+    find.addEventListener('keydown', e => { if (e.key === 'Enter' && sel.value !== '') { e.preventDefault(); load(+sel.value); play(); find.blur(); } });
+    $('btn-visual-demos').onclick = () => { find.value = ''; fill(); backdrop.style.display = 'flex'; load(+sel.value || 0); };
     const closeIt = () => { pause(); backdrop.style.display = 'none'; };
     $('dv-close').onclick = closeIt;
     backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) closeIt(); });
@@ -14175,7 +14343,7 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
     $('gt-fold').onclick = () => { const b = $('gt-body'); b.style.display = b.style.display === 'none' ? 'flex' : 'none'; $('gt-fold').textContent = b.style.display === 'none' ? '▸' : '▾'; };
   })();
 
-  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-miliardar', 'btn-balance', 'btn-area-grid', 'btn-visual-demos', 'btn-geo-tasks'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
+  ['btn-mult-game', 'btn-tri-lines', 'btn-hangman', 'btn-hanoi', 'btn-tangram', 'btn-div-tally', 'btn-miliardar', 'btn-balance', 'btn-area-grid', 'btn-visual-demos', 'btn-geo-tasks'].forEach(id => $(id).addEventListener('click', () => { $('math-menu-popup').style.display = 'none'; }));
 })();
 
 document.getElementById('btn-circle').onclick = () => setTool('circle');
@@ -18744,7 +18912,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v424</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v429</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -18784,6 +18952,7 @@ const HELP_CONTENT_HTML = `
   <li><b>Demonstrații vizuale</b> — animații pas cu pas pentru idei importante din matematică: teorema lui Pitagora, (a + b)², diferența de pătrate, suma unghiurilor unui triunghi, unghiul înscris în cerc (jumătate din unghiul la centru), aria paralelogramului, triunghiului și cercului, lungimea cercului, suma numerelor impare, suma 1 + 2 + … + n, teorema lui pătratul unei diferențe, cubul unei sume, completarea pătratului, suma progresiei aritmetice, adunarea fracțiilor, Thales, linia mijlocie, aria trapezului și a patrulaterului cu diagonale perpendiculare, mediane/înălțimi/bisectoare concurente, teorema înălțimii și a catetei, a doua demonstrație a teoremei lui Pitagora (forfecare), simetria (reflexie, rotație, translație), fracții echivalente, inegalitatea mediilor, numere negative pe axă, sin și cos din cercul unitate, derivata ca limită a secantelor și suma Riemann. Cu ▶/⏸ pornești sau oprești animația, cu ◀ ▶ sari între pași, iar cu cursorul o derulezi manual. Sub desen apare explicația fiecărui pas.</li>
   <li><b>Arii și perimetre pe caroiaj</b> — o figură colorată pe caroiaj (un pătrățel = 1 cm²): elevul calculează aria, perimetrul sau ambele; dacă greșește, pătrățelele sau laturile conturului se numerotează ca să le numere. Varianta „Desenează figura”: se cer o arie și un perimetru, iar elevul colorează pătrățele (poate trage degetul) până se potrivesc; sub grilă vede aria și perimetrul figurii lui. Trei niveluri: dreptunghiuri, figuri din 6–10 pătrățele, figuri din 10–16.</li>
   <li><b>Exerciții cu instrumente</b> — deschide tu instrumentele de care ai nevoie (sunt listate în panou); dacă greșești, apare „▶ Arată cum”, o animație pas cu pas a rezolvării corecte (pornește singură la a doua greșeală). Sarcini pe tablă cu rigla, echerul, raportorul și compasul: măsori un segment sau un unghi și scrii răspunsul, apoi desenezi segmente, unghiuri, perpendiculare, paralele, cercuri, mediatoare și bisectoare. Butonul „Verifică” controlează desenul tău (toleranță mică, de ordinul unui milimetru sau al câtorva grade); „Altă sarcină” trece mai departe și șterge desenele sarcinii.</li>
+  <li><b>Împărțire vizuală (bețișoare)</b> — împărțirea unui număr la un număr de o cifră, ca pe tablă: la fiecare rând se formează grupe de câte „împărțitor” bețișoare (tăiate cu o linie); numărul de grupe este cifra câtului, iar bețișoarele rămase (galben) se unesc cu cifra următoare. Folosești „Pasul următor” sau „Arată tot”.</li>
   <li><b>Tangram (joc)</b> — reconstruiești o siluetă din cele 7 piese (2 triunghiuri mari, 1 mediu, 2 mici, un pătrat și un paralelogram). Tragi piesele, atingi o piesă ca s-o rotești cu 45° și poți întoarce paralelogramul. Butonul „Indiciu” arată conturul pieselor.</li>
   <li><b>Vrei să fii miliardar? (joc)</b> — seturi de câte 10 întrebări cu 4 variante de răspuns, în ordine crescătoare a dificultății: matematică (primar, gimnaziu, liceu), limba și literatura română, biologie, fizică, geografie și sport; fiecare domeniu are 10 seturi. Ai trei ajutoare: 50:50, publicul și prietenul. După întrebarea 5 ai o sumă sigură (1.000), iar „Mă retrag” te lasă să pleci cu suma câștigată.</li>
   <li><b>Hangman (joc)</b> — elevul ghicește litere pentru a descoperi un cuvânt; categorii: Matematică (cuvinte în română, nivel la alegere, cu definiție la final), Animale, Flori și Obiecte; cuvintele sunt în limba interfeței (română sau engleză), iar la final apare traducerea în cealaltă limbă; are 6 vieți, poate cere un indiciu (costă o viață) și poate scrie literele și de la tastatură. La final apare definiția cuvântului.</li>
@@ -18888,7 +19057,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v424</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v429</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -18928,6 +19097,7 @@ const HELP_CONTENT_HTML_EN = `
   <li><b>Visual demonstrations</b> — step-by-step animations of key ideas: the Pythagorean theorem, (a + b)², difference of squares, angle sum of a triangle, inscribed angle (half the central angle), areas of a parallelogram, triangle and circle, circumference, sum of odd numbers, 1 + 2 + … + n, square of a difference, cube of a sum, completing the square, arithmetic progression sum, adding fractions, Thales' theorem, the midsegment, areas of a trapezoid and of a quadrilateral with perpendicular diagonals, concurrent medians/altitudes/bisectors, the altitude and leg theorems, the second (shearing) proof of Pythagoras, symmetry (reflection, rotation, translation), equivalent fractions, the AM–GM inequality, negative numbers on the number line, sine and cosine from the unit circle, the derivative as a limit of secants and Riemann sums. ▶/⏸ plays or pauses, ◀ ▶ jump between steps, and the slider scrubs manually. The explanation of each step appears under the drawing.</li>
   <li><b>Areas and perimeters on a grid</b> — a coloured figure on a grid (one square = 1 cm²): the student works out the area, the perimeter or both; after a mistake the squares or outline sides get numbered so they can be counted. The “Draw the figure” variant gives an area and a perimeter, and the student colours squares (dragging works) until they match; below the grid the area and perimeter of their figure are shown. Three levels: rectangles, figures of 6–10 squares, figures of 10–16.</li>
   <li><b>Tool exercises</b> — open the tools you need yourself (they are listed in the panel); if you get it wrong, “▶ Show how” appears, a step-by-step animation of the correct method (it starts by itself after the second mistake). Tasks on the whiteboard using the ruler, set square, protractor and compass: measure a segment or an angle and type the answer, then draw segments, angles, perpendiculars, parallels, circles, perpendicular bisectors and angle bisectors. “Check” verifies your drawing (small tolerance, about a millimeter or a few degrees); “Another task” moves on and clears the task drawings.</li>
+  <li><b>Visual division (sticks)</b> — dividing a number by a one-digit number as on the board: each row makes groups of “divisor” sticks (crossed by a line); the number of groups is the quotient digit, and the leftover sticks (yellow) join the next digit. Use “Next step” or “Show all”.</li>
   <li><b>Tangram (game)</b> — rebuild a silhouette from the 7 pieces (2 large triangles, 1 medium, 2 small, a square and a parallelogram). Drag the pieces, tap a piece to rotate it by 45°, and flip the parallelogram. The “Hint” button shows the outline of the pieces.</li>
   <li><b>Who wants to be a billionaire? (game)</b> — 10 questions with 4 answers, in increasing difficulty: math (primary, middle school, high school), Romanian language and literature, biology, physics, geography and sports; each subject has 10 sets. You have three lifelines: 50:50, audience and friend. After question 5 you reach a safe amount (1,000), and “Walk away” lets you leave with what you have won.</li>
   <li><b>Hangman (game)</b> — the student guesses letters to uncover a word; categories: Math (with definitions), Animals, Flowers, Objects; words follow the interface language (Romanian or English), and the translation into the other language is shown at the end; 6 lives, an optional hint (costs a life), and letters can also be typed on the keyboard. The definition of the word is shown at the end. (The word list is in Romanian.)</li>
@@ -19151,7 +19321,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v424';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v429';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
