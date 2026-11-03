@@ -12149,6 +12149,11 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
       drag = { pc, sx: ev.clientX, sy: ev.clientY, ox: pc.x, oy: pc.y, k, moved: false, rect: r };
       drawAll();
       let top = svg.lastChild; const pid = ev.pointerId;
+      // piesa trasă trece pe un strat separat, mutat de placa video (transform): zona de joc nu se mai redesenează la fiecare mișcare
+      const sc = 1 / k, ox0 = pc.x, oy0 = pc.y, ov = document.createElementNS(NS, 'svg');
+      ov.setAttribute('viewBox', svg.getAttribute('viewBox'));
+      ov.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:420;overflow:visible;will-change:transform;`;
+      ov.appendChild(top.cloneNode(false)); document.body.appendChild(ov); top.setAttribute('opacity', '0');
       try { top.setPointerCapture && top.setPointerCapture(pid); } catch (_) {}
       const mv = (e) => {
         if (e.pointerId !== pid) return;
@@ -12164,12 +12169,12 @@ document.getElementById('btn-arrow').onclick = () => setTool('arrow');
         raf = 0;
         const ddx = tx - pc.x, ddy = ty - pc.y;
         if (Math.abs(ddx) + Math.abs(ddy) < .4) { pc.x = tx; pc.y = ty; } else { pc.x += ddx * .45; pc.y += ddy * .45; raf = requestAnimationFrame(step); }
-        top.setAttribute('points', poly(pc).map(p => p[0] + ',' + p[1]).join(' '));
+        ov.style.transform = `translate3d(${(pc.x - ox0) * sc}px,${(pc.y - oy0) * sc}px,0)`;
       };
       const up = (e) => {
         if (e && e.pointerId !== pid) return;
         window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
-        if (raf) cancelAnimationFrame(raf); pc.x = tx; pc.y = ty;
+        if (raf) cancelAnimationFrame(raf); pc.x = tx; pc.y = ty; ov.remove();
         if (!drag.moved) { pc.rot = (pc.rot + 1) % 8; autoPlace(pc); }          // atingere = rotire cu 45°
         else if (!autoPlace(pc)) snap(pc);
         drag = null; drawAll(); check();
@@ -18912,7 +18917,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v429</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v431</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -19057,7 +19062,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v429</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v431</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -19321,7 +19326,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v429';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v431';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
