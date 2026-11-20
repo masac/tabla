@@ -872,6 +872,7 @@ input:focus-visible {
       cursor: pointer;
       min-height: clamp(22px, 2.1vw, 30px);
       flex-shrink: 0;
+      width: auto; font-size: clamp(13px, 1.1vw, 16px);
     }
     #lang-select:hover { background: #e2e2e8; }
   </style>
@@ -1225,11 +1226,11 @@ input:focus-visible {
     <div class="sep"></div>
     <div class="tool-group" style="margin-left: auto;">
       <select id="lang-select" title="Limbă / Language">
-        <option value="ro">🇷🇴 Română</option>
-        <option value="en">🇬🇧 English</option>
+        <option value="ro" title="Română">🇷🇴</option>
+        <option value="en" title="English">🇬🇧</option>
       </select>
-      <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i> Ajutor</button>
-      <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i> Licență</button>
+      <button class="tool" id="btn-help" title="Ajutor"><i class="ti ti-help"></i></button>
+      <button class="tool" id="btn-license" title="Licență"><i class="ti ti-license"></i></button>
     </div>
   </div>
 </div>

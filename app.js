@@ -388,8 +388,6 @@ function applyStaticUI() {
 
   setBtnText('btn-load-pdf', 'Fișă PDF', 'PDF Sheet');
   setBtnText('btn-culegere', 'Culegere', 'Problem book');
-  setBtnText('btn-help', 'Ajutor', 'Help');
-  setBtnText('btn-license', 'Licență', 'License');
   setElText('calc-header-title', '🧮 Calculator', '🧮 Calculator');
   if (window.refreshTimerLabels) window.refreshTimerLabels();
   setElText('text-header-title', '✎ Text', '✎ Text');
@@ -18910,7 +18908,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v432</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v433</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -19055,7 +19053,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v432</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v433</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -19319,7 +19317,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v432';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v433';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
