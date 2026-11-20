@@ -4064,13 +4064,21 @@ function drawSelectionHighlights() {
   selCtx.lineWidth = 2;
   selCtx.setLineDash([5, 4]);
   
-  for (const idx of selectedStrokes) {
-    const stroke = page.strokes[idx];
-    if (!stroke) continue;
-    const bbox = getStrokeBoundingBox(stroke);
-    selCtx.strokeRect(bbox.x - 2, bbox.y - 2, bbox.w + 4, bbox.h + 4);
-    selCtx.fillStyle = 'rgba(230, 126, 0, 0.15)';
-    selCtx.fillRect(bbox.x - 2, bbox.y - 2, bbox.w + 4, bbox.h + 4);
+  // Un singur dreptunghi pentru TOATĂ selecția (combinat), nu câte unul pentru fiecare element.
+  {
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const idx of selectedStrokes) {
+      const stroke = page.strokes[idx];
+      if (!stroke) continue;
+      const b = getStrokeBoundingBox(stroke);
+      bx0 = Math.min(bx0, b.x); by0 = Math.min(by0, b.y);
+      bx1 = Math.max(bx1, b.x + b.w); by1 = Math.max(by1, b.y + b.h);
+    }
+    if (bx0 < bx1 || by0 < by1) {
+      selCtx.strokeRect(bx0 - 2, by0 - 2, bx1 - bx0 + 4, by1 - by0 + 4);
+      selCtx.fillStyle = 'rgba(230, 126, 0, 0.15)';
+      selCtx.fillRect(bx0 - 2, by0 - 2, bx1 - bx0 + 4, by1 - by0 + 4);
+    }
   }
   
   selCtx.setLineDash([]);
@@ -4115,6 +4123,28 @@ function drawSelectionHighlights() {
       selCtx.stroke();
       selCtx.restore();
 
+      // Mâner de multiplicare (copiere) — la fel pentru un singur element sau pentru un grup
+      // selectat; colțul din dreapta-jos, decalat față de mânerul de scalare (distanța e în
+      // pixeli de ECRAN, convertită în conținut, ca zonele de atingere să nu se suprapună).
+      const cpOffset = geoScreenLengthToContent(27);
+      const cpx = hx + cpOffset;
+      const cpy = hy + cpOffset;
+      currentDuplicateHandle = { x: cpx, y: cpy, strokeIdx: [...selectedStrokes] };
+      selCtx.save();
+      selCtx.fillStyle = '#8e44ad';
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 2.5 * hs;
+      selCtx.beginPath();
+      selCtx.arc(cpx, cpy, 12 * hs, 0, Math.PI * 2);
+      selCtx.fill();
+      selCtx.stroke();
+      selCtx.strokeStyle = '#ffffff';
+      selCtx.lineWidth = 1.6 * hs;
+      selCtx.lineJoin = 'round';
+      selCtx.strokeRect(cpx - 6 * hs, cpy - 3 * hs, 7 * hs, 7 * hs);
+      selCtx.strokeRect(cpx - 2 * hs, cpy - 7 * hs, 7 * hs, 7 * hs);
+      selCtx.restore();
+
       // Mâner de ștergere (X roșu) — colțul din dreapta-sus, la fel ca la imagini
       const dx = bbox.x + bbox.w + 2 * hs;
       const dy = bbox.y - 2 * hs;
@@ -4140,45 +4170,6 @@ function drawSelectionHighlights() {
       selCtx.restore();
     }
   }
-  if (selectedStrokes.size === 1) {
-    const idx = [...selectedStrokes][0];
-    const stroke = page.strokes[idx];
-    if (stroke) {
-      const bbox = getStrokeBoundingBox(stroke);
-      const hs = geoScreenLengthToContent(1);
-
-      // Mâner de multiplicare (copiere) — colțul din dreapta-jos, ușor
-      // decalat față de mânerul de scalare (același colț), ca să nu se
-      // suprapună. Decalajul e definit tot ca o lungime de ECRAN (convertită
-      // în conținut) — la o valoare fixă în conținut, la zoom mic pe PDF
-      // (tipic pe telefon, ca să încapă toată pagina) zonele de "lovire" ale
-      // celor două mânere (deja adaptate la scară) ar ajunge să se
-      // suprapună, făcând ca o încercare de redimensionare să declanșeze
-      // din greșeală duplicarea.
-      const hx = bbox.x + bbox.w + 2 * hs;
-      const hy = bbox.y + bbox.h + 2 * hs;
-      const cpOffset = geoScreenLengthToContent(27);
-      const cpx = hx + cpOffset;
-      const cpy = hy + cpOffset;
-      currentDuplicateHandle = { x: cpx, y: cpy, strokeIdx: idx };
-      selCtx.save();
-      selCtx.fillStyle = '#8e44ad';
-      selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 2.5 * hs;
-      selCtx.beginPath();
-      selCtx.arc(cpx, cpy, 12 * hs, 0, Math.PI * 2);
-      selCtx.fill();
-      selCtx.stroke();
-      // pictogramă "copiere" — două pătrate suprapuse
-      selCtx.strokeStyle = '#ffffff';
-      selCtx.lineWidth = 1.6 * hs;
-      selCtx.lineJoin = 'round';
-      selCtx.strokeRect(cpx - 6 * hs, cpy - 3 * hs, 7 * hs, 7 * hs);
-      selCtx.strokeRect(cpx - 2 * hs, cpy - 7 * hs, 7 * hs, 7 * hs);
-      selCtx.restore();
-    }
-  }
-
   // Mâner de rotire — pentru corpuri 3D poligonale/rotunde (nu și pentru sferă, care arată
   // la fel din orice unghi) ȘI pentru figuri geometrice 2D (poligoane), poziționat
   // în colțul din stânga-sus, opus mânerului de scalare.
@@ -4337,18 +4328,19 @@ function offsetStrokeInPlace(s, dx, dy) {
 
 // Multiplică (copiază) stroke-ul selectat — clonă completă, ușor decalată,
 // inserată imediat deasupra originalului și selectată automat.
-function duplicateSelectedStroke(idx) {
+function duplicateSelectedStrokes(idxList) {
   const page = getCurrentPage();
   if (!page) return;
-  const stroke = page.strokes[idx];
-  if (!stroke) return;
-
-  const clone = JSON.parse(JSON.stringify(stroke));
-  const offset = 24;
-  offsetStrokeInPlace(clone, offset, offset);
-
-  pushStroke(page, clone);
-  selectedStrokes = new Set([page.strokes.length - 1]);
+  const list = (Array.isArray(idxList) ? idxList : [idxList]).filter(i => page.strokes[i]).sort((x, y) => x - y);
+  if (!list.length) return;
+  const offset = 24, created = [];
+  for (const i of list) {
+    const clone = JSON.parse(JSON.stringify(page.strokes[i]));
+    offsetStrokeInPlace(clone, offset, offset);
+    pushStroke(page, clone);
+    created.push(page.strokes.length - 1);
+  }
+  selectedStrokes = new Set(created);
   selectedImages.clear();
   updateImageSelection();
   redrawStrokes();
@@ -4643,13 +4635,14 @@ function handlePointerDown(e) {
       }
     }
 
-    if (currentDuplicateHandle && selectedStrokes.has(currentDuplicateHandle.strokeIdx)) {
+    if (currentDuplicateHandle && currentDuplicateHandle.strokeIdx.length > 0 &&
+        currentDuplicateHandle.strokeIdx.every(i => selectedStrokes.has(i))) {
       const cphx = p.x - currentDuplicateHandle.x, cphy = p.y - currentDuplicateHandle.y;
       // Vezi explicația de la delHitRadius mai sus — aceeași conversie.
       const cpHitRadius = geoScreenLengthToContent(e.pointerType === 'touch' ? 30 : 16);
       if (Math.sqrt(cphx * cphx + cphy * cphy) < cpHitRadius && page) {
         e.preventDefault();
-        duplicateSelectedStroke(currentDuplicateHandle.strokeIdx);
+        duplicateSelectedStrokes(currentDuplicateHandle.strokeIdx);
         return;
       }
     }
@@ -18917,7 +18910,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v431</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v432</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -19062,7 +19055,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v431</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v432</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -19326,7 +19319,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v431';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v432';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
