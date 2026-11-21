@@ -173,8 +173,10 @@ input:focus-visible {
     .pdf-pane-draw { z-index: 2; }
     .pdf-pane-overlay { z-index: 3; pointer-events: none; }
     .pdf-pane-select { z-index: 4; pointer-events: none; }
-    .pdf-pane-images { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; transform-origin: 0 0; }
-    .pdf-pane-images .image-item { pointer-events: auto; touch-action: none; }
+    /* imaginile neselectate stau SUB stratul de scris (ca pe tablă): se poate scrie peste ele; cele selectate trec în față, ca să li se poată folosi mânerele */
+    .pdf-pane-images { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; transform-origin: 0 0; }
+    .pdf-pane-images-front { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; transform-origin: 0 0; }
+    .pdf-pane-images .image-item, .pdf-pane-images-front .image-item { pointer-events: auto; touch-action: none; }
 
     /* ===== Rezolvări pentru exerciții trimise din culegere: bifa din fața numărului + cardul cu rezolvarea ===== */
     .pdf-pane-marks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
@@ -891,6 +893,7 @@ input:focus-visible {
       <canvas class="pdf-pane-overlay"></canvas>
       <canvas class="pdf-pane-select"></canvas>
       <div class="pdf-pane-images"></div>
+      <div class="pdf-pane-images-front"></div>
       <div class="pdf-scrollbar-track"><div class="pdf-scrollbar-thumb"></div></div>
       <div class="pdf-pane-empty">📄 Nicio fișă încărcată</div>
       <div class="pdf-pane-controls">

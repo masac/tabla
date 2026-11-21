@@ -581,6 +581,7 @@ function updatePdfPaneImagesTransform(name) {
   if (!els || !els.images) return;
   const ct = getPaneContentTransform(name);
   els.images.style.transform = `translate(${ct.offX}px, ${ct.offY}px) scale(${ct.scale})`;
+  if (els.imagesFront) els.imagesFront.style.transform = els.images.style.transform;
 }
 
 function applyImagesPanTransform() {
@@ -598,6 +599,7 @@ function applyImagesPanTransform() {
     if (els.images) {
       const ct = getPaneContentTransform(activeSurface);
       els.images.style.transform = `translate(${ct.offX}px, ${ct.offY}px) scale(${ct.scale})`;
+      if (els.imagesFront) els.imagesFront.style.transform = els.images.style.transform;
     }
   }
 }
@@ -979,6 +981,7 @@ function getPaneEls(name) {
     overlay: root.querySelector('.pdf-pane-overlay'),
     select: root.querySelector('.pdf-pane-select'),
     images: root.querySelector('.pdf-pane-images'),
+    imagesFront: root.querySelector('.pdf-pane-images-front'),
     pagenum: root.querySelector('.pdf-pane-pagenum'),
     scrollTrack: root.querySelector('.pdf-scrollbar-track'),
     scrollThumb: root.querySelector('.pdf-scrollbar-thumb')
@@ -2199,6 +2202,7 @@ function renderImages() {
   const isPdfPane = !!pdfPanes[activeSurface];
   const pdfEls = isPdfPane ? getPaneEls(activeSurface) : null;
   if (pdfEls && pdfEls.images) pdfEls.images.innerHTML = '';
+  if (pdfEls && pdfEls.imagesFront) pdfEls.imagesFront.innerHTML = '';
   const targetContainer = (isPdfPane && pdfEls && pdfEls.images) ? pdfEls.images : imagesContainer;
 
   const page = getCurrentPage();
@@ -2295,13 +2299,20 @@ let resizeOrigW = 0, resizeOrigH = 0;
 let imageDragStartPositions = new Map();
 
 function updateImageSelection() {
-  document.querySelectorAll('#images-container .image-item, #images-container-front .image-item, .pdf-pane-images .image-item').forEach(el => {
+  document.querySelectorAll('#images-container .image-item, #images-container-front .image-item, .pdf-pane-images .image-item, .pdf-pane-images-front .image-item').forEach(el => {
     const id = parseInt(el.dataset.imageId);
     const isSelected = selectedImages.has(id);
     el.classList.toggle('selected', isSelected);
     // Distincția spate/față (mutarea între cele două containere) există
     // doar pe tablă — fereastra PDF are un singur strat de imagini.
-    if (el.closest('.pdf-pane')) return;
+    const paneEl = el.closest('.pdf-pane');
+    if (paneEl) {
+      // la fel ca pe tablă: imaginea selectată trece în față, cele neselectate rămân sub scris
+      const pEls = getPaneEls(paneEl.dataset.pane);
+      const dst = isSelected ? pEls.imagesFront : pEls.images;
+      if (dst && el.parentNode !== dst) dst.appendChild(el);
+      return;
+    }
     // Doar imaginea (imaginile) selectată(e) curent trec deasupra liniilor
     // desenate, ca butoanele de blocare/ștergere/redimensionare să rămână
     // accesibile la atingere. Imaginile neselectate stau sub linii, ca
@@ -2435,7 +2446,7 @@ function handleImagePointerDown(e) {
   // Imaginea selectată stă în containerul din față (ca mânerele ei să fie
   // atingibile) și ar prinde atingerea chiar dacă dedesubt, deasupra ei
   // vizual, e un desen — îl lăsăm pe acela să primească evenimentul.
-  if (!e.target.closest('.resizer') && !target.closest('.pdf-pane-images') && !isImageDrag) {
+  if (!e.target.closest('.resizer') && !target.closest('.pdf-pane') && !isImageDrag) {
     let hitStroke = false;
     try { hitStroke = strokeHasPriorityAt(pos(e).x, pos(e).y, page); } catch (er) {}
     if (hitStroke) {
@@ -2502,7 +2513,7 @@ function handleImagePointerDown(e) {
 // containerul de imagini al ferestrei PDF, care are un singur strat.
 imagesContainer.addEventListener('pointerdown', handleImagePointerDown);
 imagesContainerFront.addEventListener('pointerdown', handleImagePointerDown);
-document.querySelectorAll('.pdf-pane-images').forEach(el => el.addEventListener('pointerdown', handleImagePointerDown));
+document.querySelectorAll('.pdf-pane-images, .pdf-pane-images-front').forEach(el => el.addEventListener('pointerdown', handleImagePointerDown));
 
 // Scala curentă de conținut a suprafeței active — folosită ca să convertim
 // corect o deplasare în pixeli de ecran (mișcarea reală a cursorului/
@@ -18908,7 +18919,7 @@ function cancelGeoSegBuild() {
 // ================================================================
 
 const HELP_CONTENT_HTML = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v433</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">Versiune aplicație: v434</p>
 <h4>Setări</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Temă:</span>
@@ -19053,7 +19064,7 @@ const LICENSE_CONTENT_HTML = `
 `;
 
 const HELP_CONTENT_HTML_EN = `
-<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v433</p>
+<p style="font-size:12px;color:#888;margin-bottom:10px;">App version: v434</p>
 <h4>Settings</h4>
 <p style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
   <span>Theme:</span>
@@ -19317,7 +19328,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const overlay = document.getElementById('culegere-overlay');
   const frame = document.getElementById('culegere-frame');
   if (!btn || !overlay || !frame) return;
-  const CULEGERE_URL = 'culegere.html?embed=1&v=v433';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
+  const CULEGERE_URL = 'culegere.html?embed=1&v=v434';  // v=… ocolește memoria cache a browserului la fiecare versiune nouă
 
   function openCulegere() {
     if (!frame.getAttribute('src')) frame.setAttribute('src', CULEGERE_URL); // încărcat la cerere
